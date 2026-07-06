@@ -9,8 +9,25 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
-import { Competition, Player, Coach, WeighIn } from './types';
+import { Competition, Player, Coach, WeighIn, Organizer } from './types';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
+import { 
+  fetchCompetitions, 
+  saveCompetition, 
+  deleteCompetition, 
+  fetchCoaches, 
+  saveCoach, 
+  deleteCoach, 
+  fetchOrganizers, 
+  saveOrganizer, 
+  deleteOrganizer, 
+  fetchMasterAthletes, 
+  saveMasterAthlete, 
+  deleteMasterAthlete, 
+  fetchPlayersForComp, 
+  savePlayerToFirestore, 
+  deletePlayerFromFirestore 
+} from './firebase';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 
@@ -24,7 +41,7 @@ export default function App() {
   
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [coaches, setCoaches] = useState<Record<string, Coach>>({});
-  const [organizers, setOrganizers] = useState<Record<string, import('./types').Organizer>>({});
+  const [organizers, setOrganizers] = useState<Record<string, Organizer>>({});
   const [players, setPlayers] = useState<Player[]>([]);
   const [masterAthletes, setMasterAthletes] = useState<Record<string, Partial<Player>>>({});
 
@@ -153,96 +170,136 @@ export default function App() {
 
   // --- INITIALIZATION ---
   useEffect(() => {
-    // Load from local storage
-    const storedComps = localStorage.getItem('app:competitions');
-    const storedCoaches = localStorage.getItem('app:coaches');
-    
-    let loadedComps: Competition[] = [];
-    if (storedComps) {
-      try {
-        loadedComps = JSON.parse(storedComps);
-        setCompetitions(loadedComps);
-      } catch (e) {
-        console.error("Failed to parse competitions", e);
+    const initData = async () => {
+      // 1. Fetch competitions
+      const cloudComps = await fetchCompetitions();
+      let loadedComps = cloudComps;
+      if (loadedComps.length === 0) {
+        const storedComps = localStorage.getItem('app:competitions');
+        if (storedComps) {
+          try {
+            loadedComps = JSON.parse(storedComps);
+            // Sync to cloud
+            for (const c of loadedComps) {
+              await saveCompetition(c);
+            }
+          } catch (e) {
+            console.error("Failed to parse competitions", e);
+          }
+        }
       }
-    }
 
-    if (loadedComps.length === 0) {
-      const defaultComps: Competition[] = [{
-        id: 'tmremaja2026',
-        name: 'TM National Remaja 2026',
-        venue: 'National Taekwondo Arena',
-        date: '2026-09-12',
-        staffCode: 'weighin123',
-        events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'],
-        genders: ['Male', 'Female', 'Mix'],
-        ageGroups: [
-          'Super Cadet (9 To 10 Years Old)', 'Super Cadet (9 to 11 Years Old)', 'Cadet (11 to 12 Years Old)',
-          'Cadet (12 to 14 Years Old)', 'Junior (13 to 14 Years Old)', 'Junior (15 to 17 Years Old)',
-          '12 to 14 Years Old', '15 to 17 Years Old', '16 years & Older'
-        ],
-        weightClasses: [
-          'All Colour Belt', 'BANTAM 21.01KG-24KG', 'BANTAM 23.01KG-26KG', 'BANTAM 33.01KG-37KG', 'BANTAM 37.01KG-41KG',
-          'BANTAM 44.01KG-46KG', 'BANTAM 48.01KG-51KG', 'FEATHER 24.01KG-27KG', 'FEATHER 26.01KG-29KG', 'FEATHER 37.01KG-41KG',
-          'FEATHER 41.01KG-45KG', 'FEATHER 46.01KG-49KG', 'FEATHER 51.01KG-55KG', 'FIN BELOW 18KG', 'FIN BELOW 20KG',
-          'FIN BELOW 29KG', 'FIN BELOW 33KG', 'FIN BELOW 42KG', 'FIN BELOW 45KG', 'FLY 18.01KG-21KG', 'FLY 20.01KG-23KG',
-          'FLY 29.01KG-33KG', 'FLY 33.01KG-37KG', 'FLY 42.01KG-44KG', 'FLY 45.01KG-48KG', 'HEAVY 38KG & ABOVE',
-          'HEAVY 40KG & ABOVE', 'HEAVY 59KG & ABOVE', 'HEAVY 65KG & ABOVE', 'HEAVY 68KG & ABOVE', 'HEAVY 78KG & ABOVE',
-          'LIGHT 27.01KG-30KG', 'LIGHT 29.01KG-32KG', 'LIGHT 41.01KG-44KG', 'LIGHT 45.01KG-49KG', 'LIGHT 49.01KG-52KG',
-          'LIGHT 55.01KG-59KG', 'LIGHT HEAVY 55.01KG-59KG', 'LIGHT HEAVY 61.01KG-65KG', 'LIGHT HEAVY 63.01KG-68KG',
-          'LIGHT HEAVY 73.01KG-78KG', 'LIGHT MIDDLE 47.01KG-51KG', 'LIGHT MIDDLE 53.01KG-57KG', 'LIGHT MIDDLE 55.01KG-59KG',
-          'LIGHT MIDDLE 63.01KG-68KG', 'MIDDLE 34.01KG-38KG', 'MIDDLE 36.01KG-40KG', 'MIDDLE 51.01KG-55KG',
-          'MIDDLE 57.01KG-61KG', 'MIDDLE 59.01KG-63KG', 'MIDDLE 68.01KG-73KG', 'Not Exceeding 58KG', 'Open Weight',
-          'Over 65KG', 'P21', 'P22', 'P23', 'Taegeuk 4 to Koryo', 'Taegeuk 4 to Taebaek', 'Taegeuk 5 to Pyongwon',
-          'WELTER 30.01KG-34KG', 'WELTER 32.01KG-36KG', 'WELTER 44.01KG-47KG', 'WELTER 49.01KG-53KG',
-          'WELTER 52.01KG-55KG', 'WELTER 59.01KG-63KG'
-        ],
-        isActive: true
-      }];
-      setCompetitions(defaultComps);
-      localStorage.setItem('app:competitions', JSON.stringify(defaultComps));
-      if (defaultComps.length > 0) {
-        setOComp(defaultComps[0].id);
-        setCComp(defaultComps[0].id);
+      if (loadedComps.length === 0) {
+        const defaultComps: Competition[] = [{
+          id: 'tmremaja2026',
+          name: 'TM National Remaja 2026',
+          venue: 'National Taekwondo Arena',
+          date: '2026-09-12',
+          staffCode: 'weighin123',
+          events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'],
+          genders: ['Male', 'Female', 'Mix'],
+          ageGroups: [
+            'Super Cadet (9 To 10 Years Old)', 'Super Cadet (9 to 11 Years Old)', 'Cadet (11 to 12 Years Old)',
+            'Cadet (12 to 14 Years Old)', 'Junior (13 to 14 Years Old)', 'Junior (15 to 17 Years Old)',
+            '12 to 14 Years Old', '15 to 17 Years Old', '16 years & Older'
+          ],
+          weightClasses: [
+            'All Colour Belt', 'BANTAM 21.01KG-24KG', 'BANTAM 23.01KG-26KG', 'BANTAM 33.01KG-37KG', 'BANTAM 37.01KG-41KG',
+            'BANTAM 44.01KG-46KG', 'BANTAM 48.01KG-51KG', 'FEATHER 24.01KG-27KG', 'FEATHER 26.01KG-29KG', 'FEATHER 37.01KG-41KG',
+            'FEATHER 41.01KG-45KG', 'FEATHER 46.01KG-49KG', 'FEATHER 51.01KG-55KG', 'FIN BELOW 18KG', 'FIN BELOW 20KG',
+            'FIN BELOW 29KG', 'FIN BELOW 33KG', 'FIN BELOW 42KG', 'FIN BELOW 45KG', 'FLY 18.01KG-21KG', 'FLY 20.01KG-23KG',
+            'FLY 29.01KG-33KG', 'FLY 33.01KG-37KG', 'FLY 42.01KG-44KG', 'FLY 45.01KG-48KG', 'HEAVY 38KG & ABOVE',
+            'HEAVY 40KG & ABOVE', 'HEAVY 59KG & ABOVE', 'HEAVY 65KG & ABOVE', 'HEAVY 68KG & ABOVE', 'HEAVY 78KG & ABOVE',
+            'LIGHT 27.01KG-30KG', 'LIGHT 29.01KG-32KG', 'LIGHT 41.01KG-44KG', 'LIGHT 45.01KG-49KG', 'LIGHT 49.01KG-52KG',
+            'LIGHT 55.01KG-59KG', 'LIGHT HEAVY 55.01KG-59KG', 'LIGHT HEAVY 61.01KG-65KG', 'LIGHT HEAVY 63.01KG-68KG',
+            'LIGHT HEAVY 73.01KG-78KG', 'LIGHT MIDDLE 47.01KG-51KG', 'LIGHT MIDDLE 53.01KG-57KG', 'LIGHT MIDDLE 55.01KG-59KG',
+            'LIGHT MIDDLE 63.01KG-68KG', 'MIDDLE 34.01KG-38KG', 'MIDDLE 36.01KG-40KG', 'MIDDLE 51.01KG-55KG',
+            'MIDDLE 57.01KG-61KG', 'MIDDLE 59.01KG-63KG', 'MIDDLE 68.01KG-73KG', 'Not Exceeding 58KG', 'Open Weight',
+            'Over 65KG', 'P21', 'P22', 'P23', 'Taegeuk 4 to Koryo', 'Taegeuk 4 to Taebaek', 'Taegeuk 5 to Pyongwon',
+            'WELTER 30.01KG-34KG', 'WELTER 32.01KG-36KG', 'WELTER 44.01KG-47KG', 'WELTER 49.01KG-53KG',
+            'WELTER 52.01KG-55KG', 'WELTER 59.01KG-63KG'
+          ],
+          isActive: true
+        }];
+        loadedComps = defaultComps;
+        for (const c of defaultComps) {
+          await saveCompetition(c);
+        }
+        localStorage.setItem('app:competitions', JSON.stringify(defaultComps));
       }
-    } else {
-      setOComp(loadedComps[0]?.id || '');
-      // Select the first active competition for coach if possible
-      const activeComps = loadedComps.filter(c => c.isActive !== false);
-      setCComp(activeComps[0]?.id || loadedComps[0]?.id || '');
-    }
+      setCompetitions(loadedComps);
 
-    if (storedCoaches) {
-      try {
-        setCoaches(JSON.parse(storedCoaches));
-      } catch (e) {
-        console.error("Failed to parse coaches", e);
+      if (loadedComps.length > 0) {
+        setOComp(loadedComps[0].id);
+        const activeComps = loadedComps.filter(c => c.isActive !== false);
+        setCComp(activeComps[0]?.id || loadedComps[0]?.id || '');
       }
-    } else {
-      const defaultCoaches = { 
-        demo: { password: 'demo123', name: 'Coach Demo', club: 'SMART MA TAEKWONDO CLUB' } 
-      };
-      setCoaches(defaultCoaches);
-      localStorage.setItem('app:coaches', JSON.stringify(defaultCoaches));
-    }
 
-    const storedOrganizers = localStorage.getItem('app:organizers');
-    if (storedOrganizers) {
-      try {
-        setOrganizers(JSON.parse(storedOrganizers));
-      } catch (e) {
-        console.error("Failed to parse organizers", e);
+      // 2. Fetch coaches
+      const cloudCoaches = await fetchCoaches();
+      let loadedCoaches = cloudCoaches;
+      if (Object.keys(loadedCoaches).length === 0) {
+        const storedCoaches = localStorage.getItem('app:coaches');
+        if (storedCoaches) {
+          try {
+            loadedCoaches = JSON.parse(storedCoaches);
+            for (const username of Object.keys(loadedCoaches)) {
+              await saveCoach({ ...loadedCoaches[username], username });
+            }
+          } catch (e) {
+            console.error("Failed to parse coaches", e);
+          }
+        }
       }
-    }
 
-    const storedMaster = localStorage.getItem('app:masterAthletes');
-    if (storedMaster) {
-      try {
-        setMasterAthletes(JSON.parse(storedMaster));
-      } catch (e) {
-        console.error("Failed to parse masterAthletes", e);
+      if (Object.keys(loadedCoaches).length === 0) {
+        const defaultCoaches = { 
+          demo: { password: 'demo123', name: 'Coach Demo', club: 'SMART MA TAEKWONDO CLUB', username: 'demo' } 
+        };
+        loadedCoaches = defaultCoaches;
+        await saveCoach(defaultCoaches.demo);
+        localStorage.setItem('app:coaches', JSON.stringify(defaultCoaches));
       }
-    }
+      setCoaches(loadedCoaches);
+
+      // 3. Fetch organizers
+      const cloudOrganizers = await fetchOrganizers();
+      let loadedOrganizers = cloudOrganizers;
+      if (Object.keys(loadedOrganizers).length === 0) {
+        const storedOrganizers = localStorage.getItem('app:organizers');
+        if (storedOrganizers) {
+          try {
+            loadedOrganizers = JSON.parse(storedOrganizers);
+            for (const username of Object.keys(loadedOrganizers)) {
+              await saveOrganizer({ ...loadedOrganizers[username], username });
+            }
+          } catch (e) {
+            console.error("Failed to parse organizers", e);
+          }
+        }
+      }
+      setOrganizers(loadedOrganizers);
+
+      // 4. Fetch masterAthletes
+      const cloudMaster = await fetchMasterAthletes();
+      let loadedMaster = cloudMaster;
+      if (Object.keys(loadedMaster).length === 0) {
+        const storedMaster = localStorage.getItem('app:masterAthletes');
+        if (storedMaster) {
+          try {
+            loadedMaster = JSON.parse(storedMaster);
+            for (const id of Object.keys(loadedMaster)) {
+              await saveMasterAthlete({ ...loadedMaster[id], id });
+            }
+          } catch (e) {
+            console.error("Failed to parse masterAthletes", e);
+          }
+        }
+      }
+      setMasterAthletes(loadedMaster);
+    };
+
+    initData();
   }, []);
 
   // Sync theme, density, and colors
@@ -314,17 +371,26 @@ export default function App() {
   // Fetch players when a competition is selected
   useEffect(() => {
     if (compId) {
-      const storedPlayers = localStorage.getItem(`app:players:${compId}`);
-      if (storedPlayers) {
-        try {
-          setPlayers(JSON.parse(storedPlayers));
-        } catch (e) {
-          console.error("Failed to parse players for comp", compId, e);
-          setPlayers([]);
+      const loadPlayers = async () => {
+        const cloudPlayers = await fetchPlayersForComp(compId);
+        let loadedPlayers = cloudPlayers;
+        if (loadedPlayers.length === 0) {
+          const storedPlayers = localStorage.getItem(`app:players:${compId}`);
+          if (storedPlayers) {
+            try {
+              loadedPlayers = JSON.parse(storedPlayers);
+              // Sync to cloud
+              for (const p of loadedPlayers) {
+                await savePlayerToFirestore(p);
+              }
+            } catch (e) {
+              console.error("Failed to parse players for comp", compId, e);
+            }
+          }
         }
-      } else {
-        setPlayers([]);
-      }
+        setPlayers(loadedPlayers);
+      };
+      loadPlayers();
     } else {
       setPlayers([]);
     }
@@ -339,29 +405,86 @@ export default function App() {
   };
 
   // --- SAVE HELPERS ---
-  const saveCompsToStorage = (list: Competition[]) => {
+  const saveCompsToStorage = async (list: Competition[]) => {
     setCompetitions(list);
     localStorage.setItem('app:competitions', JSON.stringify(list));
+    
+    // Cloud sync
+    for (const c of list) {
+      await saveCompetition(c);
+    }
+    // Delete removed ones from cloud
+    const currentIds = list.map(c => c.id);
+    for (const c of competitions) {
+      if (!currentIds.includes(c.id)) {
+        await deleteCompetition(c.id);
+      }
+    }
   };
 
-  const saveCoachesToStorage = (obj: Record<string, Coach>) => {
+  const saveCoachesToStorage = async (obj: Record<string, Coach>) => {
     setCoaches(obj);
     localStorage.setItem('app:coaches', JSON.stringify(obj));
+    
+    // Cloud sync
+    for (const username of Object.keys(obj)) {
+      await saveCoach({ ...obj[username], username });
+    }
+    // Delete removed ones
+    for (const username of Object.keys(coaches)) {
+      if (!(username in obj)) {
+        await deleteCoach(username);
+      }
+    }
   };
 
-  const saveOrganizersToStorage = (obj: Record<string, import('./types').Organizer>) => {
+  const saveOrganizersToStorage = async (obj: Record<string, Organizer>) => {
     setOrganizers(obj);
     localStorage.setItem('app:organizers', JSON.stringify(obj));
+    
+    // Cloud sync
+    for (const username of Object.keys(obj)) {
+      await saveOrganizer({ ...obj[username], username });
+    }
+    // Delete removed ones
+    for (const username of Object.keys(organizers)) {
+      if (!(username in obj)) {
+        await deleteOrganizer(username);
+      }
+    }
   };
 
-  const savePlayersToStorage = (id: string, list: Player[]) => {
+  const savePlayersToStorage = async (id: string, list: Player[]) => {
     setPlayers(list);
     localStorage.setItem(`app:players:${id}`, JSON.stringify(list));
+    
+    // Cloud sync
+    for (const p of list) {
+      await savePlayerToFirestore(p);
+    }
+    // Delete removed ones from cloud
+    const currentIds = list.map(p => p.id);
+    for (const p of players) {
+      if (p.compId === id && !currentIds.includes(p.id)) {
+        await deletePlayerFromFirestore(p.id);
+      }
+    }
   };
 
-  const saveMasterAthletesToStorage = (obj: Record<string, Partial<Player>>) => {
+  const saveMasterAthletesToStorage = async (obj: Record<string, Partial<Player>>) => {
     setMasterAthletes(obj);
     localStorage.setItem('app:masterAthletes', JSON.stringify(obj));
+    
+    // Cloud sync
+    for (const id of Object.keys(obj)) {
+      await saveMasterAthlete({ ...obj[id], id });
+    }
+    // Delete removed ones
+    for (const id of Object.keys(masterAthletes)) {
+      if (!(id in obj)) {
+        await deleteMasterAthlete(id);
+      }
+    }
   };
 
 
@@ -1332,6 +1455,7 @@ export default function App() {
               <div className="flex items-center space-x-2">
                 <h1 className="text-lg font-bold uppercase tracking-wider font-sans text-text">MY-TKD REGS</h1>
                 <span className="text-[10px] uppercase font-bold tracking-widest bg-gold/10 text-gold px-2 py-0.5 rounded border border-gold/20">Skill Matrix</span>
+                <span className="text-[10px] uppercase font-bold tracking-widest bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1"><Database className="w-3 h-3" /><span>Cloud Synced</span></span>
               </div>
               <p className="text-[10px] text-text-dim">Taekwondo Championship Registration & Weigh-In Core</p>
             </div>

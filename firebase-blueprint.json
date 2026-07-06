@@ -1,0 +1,53 @@
+{
+  "collections": {
+    "competitions": {
+      "id": "string",
+      "name": "string",
+      "venue": "string",
+      "date": "string",
+      "staffCode": "string",
+      "events": "array",
+      "genders": "array",
+      "ageGroups": "array",
+      "weightClasses": "array",
+      "isActive": "boolean"
+    },
+    "players": {
+      "id": "string",
+      "compId": "string",
+      "name": "string",
+      "ic": "string",
+      "dob": "string",
+      "gender": "string",
+      "club": "string",
+      "coachUsername": "string",
+      "event": "string",
+      "ageGroup": "string",
+      "weightClass": "string",
+      "photo": "string",
+      "createdAt": "string",
+      "weighIn": "map"
+    },
+    "coaches": {
+      "username": "string",
+      "password": "string",
+      "name": "string",
+      "club": "string"
+    },
+    "organizers": {
+      "id": "string",
+      "username": "string",
+      "password": "string",
+      "name": "string",
+      "compId": "string"
+    },
+    "masterAthletes": {
+      "id": "string",
+      "name": "string",
+      "ic": "string",
+      "dob": "string",
+      "gender": "string",
+      "club": "string"
+    }
+  }
+}
