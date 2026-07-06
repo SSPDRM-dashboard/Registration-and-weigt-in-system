@@ -4,7 +4,7 @@ import {
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
-  Printer, Database
+  Printer, Database, X, Coins
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
@@ -25,17 +25,34 @@ import {
   saveMasterAthlete, 
   deleteMasterAthlete, 
   fetchPlayersForComp, 
+  subscribeToPlayersForComp,
   savePlayerToFirestore, 
   deletePlayerFromFirestore 
 } from './firebase';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 
+const parseFeeToNumber = (feeStr: string | undefined | null): number => {
+  if (!feeStr) return 0;
+  const match = feeStr.replace(/,/g, '').match(/\d+(\.\d+)?/);
+  return match ? parseFloat(match[0]) : 0;
+};
+
+const formatCurrency = (amount: number, feeSample: string | undefined | null) => {
+  if (!feeSample) return `${amount}`;
+  const prefixMatch = feeSample.match(/^[^\d]+/);
+  const prefix = prefixMatch ? prefixMatch[0].trim() + ' ' : '';
+  const suffixMatch = feeSample.match(/[^\d\s\.]+$/);
+  const suffix = suffixMatch ? ' ' + suffixMatch[0].trim() : '';
+  return `${prefix}${amount.toLocaleString()}${suffix}`;
+};
+
 export default function App() {
   // --- STATE ---
-  const [screen, setScreen] = useState<string>('login'); // login, coachHome, coachRoster, coachPlayerForm, idCard, adminHome, adminCompDetail, adminCompForm, officialScan, officialLog, organizerDashboard
-  const [loginTab, setLoginTab] = useState<'coach' | 'official' | 'admin' | 'organizer'>('coach');
-  const [role, setRole] = useState<'coach' | 'official' | 'admin' | 'organizer' | null>(null);
+  const [screen, setScreen] = useState<string>('login'); // login, coachHome, coachRoster, coachPlayerForm, idCard, adminHome, adminCompDetail, adminCompForm, officialScan, officialLog, organizerDashboard, publicView
+  const [loginTab, setLoginTab] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public'>('coach');
+  const [organizerTab, setOrganizerTab] = useState<'dashboard' | 'idCard'>('dashboard');
+  const [role, setRole] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | null>(null);
   const [user, setUser] = useState<string | null>(null); // username
   const [compId, setCompId] = useState<string | null>(null);
   
@@ -55,6 +72,10 @@ export default function App() {
   // Modals & confirmation
   const [confirmImport, setConfirmImport] = useState<boolean>(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteCompId, setConfirmDeleteCompId] = useState<string | null>(null);
+  const [confirmDeleteCoachUsername, setConfirmDeleteCoachUsername] = useState<string | null>(null);
+  const [confirmDeleteOrganizerUsername, setConfirmDeleteOrganizerUsername] = useState<string | null>(null);
+  const [confirmDeleteAthleteId, setConfirmDeleteAthleteId] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
   
   // Theme state
@@ -87,6 +108,55 @@ export default function App() {
   // Manual text entry
   const [manualCode, setManualCode] = useState<string>('');
   const [actualWeightInput, setActualWeightInput] = useState<string>('');
+
+  // Physical / Handheld scanner settings
+  const [scannerMode, setScannerMode] = useState<'camera' | 'hardware'>('camera');
+  const [autoFocusScanner, setAutoFocusScanner] = useState<boolean>(true);
+  const [isScannerFocused, setIsScannerFocused] = useState<boolean>(false);
+  const hardwareInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (screen === 'officialScan' && scannerMode === 'hardware' && autoFocusScanner && !scanResult) {
+      const interval = setInterval(() => {
+        if (hardwareInputRef.current && document.activeElement !== hardwareInputRef.current) {
+          // Do not steal focus if the user is already interacting with another text input or textarea
+          if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+             return;
+          }
+          hardwareInputRef.current.focus();
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [screen, scannerMode, autoFocusScanner, scanResult]);
+
+  // Banking and receipts states
+  const [bankNameInput, setBankNameInput] = useState('');
+  const [bankAccountInput, setBankAccountInput] = useState('');
+  const [kyorugiFeeInput, setKyorugiFeeInput] = useState('');
+  const [poomsaeFeeInput, setPoomsaeFeeInput] = useState('');
+  const [paraFeeInput, setParaFeeInput] = useState('');
+  const [virtualFeeInput, setVirtualFeeInput] = useState('');
+  const [selectedClubReceipt, setSelectedClubReceipt] = useState<{ clubName: string; receiptUrl: string; uploadedAt: string } | null>(null);
+
+  useEffect(() => {
+    const active = competitions.find(c => c.id === compId);
+    if (active) {
+      setBankNameInput(active.bankName || '');
+      setBankAccountInput(active.bankAccount || '');
+      setKyorugiFeeInput(active.kyorugiFee || '');
+      setPoomsaeFeeInput(active.poomsaeFee || '');
+      setParaFeeInput(active.paraFee || '');
+      setVirtualFeeInput(active.virtualFee || '');
+    } else {
+      setBankNameInput('');
+      setBankAccountInput('');
+      setKyorugiFeeInput('');
+      setPoomsaeFeeInput('');
+      setParaFeeInput('');
+      setVirtualFeeInput('');
+    }
+  }, [compId, competitions]);
   
   // Admin form inputs
   const [ncName, setNcName] = useState('');
@@ -116,17 +186,22 @@ export default function App() {
   const [sPass, setSPass] = useState('');
   const [sName, setSName] = useState('');
   const [sClub, setSClub] = useState('');
+  const [sPhone, setSPhone] = useState('');
+  const [sEmail, setSEmail] = useState('');
   const [cComp, setCComp] = useState('');
   const [oComp, setOComp] = useState('');
   const [oCode, setOCode] = useState('');
   const [aUser, setAUser] = useState('admin');
   const [aPass, setAPass] = useState('');
+  const [publicPassInput, setPublicPassInput] = useState('');
 
   // Admin coach edit
   const [editingCoachUsername, setEditingCoachUsername] = useState<string | null>(null);
   const [editCoachName, setEditCoachName] = useState('');
   const [editCoachClub, setEditCoachClub] = useState('');
   const [editCoachPass, setEditCoachPass] = useState('');
+  const [editCoachPhone, setEditCoachPhone] = useState('');
+  const [editCoachEmail, setEditCoachEmail] = useState('');
   
   // Admin Navigation
   const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security'>('tournaments');
@@ -370,9 +445,10 @@ export default function App() {
 
   // Fetch players when a competition is selected
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    
     if (compId) {
-      const loadPlayers = async () => {
-        const cloudPlayers = await fetchPlayersForComp(compId);
+      unsubscribe = subscribeToPlayersForComp(compId, (cloudPlayers) => {
         let loadedPlayers = cloudPlayers;
         if (loadedPlayers.length === 0) {
           const storedPlayers = localStorage.getItem(`app:players:${compId}`);
@@ -381,7 +457,7 @@ export default function App() {
               loadedPlayers = JSON.parse(storedPlayers);
               // Sync to cloud
               for (const p of loadedPlayers) {
-                await savePlayerToFirestore(p);
+                savePlayerToFirestore(p);
               }
             } catch (e) {
               console.error("Failed to parse players for comp", compId, e);
@@ -389,11 +465,18 @@ export default function App() {
           }
         }
         setPlayers(loadedPlayers);
-      };
-      loadPlayers();
+      }, (err) => {
+        console.error("Failed to sync players", err);
+      });
     } else {
       setPlayers([]);
     }
+    
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [compId]);
 
   // --- NOTIFICATION HELPER ---
@@ -406,84 +489,262 @@ export default function App() {
 
   // --- SAVE HELPERS ---
   const saveCompsToStorage = async (list: Competition[]) => {
+    const prevComps = [...competitions];
     setCompetitions(list);
     localStorage.setItem('app:competitions', JSON.stringify(list));
     
     // Cloud sync
-    for (const c of list) {
-      await saveCompetition(c);
-    }
-    // Delete removed ones from cloud
-    const currentIds = list.map(c => c.id);
-    for (const c of competitions) {
-      if (!currentIds.includes(c.id)) {
-        await deleteCompetition(c.id);
+    try {
+      if (prevComps.length === 0) {
+        // Initial sync of all competitions
+        for (const c of list) {
+          await saveCompetition(c);
+        }
+      } else {
+        // Find if any competition was deleted
+        const deletedComp = prevComps.find(c => !list.some(l => l.id === c.id));
+        if (deletedComp) {
+          await deleteCompetition(deletedComp.id);
+        } else {
+          // Find any added or changed competitions
+          const changedComps = list.filter(c => {
+            const prev = prevComps.find(pc => pc.id === c.id);
+            return !prev || JSON.stringify(prev) !== JSON.stringify(c);
+          });
+          
+          for (const c of changedComps) {
+            await saveCompetition(c);
+          }
+        }
       }
+    } catch (error) {
+      console.error("Cloud sync failed:", error);
+      let errMsg = '';
+      if (error instanceof Error) {
+        try {
+          const parsed = JSON.parse(error.message);
+          errMsg = parsed.error || error.message;
+        } catch {
+          errMsg = error.message;
+        }
+      } else {
+        errMsg = String(error);
+      }
+      triggerMsg('Cloud save failed: ' + errMsg, 'error');
+      throw error;
     }
   };
 
+  const handleUpdateBankDetails = async (bankName: string, bankAccount: string, qrCodeBase64?: string) => {
+    if (!compId) return;
+    const updatedComps = competitions.map(c => {
+      if (c.id === compId) {
+        return {
+          ...c,
+          bankName: String(bankName || '').trim(),
+          bankAccount: String(bankAccount || '').trim(),
+          bankQrCode: qrCodeBase64 !== undefined ? qrCodeBase64 : c.bankQrCode
+        };
+      }
+      return c;
+    });
+    try {
+      await saveCompsToStorage(updatedComps);
+      triggerMsg('Bank and QR details updated successfully.', 'ok');
+    } catch (e) {
+      // Error is handled/displayed in saveCompsToStorage
+    }
+  };
+
+  const handleUpdateEventFees = async (kyorugi: string, poomsae: string, para: string, virtual: string) => {
+    if (!compId) return;
+    const updatedComps = competitions.map(c => {
+      if (c.id === compId) {
+        return {
+          ...c,
+          kyorugiFee: String(kyorugi || '').trim(),
+          poomsaeFee: String(poomsae || '').trim(),
+          paraFee: String(para || '').trim(),
+          virtualFee: String(virtual || '').trim()
+        };
+      }
+      return c;
+    });
+    try {
+      await saveCompsToStorage(updatedComps);
+      triggerMsg('Participant event fees updated successfully.', 'ok');
+    } catch (e) {
+      // Error is handled/displayed in saveCompsToStorage
+    }
+  };
+
+  const handleUploadReceipt = async (clubName: string, receiptBase64: string) => {
+    if (!compId) return;
+    const clubKey = clubName.toUpperCase();
+    const updatedComps = competitions.map(c => {
+      if (c.id === compId) {
+        const existingReceipts = c.receipts || {};
+        return {
+          ...c,
+          receipts: {
+            ...existingReceipts,
+            [clubKey]: {
+              receiptUrl: receiptBase64,
+              uploadedAt: new Date().toLocaleDateString('en-MY', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+            }
+          }
+        };
+      }
+      return c;
+    });
+    await saveCompsToStorage(updatedComps);
+    triggerMsg('Payment receipt uploaded successfully!', 'ok');
+  };
+
   const saveCoachesToStorage = async (obj: Record<string, Coach>) => {
+    const prevCoaches = { ...coaches };
     setCoaches(obj);
     localStorage.setItem('app:coaches', JSON.stringify(obj));
     
     // Cloud sync
-    for (const username of Object.keys(obj)) {
-      await saveCoach({ ...obj[username], username });
-    }
-    // Delete removed ones
-    for (const username of Object.keys(coaches)) {
-      if (!(username in obj)) {
-        await deleteCoach(username);
+    try {
+      if (Object.keys(prevCoaches).length === 0) {
+        const savePromises = Object.keys(obj).map((username) =>
+          saveCoach({ ...obj[username], username })
+        );
+        await Promise.all(savePromises);
+      } else {
+        // Find deleted
+        const deletedUsernames = Object.keys(prevCoaches).filter(u => !(u in obj));
+        for (const username of deletedUsernames) {
+          await deleteCoach(username);
+        }
+        
+        // Find changed/added
+        const changedUsernames = Object.keys(obj).filter(u => {
+          const prev = prevCoaches[u];
+          return !prev || JSON.stringify(prev) !== JSON.stringify(obj[u]);
+        });
+        
+        const savePromises = changedUsernames.map(username => 
+          saveCoach({ ...obj[username], username })
+        );
+        await Promise.all(savePromises);
       }
+    } catch (error) {
+      console.error("Cloud sync for coaches failed:", error);
     }
   };
 
   const saveOrganizersToStorage = async (obj: Record<string, Organizer>) => {
+    const prevOrganizers = { ...organizers };
     setOrganizers(obj);
     localStorage.setItem('app:organizers', JSON.stringify(obj));
     
     // Cloud sync
-    for (const username of Object.keys(obj)) {
-      await saveOrganizer({ ...obj[username], username });
-    }
-    // Delete removed ones
-    for (const username of Object.keys(organizers)) {
-      if (!(username in obj)) {
-        await deleteOrganizer(username);
+    try {
+      if (Object.keys(prevOrganizers).length === 0) {
+        const savePromises = Object.keys(obj).map((username) =>
+          saveOrganizer({ ...obj[username], username })
+        );
+        await Promise.all(savePromises);
+      } else {
+        // Find deleted
+        const deletedUsernames = Object.keys(prevOrganizers).filter(u => !(u in obj));
+        for (const username of deletedUsernames) {
+          await deleteOrganizer(username);
+        }
+        
+        // Find changed/added
+        const changedUsernames = Object.keys(obj).filter(u => {
+          const prev = prevOrganizers[u];
+          return !prev || JSON.stringify(prev) !== JSON.stringify(obj[u]);
+        });
+        
+        const savePromises = changedUsernames.map(username => 
+          saveOrganizer({ ...obj[username], username })
+        );
+        await Promise.all(savePromises);
       }
+    } catch (error) {
+      console.error("Cloud sync for organizers failed:", error);
     }
   };
 
   const savePlayersToStorage = async (id: string, list: Player[]) => {
+    const prevPlayers = [...players];
     setPlayers(list);
     localStorage.setItem(`app:players:${id}`, JSON.stringify(list));
     
     // Cloud sync
-    for (const p of list) {
-      await savePlayerToFirestore(p);
-    }
-    // Delete removed ones from cloud
-    const currentIds = list.map(p => p.id);
-    for (const p of players) {
-      if (p.compId === id && !currentIds.includes(p.id)) {
-        await deletePlayerFromFirestore(p.id);
+    try {
+      const prevCompPlayers = prevPlayers.filter(p => p.compId === id);
+      
+      if (prevCompPlayers.length === 0 && list.length > 5) {
+        // Initial bulk save or bulk import
+        const savePromises = list.map((p) => savePlayerToFirestore(p));
+        await Promise.all(savePromises);
+      } else {
+        // Find deleted
+        const deletedPlayer = prevCompPlayers.find(p => !list.some(l => l.id === p.id));
+        if (deletedPlayer) {
+          await deletePlayerFromFirestore(deletedPlayer.id);
+        } else {
+          // Find changed or added
+          const changedPlayers = list.filter(p => {
+            const prev = prevCompPlayers.find(pl => pl.id === p.id);
+            return !prev || JSON.stringify(prev) !== JSON.stringify(p);
+          });
+          
+          if (changedPlayers.length > 0) {
+            const savePromises = changedPlayers.map(p => savePlayerToFirestore(p));
+            await Promise.all(savePromises);
+          }
+        }
       }
+    } catch (error) {
+      console.error("Cloud sync for players failed:", error);
     }
   };
 
   const saveMasterAthletesToStorage = async (obj: Record<string, Partial<Player>>) => {
+    const prevMaster = { ...masterAthletes };
     setMasterAthletes(obj);
     localStorage.setItem('app:masterAthletes', JSON.stringify(obj));
     
     // Cloud sync
-    for (const id of Object.keys(obj)) {
-      await saveMasterAthlete({ ...obj[id], id });
-    }
-    // Delete removed ones
-    for (const id of Object.keys(masterAthletes)) {
-      if (!(id in obj)) {
-        await deleteMasterAthlete(id);
+    try {
+      if (Object.keys(prevMaster).length === 0) {
+        const savePromises = Object.keys(obj).map((id) =>
+          saveMasterAthlete({ ...obj[id], id })
+        );
+        await Promise.all(savePromises);
+      } else {
+        // Find deleted
+        const deletedIds = Object.keys(prevMaster).filter(id => !(id in obj));
+        for (const id of deletedIds) {
+          await deleteMasterAthlete(id);
+        }
+        
+        // Find changed/added
+        const changedIds = Object.keys(obj).filter(id => {
+          const prev = prevMaster[id];
+          return !prev || JSON.stringify(prev) !== JSON.stringify(obj[id]);
+        });
+        
+        const savePromises = changedIds.map(id => 
+          saveMasterAthlete({ ...obj[id], id })
+        );
+        await Promise.all(savePromises);
       }
+    } catch (error) {
+      console.error("Cloud sync for master athletes failed:", error);
     }
   };
 
@@ -556,14 +817,19 @@ export default function App() {
     lookupPlayer(scannedId);
   };
 
-  const lookupPlayer = (playerId: string) => {
-    const p = players.find(pl => pl.id.toUpperCase() === playerId.toUpperCase());
+  const lookupPlayer = (playerIdOrQR: string) => {
+    const cleaned = playerIdOrQR.trim();
+    const parts = cleaned.split('::');
+    const targetId = parts.length === 2 ? parts[1].trim() : cleaned;
+
+    const p = players.find(pl => pl.id.toUpperCase() === targetId.toUpperCase());
     if (!p) {
-      triggerMsg('Player not registered for this competition.', 'error');
+      triggerMsg(`Player/QR code "${targetId}" not registered for this competition.`, 'error');
       return;
     }
     setScanResult(p.id);
     setActualWeightInput(p.weighIn ? p.weighIn.weight.toString() : '');
+    triggerMsg(`Profile unlocked: ${p.name}`, 'ok');
   };
 
   // --- AUTHENTICATION ACTIONS ---
@@ -575,9 +841,13 @@ export default function App() {
       triggerMsg('Invalid username or password.', 'error');
       return;
     }
+    if (!cComp) {
+      triggerMsg('No active tournament selected.', 'error');
+      return;
+    }
     setRole('organizer');
     setUser(u);
-    setCompId(acc.compId);
+    setCompId(cComp);
     setScreen('organizerDashboard');
     triggerMsg(`Welcome, Organizer ${acc.name}!`, 'ok');
   };
@@ -601,12 +871,40 @@ export default function App() {
     triggerMsg(`Welcome back, Coach ${acc.name}!`, 'ok');
   };
 
+  const handlePublicLogin = () => {
+    if (!cComp) {
+      triggerMsg('No active tournament selected.', 'error');
+      return;
+    }
+    const targetComp = competitions.find(c => c.id === cComp);
+    if (targetComp && targetComp.publicViewPassword) {
+      if (publicPassInput !== targetComp.publicViewPassword) {
+        triggerMsg('Invalid public access password.', 'error');
+        return;
+      }
+    }
+    setRole('public');
+    setUser('Guest');
+    setCompId(cComp);
+    setScreen('publicView');
+    triggerMsg('Viewing tournament public directory.', 'ok');
+  };
+
+  const handleUpdatePublicViewPassword = (password: string) => {
+    if (!compId) return;
+    const updated = competitions.map(c => c.id === compId ? { ...c, publicViewPassword: password } : c);
+    saveCompsToStorage(updated);
+    triggerMsg('Public View access password updated.', 'ok');
+  };
+
   const handleCoachSignup = () => {
     const u = sUser.trim();
     const p = sPass;
     const name = sName.trim();
     const club = sClub.trim();
-    if (!u || !p || !name || !club) {
+    const phone = sPhone.trim();
+    const email = sEmail.trim();
+    if (!u || !p || !name || !club || !phone || !email) {
       triggerMsg('Please fill in every registration field.', 'error');
       return;
     }
@@ -614,7 +912,7 @@ export default function App() {
       triggerMsg('Username already taken.', 'error');
       return;
     }
-    const updated = { ...coaches, [u]: { password: p, name, club } };
+    const updated = { ...coaches, [u]: { password: p, name, club, phone, email } };
     saveCoachesToStorage(updated);
     setRole('coach');
     setUser(u);
@@ -657,13 +955,15 @@ export default function App() {
     setEditingCoachUsername(username);
     setEditCoachName(coach.name);
     setEditCoachClub(coach.club);
-    setEditCoachPass(coach.password);
+    setEditCoachPass(coach.password || '');
+    setEditCoachPhone(coach.phone || '');
+    setEditCoachEmail(coach.email || '');
   };
 
   const handleAdminSaveCoach = () => {
     if (!editingCoachUsername) return;
     if (!editCoachName.trim() || !editCoachClub.trim() || !editCoachPass) {
-      triggerMsg('Please fill in all coach details.', 'error');
+      triggerMsg('Please fill in Name, Club, and Password.', 'error');
       return;
     }
     const updated = {
@@ -671,7 +971,9 @@ export default function App() {
       [editingCoachUsername]: {
         password: editCoachPass,
         name: editCoachName.trim(),
-        club: editCoachClub.trim()
+        club: editCoachClub.trim(),
+        phone: editCoachPhone.trim() || undefined,
+        email: editCoachEmail.trim() || undefined
       }
     };
     saveCoachesToStorage(updated);
@@ -680,12 +982,11 @@ export default function App() {
   };
 
   const handleAdminDeleteCoach = (username: string) => {
-    if (confirm(`Are you sure you want to delete coach account ${username}?`)) {
-      const updated = { ...coaches };
-      delete updated[username];
-      saveCoachesToStorage(updated);
-      triggerMsg('Coach account deleted.', 'ok');
-    }
+    const updated = { ...coaches };
+    delete updated[username];
+    saveCoachesToStorage(updated);
+    setConfirmDeleteCoachUsername(null);
+    triggerMsg('Coach account deleted.', 'ok');
   };
 
   const handleAdminCreateOrganizer = () => {
@@ -717,12 +1018,11 @@ export default function App() {
   };
 
   const handleAdminDeleteOrganizer = (username: string) => {
-    if (confirm(`Are you sure you want to delete organizer account ${username}?`)) {
-      const updated = { ...organizers };
-      delete updated[username];
-      saveOrganizersToStorage(updated);
-      triggerMsg('Organizer account deleted.', 'ok');
-    }
+    const updated = { ...organizers };
+    delete updated[username];
+    saveOrganizersToStorage(updated);
+    setConfirmDeleteOrganizerUsername(null);
+    triggerMsg('Organizer account deleted.', 'ok');
   };
 
   const handleAdminChangePassword = () => {
@@ -786,6 +1086,16 @@ export default function App() {
     const updated = competitions.map(c => c.id === id ? { ...c, isActive: c.isActive === false ? true : false } : c);
     saveCompsToStorage(updated);
     triggerMsg('Tournament active status updated.', 'ok');
+  };
+
+  const handleAdminDeleteComp = async (id: string) => {
+    const updated = competitions.filter(c => c.id !== id);
+    await saveCompsToStorage(updated);
+    if (compId === id) {
+      setCompId(updated[0]?.id || null);
+    }
+    setConfirmDeleteCompId(null);
+    triggerMsg('Competition event deleted successfully.', 'ok');
   };
 
   const handleUpdateStaffCode = (code: string) => {
@@ -1144,6 +1454,7 @@ export default function App() {
           gender: pGender,
           club: pClub.trim(),
           photo: pendingPhoto || undefined,
+          coachUsername: user || undefined,
         }
       });
     }
@@ -1445,7 +1756,7 @@ export default function App() {
       {/* HEADER BANNER */}
       <header className="bg-surface/90 backdrop-blur-md border-b border-line shadow-lg sticky top-0 z-50 transition-all duration-300 print:hidden">
         <div className={`${getLayoutWidthClass()} mx-auto px-4 py-3 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4`}>
-          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => role ? setScreen(role === 'admin' ? 'adminHome' : role === 'organizer' ? 'organizerDashboard' : role === 'official' ? 'officialScan' : 'coachHome') : setScreen('login')}>
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => role ? setScreen(role === 'admin' ? 'adminHome' : role === 'organizer' ? 'organizerDashboard' : role === 'official' ? 'officialScan' : role === 'public' ? 'publicView' : 'coachHome') : setScreen('login')}>
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-hong to-chong p-0.5 shadow-md flex items-center justify-center">
               <div className="w-full h-full rounded-full bg-ink flex items-center justify-center">
                 <Trophy className="w-5 h-5 text-gold" />
@@ -1454,8 +1765,12 @@ export default function App() {
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-lg font-bold uppercase tracking-wider font-sans text-text">MY-TKD REGS</h1>
-                <span className="text-[10px] uppercase font-bold tracking-widest bg-gold/10 text-gold px-2 py-0.5 rounded border border-gold/20">Skill Matrix</span>
-                <span className="text-[10px] uppercase font-bold tracking-widest bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1"><Database className="w-3 h-3" /><span>Cloud Synced</span></span>
+                {role === 'admin' && (
+                  <>
+                    <span className="text-[10px] uppercase font-bold tracking-widest bg-gold/10 text-gold px-2 py-0.5 rounded border border-gold/20">Skill Matrix</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1"><Database className="w-3 h-3" /><span>Cloud Synced</span></span>
+                  </>
+                )}
               </div>
               <p className="text-[10px] text-text-dim">Taekwondo Championship Registration & Weigh-In Core</p>
             </div>
@@ -1473,7 +1788,7 @@ export default function App() {
             </button>
 
             {/* ATHLETE DATABASE BUTTON */}
-            {role && (
+            {role === 'admin' && (
               <button 
                 onClick={() => setShowAthleteDbModal(true)}
                 className="flex items-center space-x-1.5 text-xs bg-surface-2 hover:bg-line border border-line text-gold px-3.5 py-1.5 rounded-xl transition duration-200 shadow-sm cursor-pointer"
@@ -1531,10 +1846,10 @@ export default function App() {
             </div>
 
             {/* TAB SELECTOR */}
-            <div className="flex border-b border-line">
+            <div className="flex border-b border-line overflow-x-auto scrollbar-none">
               <button 
                 onClick={() => setLoginTab('coach')}
-                className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition ${
+                className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'coach' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -1542,7 +1857,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('organizer')}
-                className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition ${
+                className={`flex-1 min-w-[80px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'organizer' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -1550,7 +1865,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('official')}
-                className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition ${
+                className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'official' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -1558,11 +1873,19 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('admin')}
-                className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition ${
+                className={`flex-1 min-w-[60px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'admin' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
                 Admin
+              </button>
+              <button 
+                onClick={() => setLoginTab('public')}
+                className={`flex-1 min-w-[95px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                  loginTab === 'public' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
+                }`}
+              >
+                Public View
               </button>
             </div>
 
@@ -1632,6 +1955,22 @@ export default function App() {
 
               {loginTab === 'organizer' && (
                 <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Select active tournament</label>
+                    <select 
+                      value={cComp}
+                      onChange={(e) => setCComp(e.target.value)}
+                      className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                    >
+                      {competitions.filter(c => c.isActive !== false).length === 0 ? (
+                        <option value="">No active tournaments available...</option>
+                      ) : (
+                        competitions.filter(c => c.isActive !== false).map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
                   <div>
                     <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Organizer Username</label>
                     <div className="relative">
@@ -1745,6 +2084,65 @@ export default function App() {
                   </button>
                 </div>
               )}
+
+              {loginTab === 'public' && (
+                <div className="space-y-4 animate-fade-in">
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Select Tournament to Query</label>
+                    <select 
+                      value={cComp}
+                      onChange={(e) => { setCComp(e.target.value); setPublicPassInput(''); }}
+                      className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                    >
+                      {competitions.filter(c => c.isActive !== false).length === 0 ? (
+                        <option value="">No active tournaments available...</option>
+                      ) : (
+                        competitions.filter(c => c.isActive !== false).map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {(() => {
+                    const sel = competitions.find(c => c.id === cComp);
+                    if (sel && sel.publicViewPassword) {
+                      return (
+                        <div className="animate-fade-in space-y-1.5">
+                          <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest flex items-center gap-1">
+                            <Lock className="w-3.5 h-3.5 text-gold" />
+                            Public Access Password
+                          </label>
+                          <div className="relative">
+                            <input 
+                              type="password" 
+                              placeholder="Enter public view password"
+                              value={publicPassInput} 
+                              onChange={(e) => setPublicPassInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handlePublicLogin(); }}
+                              className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
+                            />
+                            <Lock className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  
+                  <button 
+                    onClick={handlePublicLogin}
+                    className="w-full bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition mt-2 cursor-pointer shadow-md hover:shadow flex items-center justify-center gap-2"
+                  >
+                    <Users className="w-4 h-4" />
+                    Enter Public View
+                  </button>
+                  
+                  <p className="text-center text-[10px] text-text-dim leading-normal pt-2">
+                    Access to registered competitor profiles, team classifications, and weigh-in results. Actions are read-only.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1798,6 +2196,28 @@ export default function App() {
                   onChange={(e) => setSClub(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
                   placeholder="PERSATUAN TAEKWONDO NEGERI PERAK" 
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number</label>
+                <input 
+                  type="tel" 
+                  value={sPhone} 
+                  onChange={(e) => setSPhone(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
+                  placeholder="+6012-3456789" 
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Email Address</label>
+                <input 
+                  type="email" 
+                  value={sEmail} 
+                  onChange={(e) => setSEmail(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
+                  placeholder="coach@example.com" 
                   className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
                 />
               </div>
@@ -1892,31 +2312,307 @@ export default function App() {
               </button>
             </div>
 
+            {/* PAYMENT & BANKING SECTION FOR COACH */}
+            {(() => {
+              const coachClub = coaches[user || '']?.club || 'My Club';
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface p-6 rounded-2xl border border-line shadow-sm">
+                  {/* Box 1: Bank Details provided by Organizer */}
+                  <div className="space-y-4 flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                        <Lock className="w-4 h-4 text-gold" />
+                        1. Bank details provided by organizer
+                      </h3>
+                      <p className="text-[10px] text-text-dim uppercase tracking-wider mb-3">Please use these credentials to pay registration fees</p>
+                    </div>
+
+                    <div className="bg-ink/30 p-4 rounded-xl border border-line/50 space-y-3">
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center py-1.5 border-b border-line/30">
+                          <span className="text-[10px] font-semibold text-text-dim uppercase">Bank Name</span>
+                          <span className="text-xs font-bold text-text">{activeComp.bankName || <em className="text-text-dim">Not provided yet</em>}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1.5 border-b border-line/30">
+                          <span className="text-[10px] font-semibold text-text-dim uppercase">Bank Account</span>
+                          <span className="text-xs font-mono font-bold text-gold flex items-center gap-1.5">
+                            {activeComp.bankAccount ? (
+                              <>
+                                {activeComp.bankAccount}
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(activeComp.bankAccount || '');
+                                    triggerMsg('Bank account copied to clipboard!', 'ok');
+                                  }}
+                                  className="text-[9px] text-gold/80 hover:text-gold uppercase tracking-widest border border-gold/30 px-1.5 py-0.5 rounded hover:bg-gold/10 transition cursor-pointer"
+                                >
+                                  Copy
+                                </button>
+                              </>
+                            ) : (
+                              <em className="text-text-dim">Not provided yet</em>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Event Fees block */}
+                      {(activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee) && (
+                        <div className="mt-2 p-2.5 bg-ink/20 rounded-xl border border-line/20 space-y-1.5">
+                          <span className="block text-[8px] font-bold text-gold uppercase tracking-wider">Participant Event Fees:</span>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                            {activeComp.kyorugiFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Kyorugi:</span>
+                                <span className="font-bold text-text font-mono">{activeComp.kyorugiFee}</span>
+                              </div>
+                            )}
+                            {activeComp.poomsaeFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Poomsae:</span>
+                                <span className="font-bold text-text font-mono">{activeComp.poomsaeFee}</span>
+                              </div>
+                            )}
+                            {activeComp.paraFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Para:</span>
+                                <span className="font-bold text-text font-mono">{activeComp.paraFee}</span>
+                              </div>
+                            )}
+                            {activeComp.virtualFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Virtual:</span>
+                                <span className="font-bold text-text font-mono">{activeComp.virtualFee}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {activeComp.bankQrCode && (
+                      <div className="flex items-center gap-3 bg-gold/5 p-2 rounded-lg border border-gold/20 mt-1">
+                        <img 
+                          src={activeComp.bankQrCode} 
+                          alt="Scan QR to Pay" 
+                          className="w-14 h-14 object-contain rounded bg-white p-0.5"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div>
+                          <p className="text-[10px] font-bold text-text uppercase tracking-wider">Scan to Pay QR</p>
+                          <p className="text-[8px] text-text-dim">Scan with your banking app to transfer fees</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Box 2: Coach Receipt Upload */}
+                  <div className="flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                        <FileText className="w-4 h-4 text-gold" />
+                        2. Coach to upload the payment receipt
+                      </h3>
+                      <p className="text-[10px] text-text-dim uppercase tracking-wider mb-3">Upload bank transaction receipt for your club registration ({coachClub})</p>
+                    </div>
+
+                    {(() => {
+                      const clubKey = coachClub.toUpperCase();
+                      const receipt = activeComp.receipts?.[clubKey];
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-ink/25 p-4 rounded-xl border border-line/50">
+                          {/* Receipt Status and Thumbnail */}
+                          <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-lg p-2 bg-ink/10 h-32">
+                            {receipt ? (
+                              <div className="relative group w-24 h-24 flex flex-col justify-center items-center">
+                                <img 
+                                  src={receipt.receiptUrl} 
+                                  alt="Receipt preview" 
+                                  className="w-full h-16 object-cover rounded cursor-pointer border border-line"
+                                  onClick={() => setSelectedClubReceipt({ clubName: coachClub, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="text-[8px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-0.5">
+                                  <CheckCircle className="w-2.5 h-2.5 text-green-400" />
+                                  <span>Submitted</span>
+                                </div>
+                                <div className="text-[7px] text-text-dim text-center truncate w-full">
+                                  {receipt.uploadedAt}
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const updated = competitions.map(c => {
+                                      if (c.id === compId) {
+                                        const nextRecs = { ...(c.receipts || {}) };
+                                        delete nextRecs[clubKey];
+                                        return { ...c, receipts: nextRecs };
+                                      }
+                                      return c;
+                                    });
+                                    saveCompsToStorage(updated);
+                                    triggerMsg('Receipt deleted.', 'ok');
+                                  }}
+                                  className="absolute -top-1.5 -right-1.5 bg-red-500/90 text-white p-1 rounded-full hover:bg-red-600 transition"
+                                  title="Delete Receipt"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="text-center p-2">
+                                <FileText className="w-8 h-8 text-text-dim/50 mx-auto mb-1" />
+                                <span className="text-[10px] text-text-dim font-medium uppercase tracking-wider block">Pending</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Upload action */}
+                          <div className="space-y-2">
+                            <label className="flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-lg p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-24">
+                              <Upload className="w-5 h-5 text-gold mb-1" />
+                              <span className="text-[10px] font-bold text-text-dim uppercase">Upload Receipt</span>
+                              <span className="text-[8px] text-text-dim">PNG/JPG up to 3MB</span>
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  if (file.size > 3 * 1024 * 1024) {
+                                    triggerMsg('Receipt file must be less than 3MB', 'error');
+                                    return;
+                                  }
+                                  const reader = new FileReader();
+                                  reader.onload = (evt) => {
+                                    const base64 = evt.target?.result as string;
+                                    handleUploadReceipt(coachClub, base64);
+                                  };
+                                  reader.readAsDataURL(file);
+                                }}
+                                className="hidden" 
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Quick KPI stats for this tournament */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-surface p-4 rounded-xl border border-line">
-                <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">Registered Athletes</span>
-                <span className="text-2xl font-black text-text">{coachFilteredPlayers.length}</span>
-              </div>
-              <div className="bg-surface p-4 rounded-xl border border-line">
-                <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">Weighed In</span>
-                <span className="text-2xl font-black text-text">
-                  {coachFilteredPlayers.filter(p => p.weighIn !== null).length}
-                </span>
-              </div>
-              <div className="bg-surface p-4 rounded-xl border border-line">
-                <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">Passed Division</span>
-                <span className="text-2xl font-black text-green-400">
-                  {coachFilteredPlayers.filter(p => p.weighIn?.result === 'PASS' || p.weighIn?.result === 'OVERRIDE PASS').length}
-                </span>
-              </div>
-              <div className="bg-surface p-4 rounded-xl border border-line">
-                <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">Failed / Pending</span>
-                <span className="text-2xl font-black text-red-400">
-                  {coachFilteredPlayers.filter(p => p.weighIn?.result === 'FAIL' || p.weighIn?.result === 'OVERRIDE FAIL').length}
-                </span>
-              </div>
-            </div>
+            {(() => {
+              const coachAthletes = players.filter(p => p.coachUsername === user);
+              let coachKyorugiCount = 0;
+              let coachPoomsaeCount = 0;
+              let coachParaCount = 0;
+              let coachVirtualCount = 0;
+
+              coachAthletes.forEach(p => {
+                const ev = (p.event || '').toLowerCase();
+                if (ev.includes('kyorugi')) coachKyorugiCount++;
+                else if (ev.includes('poomsae')) coachPoomsaeCount++;
+                else if (ev.includes('para')) coachParaCount++;
+                else if (ev.includes('virtual')) coachVirtualCount++;
+              });
+
+              const kyorugiPrice = parseFeeToNumber(activeComp.kyorugiFee);
+              const poomsaePrice = parseFeeToNumber(activeComp.poomsaeFee);
+              const paraPrice = parseFeeToNumber(activeComp.paraFee);
+              const virtualPrice = parseFeeToNumber(activeComp.virtualFee);
+
+              const kyorugiTotal = coachKyorugiCount * kyorugiPrice;
+              const poomsaeTotal = coachPoomsaeCount * poomsaePrice;
+              const paraTotal = coachParaCount * paraPrice;
+              const virtualTotal = coachVirtualCount * virtualPrice;
+
+              const grandTotal = kyorugiTotal + poomsaeTotal + paraTotal + virtualTotal;
+              const sampleFee = activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee;
+
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                  {/* Card 1: Kyorugi */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
+                    <div>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">1. Kyorugi</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachKyorugiCount}</span>
+                    </div>
+                    {activeComp.kyorugiFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachKyorugiCount} × {activeComp.kyorugiFee} = {formatCurrency(kyorugiTotal, sampleFee)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 2: Poomsae */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
+                    <div>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">2. Poomsae</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachPoomsaeCount}</span>
+                    </div>
+                    {activeComp.poomsaeFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachPoomsaeCount} × {activeComp.poomsaeFee} = {formatCurrency(poomsaeTotal, sampleFee)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 3: Para */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
+                    <div>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">3. Para</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachParaCount}</span>
+                    </div>
+                    {activeComp.paraFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachParaCount} × {activeComp.paraFee} = {formatCurrency(paraTotal, sampleFee)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 4: Virtual */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
+                    <div>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">4. Virtual</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachVirtualCount}</span>
+                    </div>
+                    {activeComp.virtualFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachVirtualCount} × {activeComp.virtualFee} = {formatCurrency(virtualTotal, sampleFee)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 5: Total Amount */}
+                  <div className="bg-gold/5 p-4 rounded-xl border border-gold/30 flex flex-col justify-between col-span-2 sm:col-span-1">
+                    <div>
+                      <span className="block text-[10px] text-gold font-bold uppercase tracking-wider">5. Total Amount</span>
+                      <span className="text-2xl font-black text-gold mt-1 block font-mono">{formatCurrency(grandTotal, sampleFee)}</span>
+                    </div>
+                    <div className="text-[10px] text-text-dim mt-2 pt-1.5 border-t border-gold/20">
+                      Total ({coachAthletes.length} registered)
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Table or Card list */}
             <div className="bg-surface rounded-2xl border border-line shadow-sm overflow-hidden">
@@ -2142,6 +2838,10 @@ export default function App() {
                             <span>
                               {masterSearchQuery 
                                 ? `Search Results (${Object.values(masterAthletes).filter((ma: any) => {
+                                    if (role === 'coach' && user) {
+                                      const belongs = ma.coachUsername === user || (ma.club && coaches[user]?.club && ma.club === coaches[user].club);
+                                      if (!belongs) return false;
+                                    }
                                     const q = masterSearchQuery.toLowerCase();
                                     return ma.name?.toLowerCase().includes(q) || ma.ic?.toLowerCase().includes(q) || ma.club?.toLowerCase().includes(q);
                                   }).length})`
@@ -2158,7 +2858,12 @@ export default function App() {
                           
                           <div className="overflow-y-auto divide-y divide-line/40 flex-1">
                             {(() => {
-                              const list = Object.values(masterAthletes).filter((ma: any) => {
+                              const coachOwned = Object.values(masterAthletes).filter((ma: any) => {
+                                if (role !== 'coach') return true;
+                                if (!user) return false;
+                                return ma.coachUsername === user || (ma.club && coaches[user]?.club && ma.club === coaches[user].club);
+                              });
+                              const list = coachOwned.filter((ma: any) => {
                                 if (!masterSearchQuery) return true;
                                 const q = masterSearchQuery.toLowerCase();
                                 return (
@@ -2699,44 +3404,170 @@ export default function App() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               
-              {/* VIDEO SCANNER BLOCK */}
+              {/* WEIGH-IN INPUT METHOD SELECTOR CARD */}
               <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-text">Live Camera ID Scanner</h3>
-                <p className="text-xs text-text-dim">Hold the athlete's ID card QR code in front of the camera frame below to parse instantly.</p>
-                
-                <div className="relative w-full aspect-square max-w-sm mx-auto bg-ink rounded-2xl overflow-hidden border border-line flex items-center justify-center shadow-inner">
-                  {scanning ? (
-                    <video 
-                      ref={videoRef} 
-                      className="w-full h-full object-cover"
-                      playsInline
-                      muted
-                      autoPlay
-                    />
-                  ) : (
-                    <div className="text-center p-6 space-y-3">
-                      <Camera className="w-12 h-12 text-text-dim/40 mx-auto" />
-                      <p className="text-xs text-text-dim/60">Camera scanning feed is currently inactive.</p>
-                    </div>
-                  )}
-
-                  {/* Target scanner bounding box */}
-                  {scanning && (
-                    <div className="absolute inset-16 border-2 border-dashed border-gold rounded-2xl pointer-events-none flex items-center justify-center">
-                      <span className="text-[10px] text-gold uppercase tracking-wider font-bold bg-ink/85 px-2 py-0.5 rounded shadow">Position QR code</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-center">
+                <div className="flex border-b border-line pb-2 mb-2 gap-2">
                   <button 
-                    onClick={() => setScanning(!scanning)}
-                    className={`px-5 py-2.5 rounded-lg font-semibold text-sm cursor-pointer shadow-md ${scanning ? 'bg-bad text-white' : 'bg-gold text-ink'}`}
+                    onClick={() => { setScannerMode('camera'); setScanning(false); }}
+                    className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition rounded-xl flex items-center justify-center gap-2 ${
+                      scannerMode === 'camera' ? 'bg-gold/15 text-gold border border-gold/30 font-bold' : 'text-text-dim hover:text-text bg-ink/20'
+                    }`}
                   >
-                    {scanning ? 'Stop Camera Scanning' : 'Start Camera Scan'}
+                    <Camera className="w-4 h-4" />
+                    <span>Live Camera</span>
+                  </button>
+                  <button 
+                    onClick={() => { setScannerMode('hardware'); setScanning(false); }}
+                    className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition rounded-xl flex items-center justify-center gap-2 ${
+                      scannerMode === 'hardware' ? 'bg-gold/15 text-gold border border-gold/30 font-bold' : 'text-text-dim hover:text-text bg-ink/20'
+                    }`}
+                  >
+                    <QrCode className="w-4 h-4" />
+                    <span>Handheld Gun Scanner</span>
                   </button>
                 </div>
-                <div id="scanErr" className="text-center text-xs"></div>
+
+                {scannerMode === 'camera' ? (
+                  <div className="space-y-4 animate-fade-in">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-text">Live Camera ID Scanner</h3>
+                    <p className="text-xs text-text-dim">Hold the athlete's ID card QR code in front of the camera frame below to parse instantly.</p>
+                    
+                    <div className="relative w-full aspect-square max-w-sm mx-auto bg-ink rounded-2xl overflow-hidden border border-line flex items-center justify-center shadow-inner">
+                      {scanning ? (
+                        <video 
+                          ref={videoRef} 
+                          className="w-full h-full object-cover"
+                          playsInline
+                          muted
+                          autoPlay
+                        />
+                      ) : (
+                        <div className="text-center p-6 space-y-3">
+                          <Camera className="w-12 h-12 text-text-dim/40 mx-auto" />
+                          <p className="text-xs text-text-dim/60">Camera scanning feed is currently inactive.</p>
+                        </div>
+                      )}
+
+                      {/* Target scanner bounding box */}
+                      {scanning && (
+                        <div className="absolute inset-16 border-2 border-dashed border-gold rounded-2xl pointer-events-none flex items-center justify-center">
+                          <span className="text-[10px] text-gold uppercase tracking-wider font-bold bg-ink/85 px-2 py-0.5 rounded shadow">Position QR code</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-center">
+                      <button 
+                        onClick={() => setScanning(!scanning)}
+                        className={`px-5 py-2.5 rounded-lg font-semibold text-sm cursor-pointer shadow-md ${scanning ? 'bg-bad text-white' : 'bg-gold text-ink'}`}
+                      >
+                        {scanning ? 'Stop Camera Scanning' : 'Start Camera Scan'}
+                      </button>
+                    </div>
+                    <div id="scanErr" className="text-center text-xs"></div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 animate-fade-in">
+                    <div className="bg-ink/50 border border-line/60 rounded-xl p-4 text-center space-y-3">
+                      <div className="inline-flex p-3 rounded-full bg-gold/10 text-gold animate-pulse">
+                        <QrCode className="w-8 h-8" />
+                      </div>
+                      <h4 className="text-xs font-bold text-text uppercase tracking-wider">Handheld Barcode / QR Scanner Mode</h4>
+                      <p className="text-[11px] text-text-dim max-w-sm mx-auto leading-normal">
+                        Connect any standard handheld USB or Bluetooth scanner gun. The scanner gun acts as a keyboard emulator—just point and scan any ID card.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                          Scan Receiver Input
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <input 
+                            type="checkbox" 
+                            id="auto-focus-cb"
+                            checked={autoFocusScanner}
+                            onChange={(e) => setAutoFocusScanner(e.target.checked)}
+                            className="w-3.5 h-3.5 text-gold bg-ink border-line rounded focus:ring-gold focus:ring-offset-ink accent-gold"
+                          />
+                          <label htmlFor="auto-focus-cb" className="text-[10px] text-text-dim cursor-pointer font-medium">
+                            Auto-focus receiver field
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Focus Status / Scanner Connectivity Indicator */}
+                      <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all duration-300 ${
+                        isScannerFocused 
+                          ? 'bg-emerald/10 border-emerald/30 text-emerald' 
+                          : 'bg-amber/10 border-amber/30 text-amber'
+                      }`}>
+                        <div className="flex items-start gap-2.5">
+                          <span className="relative flex h-2.5 w-2.5 mt-1 sm:mt-0.5">
+                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                              isScannerFocused ? 'bg-emerald' : 'bg-amber'
+                            }`}></span>
+                            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                              isScannerFocused ? 'bg-emerald' : 'bg-amber'
+                            }`}></span>
+                          </span>
+                          <div className="text-left space-y-0.5">
+                            <p className="text-xs font-bold uppercase tracking-wide">
+                              {isScannerFocused ? 'Scanner Connection Active' : 'Scanner Connection Idle'}
+                            </p>
+                            <p className="text-[10px] text-text-dim leading-relaxed max-w-sm">
+                              {isScannerFocused 
+                                ? 'Your hardware scanner is ready to transmit! Scan any athlete ID card now.' 
+                                : 'Please click inside the dashed input field below or click "Focus Field" to wake up and routes keystrokes.'
+                              }
+                            </p>
+                          </div>
+                        </div>
+                        {isScannerFocused ? (
+                          <span className="text-[10px] font-bold uppercase bg-emerald/20 px-2 py-0.5 rounded border border-emerald/20 whitespace-nowrap self-stretch sm:self-auto text-center">Ready</span>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={() => hardwareInputRef.current?.focus()}
+                            className="text-[10px] font-bold uppercase bg-amber text-ink px-2.5 py-1 rounded-lg hover:opacity-95 transition whitespace-nowrap self-stretch sm:self-auto text-center"
+                          >
+                            Focus Field
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          ref={hardwareInputRef}
+                          value={manualCode}
+                          onChange={(e) => setManualCode(e.target.value)}
+                          onFocus={() => setIsScannerFocused(true)}
+                          onBlur={() => setIsScannerFocused(false)}
+                          onKeyDown={(e) => { 
+                            if (e.key === 'Enter') { 
+                              lookupPlayer(manualCode.trim()); 
+                              setManualCode(''); 
+                            } 
+                          }}
+                          placeholder={autoFocusScanner ? "READY TO SCAN (Auto-Focused)..." : "Click here, then scan QR code..."}
+                          className="w-full bg-ink border-2 border-dashed border-line text-xs rounded-xl py-3 px-3 text-text text-center focus:outline-none focus:border-gold transition font-mono tracking-wider font-bold placeholder:text-text-dim/40"
+                        />
+                        {autoFocusScanner && (
+                          <span className="absolute right-3.5 top-3.5 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald"></span>
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[10px] text-text-dim text-center leading-normal">
+                        The receiver automatically parses the tournament credentials and matches the competitor's profile instantly.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 <div style={{ marginTop: '20px' }} className="pt-4 border-t border-line">
                   <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Or manually query competitor code</label>
@@ -3073,13 +3904,13 @@ export default function App() {
                             <div className="border-t border-line/40 pt-4 mt-4 flex items-center justify-between gap-2">
                               <button 
                                 onClick={() => { setCompId(c.id); setScreen('adminCompDetail'); }}
-                                className="bg-ink text-gold hover:bg-surface-2 border border-line px-4 py-2 rounded-xl text-xs font-bold transition flex-1 text-center"
+                                className="bg-ink text-gold hover:bg-surface-2 border border-line px-3 py-2 rounded-xl text-xs font-bold transition flex-1 text-center cursor-pointer"
                               >
-                                Configure Event
+                                Configure
                               </button>
                               <button
                                 onClick={() => handleToggleCompActive(c.id)}
-                                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex-1 text-center border ${
+                                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex-1 text-center border cursor-pointer ${
                                   c.isActive !== false
                                     ? 'bg-good/10 text-good border-good/30 hover:bg-good/20'
                                     : 'bg-surface-2 text-text-dim border-line hover:text-text'
@@ -3087,6 +3918,31 @@ export default function App() {
                               >
                                 {c.isActive !== false ? 'Active' : 'Inactive'}
                               </button>
+
+                              {confirmDeleteCompId === c.id ? (
+                                <div className="flex items-center gap-1 shrink-0 animate-fade-in">
+                                  <button
+                                    onClick={() => handleAdminDeleteComp(c.id)}
+                                    className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-2 rounded-xl text-[10px] font-bold transition cursor-pointer"
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDeleteCompId(null)}
+                                    className="bg-ink hover:bg-surface-2 border border-line text-text-dim px-2 py-2 rounded-xl text-[10px] font-bold transition cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmDeleteCompId(c.id)}
+                                  className="bg-hong/10 hover:bg-hong/25 text-hong border border-hong/30 p-2 rounded-xl transition shrink-0 cursor-pointer"
+                                  title="Delete Event"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -3115,6 +3971,8 @@ export default function App() {
                             <th className="p-4">Password</th>
                             <th className="p-4">Full Name</th>
                             <th className="p-4">Club/Team</th>
+                            <th className="p-4">Phone</th>
+                            <th className="p-4">Email</th>
                             <th className="p-4 text-right">Actions</th>
                           </tr>
                         </thead>
@@ -3148,6 +4006,22 @@ export default function App() {
                                       className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
                                     />
                                   </td>
+                                  <td className="p-4">
+                                    <input
+                                      type="text"
+                                      value={editCoachPhone}
+                                      onChange={(e) => setEditCoachPhone(e.target.value)}
+                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                    />
+                                  </td>
+                                  <td className="p-4">
+                                    <input
+                                      type="email"
+                                      value={editCoachEmail}
+                                      onChange={(e) => setEditCoachEmail(e.target.value)}
+                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                    />
+                                  </td>
                                   <td className="p-4 text-right whitespace-nowrap">
                                     <button
                                       onClick={handleAdminSaveCoach}
@@ -3169,21 +4043,42 @@ export default function App() {
                                   <td className="p-4 font-mono text-text-dim">{coach.password}</td>
                                   <td className="p-4 text-text font-bold uppercase">{coach.name}</td>
                                   <td className="p-4 text-text">{coach.club}</td>
+                                  <td className="p-4 text-text font-mono">{coach.phone || '-'}</td>
+                                  <td className="p-4 text-text">{coach.email || '-'}</td>
                                   <td className="p-4 text-right whitespace-nowrap">
-                                    <button
-                                      onClick={() => handleAdminEditCoach(username, coach)}
-                                      className="text-chong hover:bg-chong/10 p-1.5 rounded transition mr-2"
-                                      title="Edit"
-                                    >
-                                      <Edit className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      onClick={() => handleAdminDeleteCoach(username)}
-                                      className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
-                                      title="Delete"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    {confirmDeleteCoachUsername === username ? (
+                                      <div className="flex items-center justify-end space-x-1">
+                                        <button 
+                                          onClick={() => handleAdminDeleteCoach(username)}
+                                          className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-sm"
+                                        >
+                                          Confirm
+                                        </button>
+                                        <button 
+                                          onClick={() => setConfirmDeleteCoachUsername(null)}
+                                          className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1 rounded-lg text-[10px]"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <button
+                                          onClick={() => handleAdminEditCoach(username, coach)}
+                                          className="text-chong hover:bg-chong/10 p-1.5 rounded transition mr-2"
+                                          title="Edit"
+                                        >
+                                          <Edit className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          onClick={() => setConfirmDeleteCoachUsername(username)}
+                                          className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
+                                          title="Delete"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    )}
                                   </td>
                                 </tr>
                               )}
@@ -3255,13 +4150,30 @@ export default function App() {
                               <td className="p-4 text-text font-bold uppercase">{org.name}</td>
                               <td className="p-4 text-text">{competitions.find(c => c.id === org.compId)?.name || 'Unknown'}</td>
                               <td className="p-4 text-right whitespace-nowrap">
-                                <button
-                                  onClick={() => handleAdminDeleteOrganizer(username)}
-                                  className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                {confirmDeleteOrganizerUsername === username ? (
+                                  <div className="flex items-center justify-end space-x-1">
+                                    <button 
+                                      onClick={() => handleAdminDeleteOrganizer(username)}
+                                      className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-sm"
+                                    >
+                                      Confirm
+                                    </button>
+                                    <button 
+                                      onClick={() => setConfirmDeleteOrganizerUsername(null)}
+                                      className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1 rounded-lg text-[10px]"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setConfirmDeleteOrganizerUsername(username)}
+                                    className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -3412,18 +4324,16 @@ export default function App() {
         {screen === 'adminCompDetail' && activeComp && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-surface p-4 rounded-2xl border border-line shadow-sm">
-              <div className="flex items-center space-x-3">
-                <button 
-                  onClick={() => setScreen('adminHome')}
-                  className="text-xs text-gold border border-gold/30 px-3 py-1.5 rounded-lg hover:bg-gold/10 transition"
-                >
-                  ← All Tournaments
-                </button>
-                <div>
-                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">{activeComp.name}</h2>
-                  <p className="text-xs text-text-dim">Venue: {activeComp.venue} · Date: {activeComp.date}</p>
-                </div>
+              <div>
+                <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">{activeComp.name}</h2>
+                <p className="text-xs text-text-dim">Venue: {activeComp.venue} · Date: {activeComp.date}</p>
               </div>
+              <button 
+                onClick={() => setScreen('adminHome')}
+                className="text-xs text-gold border border-gold/30 px-3 py-1.5 rounded-lg hover:bg-gold/10 transition shrink-0"
+              >
+                ← All Tournaments
+              </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -3445,6 +4355,42 @@ export default function App() {
                     className="bg-gold hover:opacity-90 text-ink font-bold px-4 py-2 rounded-xl text-xs"
                   >
                     Set Code
+                  </button>
+                </div>
+              </div>
+
+              {/* PUBLIC VIEW PASSWORD MANAGEMENT */}
+              <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-gold" />
+                  Public View Access Password
+                </h3>
+                <p className="text-xs text-text-dim">Restrict guest access to registered competitor lists, weigh-in results, and division classifications. Leave blank for unrestricted public access.</p>
+                <div className="flex space-x-2">
+                  <input 
+                    type="text" 
+                    id="public-view-password-input"
+                    placeholder="Unrestricted (No Password)"
+                    defaultValue={activeComp.publicViewPassword || ''}
+                    key={`public-pwd-${activeComp.id}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleUpdatePublicViewPassword(e.currentTarget.value);
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  />
+                  <button 
+                    onClick={() => {
+                      const input = document.getElementById('public-view-password-input') as HTMLInputElement;
+                      if (input) {
+                        handleUpdatePublicViewPassword(input.value);
+                      }
+                    }}
+                    className="bg-gold hover:opacity-90 text-ink font-bold px-4 py-2 rounded-xl text-xs whitespace-nowrap"
+                  >
+                    Set Password
                   </button>
                 </div>
               </div>
@@ -3772,7 +4718,7 @@ export default function App() {
                                         <div className={`${containerClass} border-t border-dashed border-line/30 pt-2`}>
                                           <div className="bg-white p-1 rounded-lg inline-block shadow-md shrink-0">
                                             <QRCodeSVG 
-                                              value="MOCK" 
+                                              value={`${activeComp.id}::${p.id}`} 
                                               size={44} 
                                               level="M" 
                                               includeMargin={false}
@@ -4232,10 +5178,220 @@ export default function App() {
               </button>
             </div>
 
-            <div className="flex flex-col lg:flex-row gap-6 items-start">
-              <div className="flex-1 space-y-6 w-full">
+            {/* SUB NAV FOR ORGANIZER */}
+            <div className="flex border-b border-line gap-2 pb-px">
+              <button
+                onClick={() => setOrganizerTab('dashboard')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-px flex items-center gap-2 ${
+                  organizerTab === 'dashboard'
+                    ? 'border-gold text-gold bg-gold/5 font-bold'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+                Tournament Setup & Competitors
+              </button>
+              <button
+                onClick={() => setOrganizerTab('idCard')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-px flex items-center gap-2 ${
+                  organizerTab === 'idCard'
+                    ? 'border-gold text-gold bg-gold/5 font-bold'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Palette className="w-4 h-4" />
+                ID Card Design Studio
+              </button>
+            </div>
 
-            {/* Summary Box */}
+            {organizerTab === 'dashboard' ? (
+              <div className="flex flex-col lg:flex-row gap-6 items-start">
+                <div className="flex-1 space-y-6 w-full">
+
+                {/* BANKING & PAYMENT SETUP */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface p-6 rounded-2xl border border-line shadow-sm">
+                  {/* Box 1: Bank Details */}
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                        <Lock className="w-4 h-4 text-gold" />
+                        1. Bank Details Setup
+                      </h3>
+                      <p className="text-[10px] text-text-dim uppercase tracking-wider mb-3">Provide bank credentials for coach registrations</p>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Row 1: Bank Name</label>
+                        <input 
+                          type="text"
+                          value={bankNameInput}
+                          onChange={(e) => setBankNameInput(e.target.value)}
+                          placeholder="e.g. Maybank, CIMB, Bank Islam"
+                          className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Row 2: Bank Account Number</label>
+                        <input 
+                          type="text"
+                          value={bankAccountInput}
+                          onChange={(e) => setBankAccountInput(e.target.value)}
+                          placeholder="e.g. 1234567890"
+                          className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium"
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleUpdateBankDetails(bankNameInput, bankAccountInput)}
+                        className="w-full bg-gold/10 hover:bg-gold text-gold hover:text-ink border border-gold/30 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Save Bank Details
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Box 2: QR Code Upload */}
+                  <div className="flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                        <QrCode className="w-4 h-4 text-gold" />
+                        2. Payment QR Code
+                      </h3>
+                      <p className="text-[10px] text-text-dim uppercase tracking-wider mb-3">Upload tournament payment QR (DuitNow, etc.)</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-ink/25 p-4 rounded-xl border border-line/50">
+                      {/* Thumbnail / QR preview */}
+                      <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-lg p-2 bg-ink/10 h-32">
+                        {activeComp.bankQrCode ? (
+                          <div className="relative group w-24 h-24">
+                            <img 
+                              src={activeComp.bankQrCode} 
+                              alt="Bank QR" 
+                              className="w-full h-full object-contain rounded"
+                              referrerPolicy="no-referrer"
+                            />
+                            <button
+                              onClick={() => {
+                                const updated = competitions.map(c => {
+                                  if (c.id === compId) {
+                                    return { ...c, bankQrCode: '' };
+                                  }
+                                  return c;
+                                });
+                                saveCompsToStorage(updated);
+                                triggerMsg('QR code deleted.', 'ok');
+                              }}
+                              className="absolute -top-1.5 -right-1.5 bg-red-500/90 text-white p-1 rounded-full hover:bg-red-600 transition"
+                              title="Remove QR"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-center p-2">
+                            <QrCode className="w-8 h-8 text-text-dim/50 mx-auto mb-1" />
+                            <span className="text-[10px] text-text-dim">No QR Uploaded</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Upload action */}
+                      <div className="space-y-2">
+                        <label className="flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-lg p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-24">
+                          <Upload className="w-5 h-5 text-gold mb-1" />
+                          <span className="text-[10px] font-bold text-text-dim uppercase">Upload QR</span>
+                          <span className="text-[8px] text-text-dim">PNG/JPG up to 2MB</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              if (file.size > 2 * 1024 * 1024) {
+                                triggerMsg('Image must be less than 2MB', 'error');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = (evt) => {
+                                const base64 = evt.target?.result as string;
+                                handleUpdateBankDetails(bankNameInput, bankAccountInput, base64);
+                              };
+                              reader.readAsDataURL(file);
+                            }}
+                            className="hidden" 
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* PARTICIPANT FEES SETUP */}
+                <div className="bg-surface p-6 rounded-2xl border border-line shadow-sm space-y-4">
+                  <div>
+                    <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                      <Coins className="w-4 h-4 text-gold" />
+                      Participant Event Fees Setup
+                    </h3>
+                    <p className="text-[10px] text-text-dim uppercase tracking-wider">Configure registration fees for each event type (visible to coaches)</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Kyorugi Fee</label>
+                      <input 
+                        type="text"
+                        value={kyorugiFeeInput}
+                        onChange={(e) => setKyorugiFeeInput(e.target.value)}
+                        placeholder="e.g. RM 120"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Poomsae Fee</label>
+                      <input 
+                        type="text"
+                        value={poomsaeFeeInput}
+                        onChange={(e) => setPoomsaeFeeInput(e.target.value)}
+                        placeholder="e.g. RM 100"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Para Fee</label>
+                      <input 
+                        type="text"
+                        value={paraFeeInput}
+                        onChange={(e) => setParaFeeInput(e.target.value)}
+                        placeholder="e.g. RM 80"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Virtual Fee</label>
+                      <input 
+                        type="text"
+                        value={virtualFeeInput}
+                        onChange={(e) => setVirtualFeeInput(e.target.value)}
+                        placeholder="e.g. RM 50"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => handleUpdateEventFees(kyorugiFeeInput, poomsaeFeeInput, paraFeeInput, virtualFeeInput)}
+                      className="bg-gold hover:opacity-90 text-ink px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer animate-fade-in"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      Save Participant Fees
+                    </button>
+                  </div>
+                </div>
+
+                {/* Summary Box */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
                 <p className="text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Total Athletes</p>
@@ -4270,6 +5426,8 @@ export default function App() {
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Para</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Virtual</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Total</th>
+                      <th className="p-4 py-3 font-semibold text-text text-center w-32">Total Amount</th>
+                      <th className="p-4 py-3 font-semibold text-text text-center w-36">Receipt</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line/50">
@@ -4293,21 +5451,55 @@ export default function App() {
                       if (entries.length === 0) {
                         return (
                           <tr>
-                            <td colSpan={6} className="p-4 text-center text-text-dim text-xs">No athletes yet.</td>
+                            <td colSpan={8} className="p-4 text-center text-text-dim text-xs">No athletes yet.</td>
                           </tr>
                         );
                       }
                       
-                      return entries.map(([club, counts]: [string, any]) => (
-                        <tr key={club} className="hover:bg-surface-2/50 transition">
-                          <td className="p-4 text-text-dim font-medium">{club}</td>
-                          <td className="p-4 text-center font-mono text-text">{counts.kyorugi > 0 ? counts.kyorugi : '-'}</td>
-                          <td className="p-4 text-center font-mono text-text">{counts.poomsae > 0 ? counts.poomsae : '-'}</td>
-                          <td className="p-4 text-center font-mono text-text">{counts.para > 0 ? counts.para : '-'}</td>
-                          <td className="p-4 text-center font-mono text-text">{counts.virtual > 0 ? counts.virtual : '-'}</td>
-                          <td className="p-4 text-center font-mono font-bold text-text">{counts.total}</td>
-                        </tr>
-                      ));
+                      return entries.map(([club, counts]: [string, any]) => {
+                        const receipt = activeComp?.receipts?.[club];
+                        
+                        const kPrice = parseFeeToNumber(activeComp?.kyorugiFee);
+                        const pPrice = parseFeeToNumber(activeComp?.poomsaeFee);
+                        const paPrice = parseFeeToNumber(activeComp?.paraFee);
+                        const vPrice = parseFeeToNumber(activeComp?.virtualFee);
+
+                        const clubKTotal = counts.kyorugi * kPrice;
+                        const clubPTotal = counts.poomsae * pPrice;
+                        const clubPaTotal = counts.para * paPrice;
+                        const clubVTotal = counts.virtual * vPrice;
+
+                        const clubTotalAmount = clubKTotal + clubPTotal + clubPaTotal + clubVTotal;
+                        const sampleFee = activeComp?.kyorugiFee || activeComp?.poomsaeFee || activeComp?.paraFee || activeComp?.virtualFee;
+                        const totalAmountFormatted = formatCurrency(clubTotalAmount, sampleFee);
+
+                        return (
+                          <tr key={club} className="hover:bg-surface-2/50 transition">
+                            <td className="p-4 text-text-dim font-medium">{club}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.kyorugi > 0 ? counts.kyorugi : '-'}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.poomsae > 0 ? counts.poomsae : '-'}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.para > 0 ? counts.para : '-'}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.virtual > 0 ? counts.virtual : '-'}</td>
+                            <td className="p-4 text-center font-mono font-bold text-text">{counts.total}</td>
+                            <td className="p-4 text-center font-mono font-bold text-gold">{totalAmountFormatted}</td>
+                            <td className="p-4 text-center">
+                              {receipt ? (
+                                <button
+                                  onClick={() => setSelectedClubReceipt({ clubName: club, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
+                                  className="bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/60 px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 mx-auto cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>View Receipt</span>
+                                </button>
+                              ) : (
+                                <span className="bg-red-950 text-red-400 border border-red-900/40 px-2.5 py-1 rounded-lg text-[10px] font-medium inline-block select-none">
+                                  Pending Receipt
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
                     })()}
                   </tbody>
                 </table>
@@ -4426,28 +5618,32 @@ export default function App() {
               )}
             </div>
           </div>
+        </div>
+        ) : (
+          /* ID CARD DESIGN STUDIO - DEDICATED PAGE */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full animate-fade-in">
+            {/* Left Column: Configs & Upload */}
+            <div className="lg:col-span-5 bg-surface rounded-2xl border border-line p-6 space-y-6 shadow-sm">
+              <div className="border-b border-line/50 pb-3 flex justify-between items-center">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <Palette className="w-4 h-4 text-gold" />
+                  ID Card Design & Layout
+                </h3>
+                {activeComp.idCardBgUrl && (
+                  <button
+                    onClick={() => handleUpdateIdCardBgUrl(null)}
+                    className="text-[10px] font-bold text-red-400 hover:underline animate-fade-in"
+                  >
+                    Reset BG
+                  </button>
+                )}
+              </div>
 
-            {/* SIDEBAR FOR ORGANIZER */}
-            <div className="w-full lg:w-[320px] shrink-0 space-y-6">
-              <div className="bg-surface rounded-2xl border border-line p-5 space-y-5 shadow-sm sticky top-6">
-                <div className="border-b border-line/50 pb-3 flex justify-between items-center">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                    <Palette className="w-4 h-4 text-gold" />
-                    ID Card Design & Layout
-                  </h3>
-                  {activeComp.idCardBgUrl && (
-                    <button
-                      onClick={() => handleUpdateIdCardBgUrl(null)}
-                      className="text-[10px] font-bold text-red-400 hover:underline animate-fade-in"
-                    >
-                      Reset BG
-                    </button>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  {/* Upload BG Control */}
-                  <label className="cursor-pointer bg-gold/10 text-gold border border-gold/30 hover:bg-gold/15 rounded-xl p-2.5 text-center transition flex items-center justify-center gap-2 w-full font-bold shadow text-xs">
+              <div className="space-y-4">
+                {/* Upload BG Control */}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-text-dim block mb-2">Badge Background Image</span>
+                  <label className="cursor-pointer bg-gold/10 text-gold border border-gold/30 hover:bg-gold/15 rounded-xl p-3 text-center transition flex items-center justify-center gap-2 w-full font-bold shadow text-xs">
                     <Upload className="w-3.5 h-3.5" />
                     <span>{activeComp.idCardBgUrl ? 'Replace Background' : 'Upload Background'}</span>
                     <input 
@@ -4457,365 +5653,473 @@ export default function App() {
                       onChange={handleUploadIdCardBg}
                     />
                   </label>
+                  <p className="text-[9px] text-text-dim mt-1.5 text-center leading-normal">
+                    Recommended: high-quality vertical image (aspect ratio ~1:1.4)
+                  </p>
+                </div>
 
-                  {/* MINI LIVE PREVIEW */}
-                  <div className="relative w-full aspect-[1/1.4] rounded-xl border border-line overflow-hidden shadow-inner flex flex-col bg-gradient-to-br from-[#12211C] to-[#0A1310]">
-                    {activeComp.idCardBgUrl && (
-                      <>
-                        <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
-                        <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
-                      </>
-                    )}
-                    
-                    {(() => {
-                      const demoMockupPlayer = {
-                        id: 'ATH-8899',
-                        name: 'MUHAMMAD AMIRUL',
-                        club: 'KUALA LUMPUR DRAGONS',
-                        event: 'Kyorugi (Sparring)',
-                        ageGroup: 'Junior (15-17)',
-                        gender: 'MALE',
-                        weightClass: 'Under 55kg',
-                        dob: '2010-04-12',
-                        photo: ''
+                {/* FIELD DESIGNER STACKED LIST */}
+                <div className="border-t border-line/50 pt-5 space-y-3.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-text-dim block">Badge Field Configurations</span>
+                  
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1 divide-y divide-line/20">
+                    {getIdCardFields(activeComp).map((field, idx, arr) => {
+                      const handleMoveField = (index: number, direction: 'up' | 'down') => {
+                        const fieldsList = getIdCardFields(activeComp);
+                        const newFields = [...fieldsList];
+                        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+                        if (targetIndex < 0 || targetIndex >= newFields.length) return;
+                        
+                        // Swap order values
+                        const tempOrder = newFields[index].order;
+                        newFields[index].order = newFields[targetIndex].order;
+                        newFields[targetIndex].order = tempOrder;
+                        
+                        // Resort and save
+                        newFields.sort((a, b) => a.order - b.order);
+                        newFields.forEach((f, i) => { f.order = i; });
+                        
+                        handleUpdateIdCardFields(newFields);
+                        triggerMsg('Field layout order re-arranged.', 'ok');
                       };
-                      const p = demoMockupPlayer;
-                      const belt = '#000000'; // Black belt default mockup
-                      const fieldsList = getIdCardFields(activeComp);
-                      
-                      const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
-                        const map: Record<string, string> = {
-                          'xs': '7px',
-                          'sm': '9px',
-                          'base': '11px',
-                          'lg': '13px',
-                          'xl': '16px',
-                          '2xl': '20px',
-                          '3xl': '24px'
-                        };
-                        return map[size] || defaultVal;
+
+                      const handleToggleFieldVisibility = (fieldId: string) => {
+                        const fieldsList = getIdCardFields(activeComp);
+                        const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, visible: !f.visible } : f);
+                        handleUpdateIdCardFields(newFields);
+                        const targetField = fieldsList.find(f => f.id === fieldId);
+                        if (targetField) {
+                          triggerMsg(targetField.visible ? `Removed "${targetField.name}" from ID card.` : `Added "${targetField.name}" to ID card.`, 'ok');
+                        }
+                      };
+
+                      const handleChangeFieldFontSize = (fieldId: string, size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl') => {
+                        const fieldsList = getIdCardFields(activeComp);
+                        const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, fontSize: size } : f);
+                        handleUpdateIdCardFields(newFields);
+                        triggerMsg('Font size updated.', 'ok');
+                      };
+
+                      const handleChangeFieldAlign = (fieldId: string, align: 'left' | 'center' | 'right') => {
+                        const fieldsList = getIdCardFields(activeComp);
+                        const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, align } : f);
+                        handleUpdateIdCardFields(newFields);
+                        triggerMsg('Field alignment updated.', 'ok');
+                      };
+
+                      const handleChangeFieldColor = (fieldId: string, colorHex: string) => {
+                        const fieldsList = getIdCardFields(activeComp);
+                        const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, color: colorHex } : f);
+                        handleUpdateIdCardFields(newFields);
+                        triggerMsg('Font color updated.', 'ok');
                       };
 
                       return (
-                        <div className="relative z-10 h-full flex-1 flex flex-col justify-between text-[10px] py-1.5">
-                          {fieldsList.filter(f => f.visible).map(field => {
-                            if (field.id === 'header') {
-                              return (
-                                <div key="header" className={`h-7 bg-gradient-to-r from-hong via-hong to-chong flex ${
-                                  field.align === 'left' ? 'justify-start gap-1.5' :
-                                  field.align === 'right' ? 'justify-end gap-1.5' :
-                                  field.align === 'center' ? 'justify-center gap-1.5' :
-                                  'justify-between'
-                                } items-center px-2.5 shrink-0 shadow-sm w-full`}>
-                                  <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                  <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#ffffff' }}>{p.event}</span>
-                                </div>
-                              );
+                        <div 
+                          key={field.id} 
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', field.id);
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.currentTarget.classList.add('opacity-40');
+                          }}
+                          onDragEnd={(e) => {
+                            e.currentTarget.classList.remove('opacity-40');
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.add('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
+                          }}
+                          onDragLeave={(e) => {
+                            e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
+                            const draggedId = e.dataTransfer.getData('text/plain');
+                            if (draggedId && draggedId !== field.id) {
+                              handleSwapFields(draggedId, field.id);
                             }
-                            if (field.id === 'belt') {
-                              return (
-                                <div key="belt" className="h-1 w-full shrink-0" style={{ backgroundColor: belt }}></div>
-                              );
-                            }
+                          }}
+                          className="pt-3 first:pt-0 space-y-1.5 border border-transparent p-1 hover:bg-white/5 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-150"
+                        >
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center space-x-1.5 min-w-0">
+                              <GripVertical className="w-3 h-3 text-text-dim/40 cursor-grab shrink-0" />
+                              <span className="text-[11px] font-bold text-text uppercase tracking-wide truncate max-w-[150px]">{field.name}</span>
+                            </div>
+                            <span className={`text-[8px] uppercase font-bold tracking-widest ${field.visible ? 'text-good' : 'text-bad'}`}>
+                              {field.visible ? 'Visible' : 'Deleted'}
+                            </span>
+                          </div>
 
-                            // Render mini interactive card items
-                            return (
-                              <div key={field.id} className="px-3 py-0.5 shrink-0">
-                                {(() => {
-                                  if (field.id === 'photo') {
-                                    return (
-                                      <div className={`flex ${
-                                        field.align === 'left' ? 'justify-start' :
-                                        field.align === 'right' ? 'justify-end' :
-                                        'justify-center'
-                                      }`}>
-                                        <div className="w-12 h-14 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                                          <User className="w-4 h-4 text-text-dim/40 mx-auto" />
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'name') {
-                                    return (
-                                      <div className={
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }>
-                                        <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2" style={{ fontSize: getFontSizePx(field.fontSize, '11px'), color: field.color || '#ffffff' }}>{p.name}</h3>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'club') {
-                                    return (
-                                      <div className={
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }>
-                                        <p className="uppercase tracking-widest text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#a0aec0' }}>{p.club}</p>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'athleteId') {
-                                    return (
-                                      <div className={
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }>
-                                        <span className="inline-block bg-surface border border-line font-mono px-1 py-0.5 rounded font-bold text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>{p.id}</span>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'metadata') {
-                                    return (
-                                      <div className={`grid grid-cols-2 gap-1 text-[8px] border-t border-line/30 pt-2 ${
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }`}>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
-                                          <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
-                                        </div>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
-                                          <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.gender}</span>
-                                        </div>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
-                                          <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
-                                        </div>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
-                                          <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.dob}</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'qrcode') {
-                                    const containerClass = 
-                                      field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
-                                      field.align === 'center' ? 'flex flex-col items-center justify-center gap-1 text-center' :
-                                      'flex items-center justify-between';
-                                    
-                                    const textAlignmentClass = 
-                                      field.align === 'right' ? 'text-left min-w-0' :
-                                      field.align === 'center' ? 'text-center min-w-0' :
-                                      'text-right min-w-0';
-
-                                    return (
-                                      <div className={`${containerClass} border-t border-dashed border-line/30 pt-1.5`}>
-                                        <div className="bg-white p-0.5 rounded inline-block shadow shrink-0">
-                                          <QRCodeSVG 
-                                            value="MOCK" 
-                                            size={28} 
-                                            level="M" 
-                                            includeMargin={false}
-                                          />
-                                        </div>
-                                        <div className={textAlignmentClass}>
-                                          <p className="font-display font-bold uppercase tracking-wider text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                                          <p className="mt-0.5 leading-normal text-[5px]" style={{ fontSize: getFontSizePx(field.fontSize, '5px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                })()}
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <div className="flex items-center border border-line rounded overflow-hidden bg-ink">
+                                <button
+                                  type="button"
+                                  disabled={idx === 0}
+                                  onClick={() => handleMoveField(idx, 'up')}
+                                  className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={idx === arr.length - 1}
+                                  onClick={() => handleMoveField(idx, 'down')}
+                                  className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
+                                >
+                                  ▼
+                                </button>
                               </div>
-                            );
-                          })}
+
+                              {/* Alignment Selector */}
+                              {['header', 'photo', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
+                                <select
+                                  value={field.align || (field.id === 'qrcode' ? 'left' : 'center')}
+                                  onChange={(e) => handleChangeFieldAlign(field.id, e.target.value as any)}
+                                  className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
+                                  title="Align Element"
+                                >
+                                  <option value="left">L Align</option>
+                                  <option value="center">C Align</option>
+                                  <option value="right">R Align</option>
+                                </select>
+                              )}
+
+                              {['header', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
+                                <div className="flex items-center gap-1.5">
+                                  <select
+                                    value={field.fontSize}
+                                    onChange={(e) => handleChangeFieldFontSize(field.id, e.target.value as any)}
+                                    className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
+                                    title="Font Size"
+                                  >
+                                    <option value="xs">XS</option>
+                                    <option value="sm">SM</option>
+                                    <option value="base">MD</option>
+                                    <option value="lg">LG</option>
+                                    <option value="xl">XL</option>
+                                    <option value="2xl">2X</option>
+                                    <option value="3xl">3X</option>
+                                  </select>
+
+                                  <div className="relative flex items-center bg-ink border border-line rounded px-1.5 py-0.5 gap-1.5" title="Font Color">
+                                    <input
+                                      type="color"
+                                      value={field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}
+                                      onChange={(e) => handleChangeFieldColor(field.id, e.target.value)}
+                                      className="w-3.5 h-3.5 rounded-full border border-line/40 cursor-pointer overflow-hidden p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border-none shrink-0"
+                                    />
+                                    <span className="text-[8px] font-mono text-text-dim uppercase leading-none">{field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleFieldVisibility(field.id)}
+                              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition border ${
+                                field.visible 
+                                  ? 'text-bad bg-bad/5 border-bad/20 hover:bg-bad/10' 
+                                  : 'text-good bg-good/5 border-good/20 hover:bg-good/10'
+                              }`}
+                            >
+                              {field.visible ? 'Del' : 'Add'}
+                            </button>
+                          </div>
                         </div>
                       );
-                    })()}
+                    })}
                   </div>
+                </div>
 
-                  {/* FIELD DESIGNER STACKED LIST */}
-                  <div className="border-t border-line/50 pt-4 space-y-3.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-text-dim block">Badge Field Configurations</span>
-                    
-                    <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 divide-y divide-line/20">
-                      {getIdCardFields(activeComp).map((field, idx, arr) => {
-                        const handleMoveField = (index: number, direction: 'up' | 'down') => {
-                          const fieldsList = getIdCardFields(activeComp);
-                          const newFields = [...fieldsList];
-                          const targetIndex = direction === 'up' ? index - 1 : index + 1;
-                          if (targetIndex < 0 || targetIndex >= newFields.length) return;
-                          
-                          // Swap order values
-                          const tempOrder = newFields[index].order;
-                          newFields[index].order = newFields[targetIndex].order;
-                          newFields[targetIndex].order = tempOrder;
-                          
-                          // Resort and save
-                          newFields.sort((a, b) => a.order - b.order);
-                          newFields.forEach((f, i) => { f.order = i; });
-                          
-                          handleUpdateIdCardFields(newFields);
-                          triggerMsg('Field layout order re-arranged.', 'ok');
-                        };
+              </div>
+            </div>
 
-                        const handleToggleFieldVisibility = (fieldId: string) => {
-                          const fieldsList = getIdCardFields(activeComp);
-                          const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, visible: !f.visible } : f);
-                          handleUpdateIdCardFields(newFields);
-                          const targetField = fieldsList.find(f => f.id === fieldId);
-                          if (targetField) {
-                            triggerMsg(targetField.visible ? `Removed "${targetField.name}" from ID card.` : `Added "${targetField.name}" to ID card.`, 'ok');
-                          }
-                        };
+            {/* Right Column: Premium High-Fidelity Large Live Preview */}
+            <div className="lg:col-span-7 bg-surface rounded-2xl border border-line p-8 flex flex-col items-center justify-center space-y-6 shadow-sm sticky top-6">
+              <div className="w-full border-b border-line/50 pb-3 flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Live Design Preview (Sample Athlete Badge)</span>
+                <span className="text-[9px] font-bold text-gold bg-gold/15 px-2.5 py-1 rounded-full border border-gold/30">Drag & Drop Enabled</span>
+              </div>
 
-                        const handleChangeFieldFontSize = (fieldId: string, size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl') => {
-                          const fieldsList = getIdCardFields(activeComp);
-                          const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, fontSize: size } : f);
-                          handleUpdateIdCardFields(newFields);
-                          triggerMsg('Font size updated.', 'ok');
-                        };
+              {/* ID CARD GRAPHIC PREVIEW CONTAINER */}
+              <div className="relative w-full max-w-[340px] aspect-[1/1.4] rounded-2xl border border-line/80 overflow-hidden shadow-2xl flex flex-col bg-gradient-to-br from-[#12211C] to-[#0A1310] animate-fade-in">
+                {activeComp.idCardBgUrl && (
+                  <>
+                    <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
+                    <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
+                  </>
+                )}
+                
+                {(() => {
+                  const demoMockupPlayer = {
+                    id: 'ATH-8899',
+                    name: 'MUHAMMAD AMIRUL',
+                    club: 'KUALA LUMPUR DRAGONS',
+                    event: 'Kyorugi (Sparring)',
+                    ageGroup: 'Junior (15-17)',
+                    gender: 'MALE',
+                    weightClass: 'Under 55kg',
+                    dob: '2010-04-12',
+                    photo: ''
+                  };
+                  const p = demoMockupPlayer;
+                  const belt = '#000000'; // Black belt default mockup
+                  const fieldsList = getIdCardFields(activeComp);
+                  
+                  const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
+                    const map: Record<string, string> = {
+                      'xs': '8px',
+                      'sm': '10px',
+                      'base': '12px',
+                      'lg': '14px',
+                      'xl': '17px',
+                      '2xl': '21px',
+                      '3xl': '25px'
+                    };
+                    return map[size] || defaultVal;
+                  };
 
-                        const handleChangeFieldAlign = (fieldId: string, align: 'left' | 'center' | 'right') => {
-                          const fieldsList = getIdCardFields(activeComp);
-                          const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, align } : f);
-                          handleUpdateIdCardFields(newFields);
-                          triggerMsg('Field alignment updated.', 'ok');
-                        };
-
-                        const handleChangeFieldColor = (fieldId: string, colorHex: string) => {
-                          const fieldsList = getIdCardFields(activeComp);
-                          const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, color: colorHex } : f);
-                          handleUpdateIdCardFields(newFields);
-                          triggerMsg('Font color updated.', 'ok');
-                        };
-
-                        return (
-                          <div 
-                            key={field.id} 
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData('text/plain', field.id);
-                              e.dataTransfer.effectAllowed = 'move';
-                              e.currentTarget.classList.add('opacity-40');
-                            }}
-                            onDragEnd={(e) => {
-                              e.currentTarget.classList.remove('opacity-40');
-                            }}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              e.currentTarget.classList.add('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
-                            }}
-                            onDragLeave={(e) => {
-                              e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
-                              const draggedId = e.dataTransfer.getData('text/plain');
-                              if (draggedId && draggedId !== field.id) {
-                                handleSwapFields(draggedId, field.id);
-                              }
-                            }}
-                            className="pt-2.5 first:pt-0 space-y-1.5 border border-transparent p-1 hover:bg-white/5 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-150"
-                          >
-                            <div className="flex justify-between items-center">
-                              <div className="flex items-center space-x-1.5 min-w-0">
-                                <GripVertical className="w-3 h-3 text-text-dim/40 cursor-grab shrink-0" />
-                                <span className="text-[11px] font-bold text-text uppercase tracking-wide truncate max-w-[150px]">{field.name}</span>
-                              </div>
-                              <span className={`text-[8px] uppercase font-bold tracking-widest ${field.visible ? 'text-good' : 'text-bad'}`}>
-                                {field.visible ? 'Visible' : 'Deleted'}
-                              </span>
+                  return (
+                    <div className="relative z-10 h-full flex-1 flex flex-col justify-between text-[11px] py-3">
+                      {fieldsList.filter(f => f.visible).map(field => {
+                        if (field.id === 'header') {
+                          return (
+                            <div key="header" className={`h-8.5 bg-gradient-to-r from-hong via-hong to-chong flex ${
+                              field.align === 'left' ? 'justify-start gap-1.5' :
+                              field.align === 'right' ? 'justify-end gap-1.5' :
+                              field.align === 'center' ? 'justify-center gap-1.5' :
+                              'justify-between'
+                            } items-center px-3.5 shrink-0 shadow-sm w-full`}>
+                              <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                              <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event}</span>
                             </div>
+                          );
+                        }
+                        if (field.id === 'belt') {
+                          return (
+                            <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }}></div>
+                          );
+                        }
 
-                            <div className="flex items-center justify-between gap-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <div className="flex items-center border border-line rounded overflow-hidden bg-ink">
-                                  <button
-                                    type="button"
-                                    disabled={idx === 0}
-                                    onClick={() => handleMoveField(idx, 'up')}
-                                    className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
-                                  >
-                                    ▲
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={idx === arr.length - 1}
-                                    onClick={() => handleMoveField(idx, 'down')}
-                                    className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
-                                  >
-                                    ▼
-                                  </button>
-                                </div>
-
-                                {/* Alignment Selector */}
-                                {['header', 'photo', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
-                                  <select
-                                    value={field.align || (field.id === 'qrcode' ? 'left' : 'center')}
-                                    onChange={(e) => handleChangeFieldAlign(field.id, e.target.value as any)}
-                                    className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
-                                    title="Align Element"
-                                  >
-                                    <option value="left">L Align</option>
-                                    <option value="center">C Align</option>
-                                    <option value="right">R Align</option>
-                                  </select>
-                                )}
-
-                                {['header', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
-                                  <div className="flex items-center gap-1.5">
-                                    <select
-                                      value={field.fontSize}
-                                      onChange={(e) => handleChangeFieldFontSize(field.id, e.target.value as any)}
-                                      className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
-                                      title="Font Size"
-                                    >
-                                      <option value="xs">XS</option>
-                                      <option value="sm">SM</option>
-                                      <option value="base">MD</option>
-                                      <option value="lg">LG</option>
-                                      <option value="xl">XL</option>
-                                      <option value="2xl">2X</option>
-                                      <option value="3xl">3X</option>
-                                    </select>
-
-                                    <div className="relative flex items-center bg-ink border border-line rounded px-1.5 py-0.5 gap-1.5" title="Font Color">
-                                      <input
-                                        type="color"
-                                        value={field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}
-                                        onChange={(e) => handleChangeFieldColor(field.id, e.target.value)}
-                                        className="w-3.5 h-3.5 rounded-full border border-line/40 cursor-pointer overflow-hidden p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border-none shrink-0"
-                                      />
-                                      <span className="text-[8px] font-mono text-text-dim uppercase leading-none">{field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}</span>
+                        // Render interactive card items in high fidelity
+                        return (
+                          <div key={field.id} className="px-4.5 py-1 shrink-0">
+                            {(() => {
+                              if (field.id === 'photo') {
+                                return (
+                                  <div className={`flex ${
+                                    field.align === 'left' ? 'justify-start' :
+                                    field.align === 'right' ? 'justify-end' :
+                                    'justify-center'
+                                  }`}>
+                                    <div className="w-14 h-16 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
+                                      <User className="w-5 h-5 text-text-dim/40 mx-auto" />
                                     </div>
                                   </div>
-                                )}
-                              </div>
+                                );
+                              }
+                              if (field.id === 'name') {
+                                return (
+                                  <div className={
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }>
+                                    <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2" style={{ fontSize: getFontSizePx(field.fontSize, '12px'), color: field.color || '#ffffff' }}>{p.name}</h3>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'club') {
+                                return (
+                                  <div className={
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }>
+                                    <p className="uppercase tracking-widest font-semibold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'athleteId') {
+                                return (
+                                  <div className={
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }>
+                                    <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'metadata') {
+                                return (
+                                  <div className={`grid grid-cols-2 gap-2 text-[9px] border-t border-line/30 pt-2 ${
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }`}>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
+                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
+                                      <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.gender}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
+                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
+                                      <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.dob}</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'qrcode') {
+                                const containerClass = 
+                                  field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
+                                  field.align === 'center' ? 'flex flex-col items-center justify-center gap-1.5 text-center' :
+                                  'flex items-center justify-between';
+                                
+                                const textAlignmentClass = 
+                                  field.align === 'right' ? 'text-left min-w-0' :
+                                  field.align === 'center' ? 'text-center min-w-0' :
+                                  'text-right min-w-0';
 
-                              <button
-                                type="button"
-                                onClick={() => handleToggleFieldVisibility(field.id)}
-                                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition border ${
-                                  field.visible 
-                                    ? 'text-bad bg-bad/5 border-bad/20 hover:bg-bad/10' 
-                                    : 'text-good bg-good/5 border-good/20 hover:bg-good/10'
-                                }`}
-                              >
-                                {field.visible ? 'Del' : 'Add'}
-                              </button>
-                            </div>
+                                return (
+                                  <div className={`${containerClass} border-t border-dashed border-line/30 pt-2`}>
+                                    <div className="bg-white p-0.5 rounded inline-block shadow shrink-0">
+                                      <QRCodeSVG 
+                                        value={`${activeComp.id}::${p.id}`} 
+                                        size={32} 
+                                        level="M" 
+                                        includeMargin={false}
+                                      />
+                                    </div>
+                                    <div className={textAlignmentClass}>
+                                      <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                                      <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                         );
                       })}
                     </div>
-                  </div>
+                  );
+                })()}
+              </div>
 
-                </div>
+              <div className="text-center max-w-md bg-ink/20 border border-line rounded-xl p-3">
+                <span className="text-[10px] font-bold text-gold uppercase tracking-wider block mb-1">Visual Design Guidelines</span>
+                <p className="text-[10px] text-text-dim leading-relaxed">
+                  Badges will auto-scale to standard physical CR80 sizes (3.375" x 2.125") upon PDF compilation and batch printing. Use the live mockup above to preview placement & layout proportions.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+          </div>
+        )}
+
+        {/* PUBLIC VIEW SCREEN */}
+        {screen === 'publicView' && activeComp && (
+          <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
+            
+            {/* Header section */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-surface p-6 rounded-2xl border border-line shadow-sm gap-4">
+              <div>
+                <h2 className="text-xl font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <Users className="w-5 h-5 text-gold" />
+                  Public Directory
+                </h2>
+                <p className="text-sm font-semibold text-gold mt-1">{activeComp.name}</p>
+              </div>
+              <div className="text-xs text-text-dim text-right bg-ink/30 px-3.5 py-2 rounded-xl border border-line flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse"></span>
+                <span>Live Public Bulletin (Read Only)</span>
               </div>
             </div>
 
+            {/* Registered Entrants section */}
+            <div className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-line/50">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
+                  <p className="text-xs text-text-dim">Search and verify registered competitors and their live weigh-in status below.</p>
+                </div>
+                {/* Search Bar */}
+                <div className="relative w-full sm:w-72">
+                  <input 
+                    type="text" 
+                    placeholder="Search name, ID, or club..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text pl-9 focus:outline-none focus:border-gold transition"
+                  />
+                  <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-3 top-2.5" />
+                  {searchQuery && (
+                    <button 
+                      onClick={() => setSearchQuery('')}
+                      className="text-text-dim hover:text-text absolute right-3 top-2 text-xs font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {coachFilteredPlayers.length === 0 ? (
+                <div className="text-center py-12 text-text-dim border border-line border-dashed rounded-xl">
+                  {players.length === 0 ? "No competitors registered for this tournament yet." : "No competitors matched your search query."}
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-line">
+                  <table className="w-full text-left text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-text-dim">
+                        <th className="p-4 font-semibold">ID</th>
+                        <th className="p-4 font-semibold">Athlete Name</th>
+                        <th className="p-4 font-semibold">Club/Team</th>
+                        <th className="p-4 font-semibold">Division Category</th>
+                        <th className="p-4 font-semibold">Weight Division</th>
+                        <th className="p-4 font-semibold">Weigh-In Scale status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line/30 text-xs">
+                      {coachFilteredPlayers.map(p => (
+                        <tr key={p.id} className="hover:bg-surface-2/30 transition">
+                          <td className="p-4 font-mono text-gold font-bold">{p.id}</td>
+                          <td className="p-4 font-bold text-text">{p.name}</td>
+                          <td className="p-4 text-text">{p.club}</td>
+                          <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
+                          <td className="p-4 text-text-dim">{p.weightClass}</td>
+                          <td className="p-4">
+                            <div className="flex flex-col gap-1 items-start">
+                              {renderBadge(p.weighIn?.result)}
+                              {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
           </div>
-        </div>
         )}
 
       </main>
@@ -4938,19 +6242,35 @@ export default function App() {
 
                         <div className="pt-3 border-t border-line/40 flex justify-between items-center bg-surface-2/10">
                           <span className="text-[10px] font-mono text-text-dim font-bold uppercase tracking-wider">ID: {ma.id}</span>
-                          <button 
-                            onClick={() => {
-                              if (confirm(`Are you sure you want to delete ${ma.name} from the local athlete database? This action is irreversible.`)) {
-                                const updated = { ...masterAthletes };
-                                delete updated[ma.id];
-                                saveMasterAthletesToStorage(updated);
-                                triggerMsg('Athlete profile removed from database successfully!', 'ok');
-                              }
-                            }}
-                            className="text-[10px] text-hong hover:text-white border border-hong/20 hover:bg-hong/90 px-2.5 py-1.5 rounded-lg transition font-bold cursor-pointer"
-                          >
-                            Delete Profile
-                          </button>
+                          {confirmDeleteAthleteId === ma.id ? (
+                            <div className="flex items-center space-x-1">
+                              <button 
+                                onClick={() => {
+                                  const updated = { ...masterAthletes };
+                                  delete updated[ma.id];
+                                  saveMasterAthletesToStorage(updated);
+                                  setConfirmDeleteAthleteId(null);
+                                  triggerMsg('Athlete profile removed from database successfully!', 'ok');
+                                }}
+                                className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-bold shadow-sm cursor-pointer"
+                              >
+                                Confirm
+                              </button>
+                              <button 
+                                onClick={() => setConfirmDeleteAthleteId(null)}
+                                className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => setConfirmDeleteAthleteId(ma.id)}
+                              className="text-[10px] text-hong hover:text-white border border-hong/20 hover:bg-hong/90 px-2.5 py-1.5 rounded-lg transition font-bold cursor-pointer"
+                            >
+                              Delete Profile
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -6063,6 +7383,52 @@ export default function App() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* PAYMENT RECEIPT MODAL */}
+      {selectedClubReceipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/85 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col p-6 space-y-4">
+            <div className="flex justify-between items-center pb-3 border-b border-line">
+              <div>
+                <h3 className="text-sm font-bold text-text uppercase tracking-wider">{selectedClubReceipt.clubName} Payment Receipt</h3>
+                <p className="text-[10px] text-text-dim uppercase tracking-wider">Uploaded at {selectedClubReceipt.uploadedAt}</p>
+              </div>
+              <button 
+                onClick={() => setSelectedClubReceipt(null)}
+                className="text-text-dim hover:text-text bg-line/20 hover:bg-line/40 p-1.5 rounded-full transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="flex-1 bg-ink/40 rounded-2xl p-2 border border-line/50 flex items-center justify-center min-h-[300px] max-h-[500px] overflow-y-auto">
+              <img 
+                src={selectedClubReceipt.receiptUrl} 
+                alt="Payment Receipt" 
+                className="max-w-full max-h-[480px] object-contain rounded-lg"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <a 
+                href={selectedClubReceipt.receiptUrl} 
+                download={`Receipt-${selectedClubReceipt.clubName.replace(/\s+/g, '-')}.png`}
+                className="bg-gold text-ink hover:opacity-90 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download File</span>
+              </a>
+              <button 
+                onClick={() => setSelectedClubReceipt(null)}
+                className="bg-ink text-text-dim border border-line hover:text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

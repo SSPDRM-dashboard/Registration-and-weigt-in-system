@@ -32,6 +32,11 @@ export interface IdCardField {
   align?: 'left' | 'center' | 'right';
 }
 
+export interface ClubReceipt {
+  receiptUrl: string;
+  uploadedAt: string;
+}
+
 export interface Competition {
   id: string;
   name: string;
@@ -45,6 +50,15 @@ export interface Competition {
   isActive?: boolean;
   idCardBgUrl?: string;
   idCardFields?: IdCardField[];
+  bankName?: string;
+  bankAccount?: string;
+  bankQrCode?: string;
+  kyorugiFee?: string;
+  poomsaeFee?: string;
+  paraFee?: string;
+  virtualFee?: string;
+  receipts?: Record<string, ClubReceipt>;
+  publicViewPassword?: string;
 }
 
 export interface Coach {
@@ -52,6 +66,8 @@ export interface Coach {
   password?: string;
   name: string;
   club: string;
+  phone?: string;
+  email?: string;
 }
 
 export interface Organizer {

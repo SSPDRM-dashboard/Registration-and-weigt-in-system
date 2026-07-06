@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import { 
   initializeFirestore, 
   collection, 
@@ -7,9 +8,36 @@ import {
   setDoc, 
   deleteDoc, 
   query, 
-  where 
+  where,
+  onSnapshot
 } from 'firebase/firestore';
 import { Competition, Player, Coach, Organizer } from './types';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
 
 const firebaseConfig = {
   projectId: "gen-lang-client-0374681556",
@@ -21,9 +49,31 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = initializeFirestore(app, {}, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
+const db = initializeFirestore(app, { ignoreUndefinedProperties: true }, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
+const auth = getAuth(app);
 
-export { db };
+export { db, auth };
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // --- FIRESTORE HELPERS ---
 
@@ -37,7 +87,7 @@ export async function fetchCompetitions(): Promise<Competition[]> {
     });
     return list;
   } catch (error) {
-    console.error('Error fetching competitions from Firestore:', error);
+    handleFirestoreError(error, OperationType.GET, 'competitions');
     return [];
   }
 }
@@ -47,7 +97,7 @@ export async function saveCompetition(comp: Competition): Promise<void> {
     const docRef = doc(db, 'competitions', comp.id);
     await setDoc(docRef, comp);
   } catch (error) {
-    console.error('Error saving competition to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, `competitions/${comp.id}`);
   }
 }
 
@@ -56,7 +106,7 @@ export async function deleteCompetition(compId: string): Promise<void> {
     const docRef = doc(db, 'competitions', compId);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting competition from Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, `competitions/${compId}`);
   }
 }
 
@@ -73,7 +123,7 @@ export async function fetchCoaches(): Promise<Record<string, Coach>> {
     });
     return coaches;
   } catch (error) {
-    console.error('Error fetching coaches from Firestore:', error);
+    handleFirestoreError(error, OperationType.GET, 'coaches');
     return {};
   }
 }
@@ -84,7 +134,7 @@ export async function saveCoach(coach: Coach): Promise<void> {
     const docRef = doc(db, 'coaches', coach.username);
     await setDoc(docRef, coach);
   } catch (error) {
-    console.error('Error saving coach to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, `coaches/${coach.username}`);
   }
 }
 
@@ -93,7 +143,7 @@ export async function deleteCoach(username: string): Promise<void> {
     const docRef = doc(db, 'coaches', username);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting coach from Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, `coaches/${username}`);
   }
 }
 
@@ -110,7 +160,7 @@ export async function fetchOrganizers(): Promise<Record<string, Organizer>> {
     });
     return organizers;
   } catch (error) {
-    console.error('Error fetching organizers from Firestore:', error);
+    handleFirestoreError(error, OperationType.GET, 'organizers');
     return {};
   }
 }
@@ -121,7 +171,7 @@ export async function saveOrganizer(organizer: Organizer): Promise<void> {
     const docRef = doc(db, 'organizers', organizer.username);
     await setDoc(docRef, organizer);
   } catch (error) {
-    console.error('Error saving organizer to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, `organizers/${organizer.username}`);
   }
 }
 
@@ -130,7 +180,7 @@ export async function deleteOrganizer(username: string): Promise<void> {
     const docRef = doc(db, 'organizers', username);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting organizer from Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, `organizers/${username}`);
   }
 }
 
@@ -147,7 +197,7 @@ export async function fetchMasterAthletes(): Promise<Record<string, Partial<Play
     });
     return master;
   } catch (error) {
-    console.error('Error fetching masterAthletes from Firestore:', error);
+    handleFirestoreError(error, OperationType.GET, 'masterAthletes');
     return {};
   }
 }
@@ -158,7 +208,7 @@ export async function saveMasterAthlete(athlete: Partial<Player>): Promise<void>
     const docRef = doc(db, 'masterAthletes', athlete.id);
     await setDoc(docRef, athlete);
   } catch (error) {
-    console.error('Error saving master athlete to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, `masterAthletes/${athlete.id}`);
   }
 }
 
@@ -167,7 +217,7 @@ export async function deleteMasterAthlete(id: string): Promise<void> {
     const docRef = doc(db, 'masterAthletes', id);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting master athlete from Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, `masterAthletes/${id}`);
   }
 }
 
@@ -182,7 +232,7 @@ export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
     });
     return players;
   } catch (error) {
-    console.error(`Error fetching players for comp ${compId} from Firestore:`, error);
+    handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
     return [];
   }
 }
@@ -192,7 +242,7 @@ export async function savePlayerToFirestore(player: Player): Promise<void> {
     const docRef = doc(db, 'players', player.id);
     await setDoc(docRef, player);
   } catch (error) {
-    console.error('Error saving player to Firestore:', error);
+    handleFirestoreError(error, OperationType.WRITE, `players/${player.id}`);
   }
 }
 
@@ -201,6 +251,24 @@ export async function deletePlayerFromFirestore(playerId: string): Promise<void>
     const docRef = doc(db, 'players', playerId);
     await deleteDoc(docRef);
   } catch (error) {
-    console.error('Error deleting player from Firestore:', error);
+    handleFirestoreError(error, OperationType.DELETE, `players/${playerId}`);
   }
+}
+
+export function subscribeToPlayersForComp(compId: string, callback: (players: Player[]) => void, onError: (error: Error) => void): () => void {
+  const colRef = collection(db, 'players');
+  const q = query(colRef, where('compId', '==', compId));
+  
+  const unsubscribe = onSnapshot(q, (snap) => {
+    const players: Player[] = [];
+    snap.forEach((doc) => {
+      players.push(doc.data() as Player);
+    });
+    callback(players);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
+    onError(error as Error);
+  });
+  
+  return unsubscribe;
 }
