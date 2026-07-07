@@ -4,7 +4,7 @@ import {
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
-  Printer, Database, X, Coins
+  Printer, Database, X, Coins, PenTool
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
@@ -31,6 +31,7 @@ import {
 } from './firebase';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import SignatureCanvas from 'react-signature-canvas';
 
 const parseFeeToNumber = (feeStr: string | undefined | null): number => {
   if (!feeStr) return 0;
@@ -68,6 +69,7 @@ export default function App() {
   const [msg, setMsg] = useState<{ text: string; type: 'error' | 'ok' } | null>(null);
   const [scanning, setScanning] = useState<boolean>(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const [showSignatures, setShowSignatures] = useState<boolean>(false);
   
   // Modals & confirmation
   const [confirmImport, setConfirmImport] = useState<boolean>(false);
@@ -114,6 +116,7 @@ export default function App() {
   const [autoFocusScanner, setAutoFocusScanner] = useState<boolean>(true);
   const [isScannerFocused, setIsScannerFocused] = useState<boolean>(false);
   const hardwareInputRef = useRef<HTMLInputElement>(null);
+  const sigCanvas = useRef<SignatureCanvas>(null);
 
   useEffect(() => {
     if (screen === 'officialScan' && scannerMode === 'hardware' && autoFocusScanner && !scanResult) {
@@ -137,6 +140,7 @@ export default function App() {
   const [poomsaeFeeInput, setPoomsaeFeeInput] = useState('');
   const [paraFeeInput, setParaFeeInput] = useState('');
   const [virtualFeeInput, setVirtualFeeInput] = useState('');
+  const [feeUpdateSuccess, setFeeUpdateSuccess] = useState(false);
   const [selectedClubReceipt, setSelectedClubReceipt] = useState<{ clubName: string; receiptUrl: string; uploadedAt: string } | null>(null);
 
   useEffect(() => {
@@ -220,6 +224,7 @@ export default function App() {
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState('');
+  const [publicSearchQuery, setPublicSearchQuery] = useState('');
 
   // Master Athlete Search Engine states
   const [masterSearchQuery, setMasterSearchQuery] = useState<string>('');
@@ -572,7 +577,8 @@ export default function App() {
     });
     try {
       await saveCompsToStorage(updatedComps);
-      triggerMsg('Participant event fees updated successfully.', 'ok');
+      setFeeUpdateSuccess(true);
+      setTimeout(() => setFeeUpdateSuccess(false), 3000);
     } catch (e) {
       // Error is handled/displayed in saveCompsToStorage
     }
@@ -1479,6 +1485,11 @@ export default function App() {
       triggerMsg('Please specify a positive numeric weight measurement.', 'error');
       return;
     }
+    
+    let signatureData = undefined;
+    if (sigCanvas.current && !sigCanvas.current.isEmpty()) {
+      signatureData = sigCanvas.current.toDataURL();
+    }
 
     const currentComp = competitions.find(c => c.id === compId);
     if (!currentComp) return;
@@ -1491,7 +1502,8 @@ export default function App() {
           weighIn: {
             weight: val,
             time: new Date().toISOString(),
-            result: autoResult as any
+            result: autoResult as any,
+            signature: signatureData
           }
         };
       }
@@ -1502,6 +1514,9 @@ export default function App() {
     const updatedPlayer = updated.find(p => p.id === scanResult);
     if (updatedPlayer?.weighIn) {
       triggerMsg(`Weigh-in recorded: ${val}kg. Outcome: ${updatedPlayer.weighIn.result}`, updatedPlayer.weighIn.result.includes('PASS') ? 'ok' : 'error');
+    }
+    if (sigCanvas.current) {
+      sigCanvas.current.clear();
     }
     setScanResult(null);
     setActualWeightInput('');
@@ -1746,6 +1761,12 @@ export default function App() {
                           p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           p.club.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesUser && matchesSearch;
+  });
+
+  const publicFilteredPlayers = players.filter(p => {
+    return p.name.toLowerCase().includes(publicSearchQuery.toLowerCase()) || 
+           p.id.toLowerCase().includes(publicSearchQuery.toLowerCase()) ||
+           p.club.toLowerCase().includes(publicSearchQuery.toLowerCase());
   });
 
   const activeComp = competitions.find(c => c.id === compId);
@@ -2686,7 +2707,7 @@ export default function App() {
                             <td className="p-4">
                               <div className="flex flex-col gap-1 items-start">
                                 {renderBadge(p.weighIn?.result)}
-                                {p.weighIn && (
+                                {p.weighIn && !activeComp?.hideScaleReadout && (
                                   <span className="text-[10px] text-text-dim">
                                     Observed: <strong>{p.weighIn.weight}kg</strong>
                                   </span>
@@ -3626,9 +3647,9 @@ export default function App() {
                           )}
                         </div>
 
-                        <div>
-                          <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Official Actual weight measurement (kg)</label>
-                          <div className="flex space-x-2">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Official Actual weight measurement (kg)</label>
                             <input 
                                type="number" 
                                step="0.01"
@@ -3636,15 +3657,35 @@ export default function App() {
                                onChange={(e) => setActualWeightInput(e.target.value)}
                                onKeyDown={(e) => { if (e.key === 'Enter') handleRecordWeighIn(); }}
                                placeholder="e.g. 54.8" 
-                               className="flex-1 bg-ink border border-line text-sm font-mono rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                               className="w-full bg-ink border border-line text-sm font-mono rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
                             />
-                            <button 
-                              onClick={handleRecordWeighIn}
-                              className="bg-gold hover:opacity-90 text-ink font-bold px-5 py-2.5 rounded-xl text-xs shadow-md"
-                            >
-                              Record Entry
-                            </button>
                           </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5 flex justify-between items-center">
+                              Player Signature
+                              <button 
+                                onClick={() => sigCanvas.current?.clear()}
+                                className="text-[10px] text-text-dim hover:text-text border border-line rounded px-1.5 py-0.5 bg-ink"
+                              >
+                                clear
+                              </button>
+                            </label>
+                            <div className="border border-line rounded-xl bg-white overflow-hidden h-32 relative">
+                              <SignatureCanvas 
+                                ref={sigCanvas} 
+                                penColor="black"
+                                canvasProps={{ className: 'w-full h-full' }} 
+                              />
+                            </div>
+                          </div>
+
+                          <button 
+                            onClick={handleRecordWeighIn}
+                            className="w-full bg-gold hover:opacity-90 text-ink font-bold px-5 py-3 rounded-xl text-sm shadow-md"
+                          >
+                            Record Entry & Signature
+                          </button>
                         </div>
 
                         {p.weighIn && (
@@ -4395,6 +4436,37 @@ export default function App() {
                 </div>
               </div>
 
+              {/* COACH SCALE READOUT TOGGLE */}
+              <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-gold" />
+                  Coach View Scale Readout
+                </h3>
+                <p className="text-xs text-text-dim">Toggle whether coaches can see the exact weight values recorded by officials during weigh-in, or just the pass/fail result.</p>
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => {
+                      if (!compId) return;
+                      const updated = competitions.map(c => 
+                        c.id === compId ? { ...c, hideScaleReadout: !c.hideScaleReadout } : c
+                      );
+                      saveCompsToStorage(updated);
+                      triggerMsg(`Scale readout is now ${!activeComp.hideScaleReadout ? 'hidden' : 'visible'} for coaches.`, 'ok');
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${!activeComp.hideScaleReadout ? 'bg-gold' : 'bg-line'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        !activeComp.hideScaleReadout ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <span className="text-sm font-semibold text-text">
+                    {!activeComp.hideScaleReadout ? 'Visible to Coaches' : 'Hidden from Coaches'}
+                  </span>
+                </div>
+              </div>
+
               {/* DEMO DATA LOADER */}
               {activeComp.id === 'tmremaja25' || activeComp.id === 'tmremaja2026' ? (
                 <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
@@ -5082,6 +5154,7 @@ export default function App() {
                         <th className="p-4">Division Category</th>
                         <th className="p-4">Weight Division</th>
                         <th className="p-4">Weigh-In Scale status</th>
+                        {showSignatures && <th className="p-4 text-center">Signature</th>}
                         <th className="p-4 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -5106,6 +5179,15 @@ export default function App() {
                               {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
                             </div>
                           </td>
+                          {showSignatures && (
+                          <td className="p-4 text-center">
+                            {p.weighIn?.signature ? (
+                              <img src={p.weighIn.signature} alt="Signature" className="h-8 inline-block bg-white rounded px-1 object-contain border border-line" />
+                            ) : (
+                              <span className="text-[10px] text-text-dim/50 italic">No signature</span>
+                            )}
+                          </td>
+                        )}
                           <td className="p-4 text-right whitespace-nowrap">
                             {confirmDeleteId === p.id ? (
                               <div className="flex items-center justify-end gap-1">
@@ -5380,7 +5462,13 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex justify-end pt-2">
+                  <div className="flex justify-end items-center gap-3 pt-2">
+                    {feeUpdateSuccess && (
+                      <span className="text-emerald-500 text-xs font-bold animate-fade-in flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Setup Successful
+                      </span>
+                    )}
                     <button
                       onClick={() => handleUpdateEventFees(kyorugiFeeInput, poomsaeFeeInput, paraFeeInput, virtualFeeInput)}
                       className="bg-gold hover:opacity-90 text-ink px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer animate-fade-in"
@@ -5508,30 +5596,64 @@ export default function App() {
 
             <div className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-line/50">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
-                {players.length > 0 && (
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                    <button 
-                      onClick={downloadWeighInExcel}
-                      className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download Total Summary (Excel)</span>
-                    </button>
-                    <button 
-                      onClick={() => setShowPrintAllCardsModal(true)}
-                      className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
-                    >
-                      <Printer className="w-4 h-4" />
-                      <span>Print & Download ID Cards</span>
-                    </button>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
+                  <p className="text-[10px] text-text-dim">Search, edit, or manage weigh-ins for all registered athletes.</p>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                  {/* Search Bar */}
+                  <div className="relative w-full sm:w-64">
+                    <input 
+                      type="text" 
+                      placeholder="Search name, ID, or club..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text pl-9 focus:outline-none focus:border-gold transition"
+                    />
+                    <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-3 top-2.5" />
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery('')}
+                        className="text-text-dim hover:text-text absolute right-3 top-2 text-xs font-bold"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
-                )}
+                  
+                  {players.length > 0 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowSignatures(!showSignatures)}
+                        className={`border font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer ${showSignatures ? 'bg-gold text-ink border-gold' : 'bg-surface-2 text-text border-line hover:bg-line'}`}
+                        title="Toggle Player Signatures"
+                      >
+                        <PenTool className="w-4 h-4" />
+                        <span className="hidden sm:inline">{showSignatures ? 'Hide Signatures' : 'Show Signatures'}</span>
+                      </button>
+                      <button 
+                        onClick={downloadWeighInExcel}
+                        className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                        title="Download Total Summary (Excel)"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setShowPrintAllCardsModal(true)}
+                        className="bg-gold hover:opacity-90 text-ink font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer whitespace-nowrap"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>Print All</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {players.length === 0 ? (
+              {coachFilteredPlayers.length === 0 ? (
                 <div className="text-center py-12 text-text-dim border border-line border-dashed rounded-xl">
-                  No competitors registered for this tournament yet.
+                  {players.length === 0 ? "No competitors registered for this tournament yet." : "No competitors matched your search query."}
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-line">
@@ -5544,11 +5666,12 @@ export default function App() {
                         <th className="p-4">Division Category</th>
                         <th className="p-4">Weight Division</th>
                         <th className="p-4">Weigh-In Scale status</th>
+                        {showSignatures && <th className="p-4 text-center">Signature</th>}
                         <th className="p-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line/30">
-                      {players.map(p => (
+                      {coachFilteredPlayers.map(p => (
                         <tr key={p.id} className="hover:bg-surface-2/30 transition">
                           <td className="p-4">
                             <button
@@ -5568,6 +5691,15 @@ export default function App() {
                               {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
                             </div>
                           </td>
+                          {showSignatures && (
+                          <td className="p-4 text-center">
+                            {p.weighIn?.signature ? (
+                              <img src={p.weighIn.signature} alt="Signature" className="h-8 inline-block bg-white rounded px-1 object-contain border border-line" />
+                            ) : (
+                              <span className="text-[10px] text-text-dim/50 italic">No signature</span>
+                            )}
+                          </td>
+                        )}
                           <td className="p-4 text-right whitespace-nowrap">
                             {confirmDeleteId === p.id ? (
                               <div className="flex items-center justify-end gap-1">
@@ -6064,14 +6196,14 @@ export default function App() {
                   <input 
                     type="text" 
                     placeholder="Search name, ID, or club..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    value={publicSearchQuery}
+                    onChange={(e) => setPublicSearchQuery(e.target.value)}
                     className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text pl-9 focus:outline-none focus:border-gold transition"
                   />
                   <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-3 top-2.5" />
-                  {searchQuery && (
+                  {publicSearchQuery && (
                     <button 
-                      onClick={() => setSearchQuery('')}
+                      onClick={() => setPublicSearchQuery('')}
                       className="text-text-dim hover:text-text absolute right-3 top-2 text-xs font-bold"
                     >
                       ×
@@ -6080,7 +6212,7 @@ export default function App() {
                 </div>
               </div>
 
-              {coachFilteredPlayers.length === 0 ? (
+              {publicFilteredPlayers.length === 0 ? (
                 <div className="text-center py-12 text-text-dim border border-line border-dashed rounded-xl">
                   {players.length === 0 ? "No competitors registered for this tournament yet." : "No competitors matched your search query."}
                 </div>
@@ -6098,7 +6230,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line/30 text-xs">
-                      {coachFilteredPlayers.map(p => (
+                      {publicFilteredPlayers.map(p => (
                         <tr key={p.id} className="hover:bg-surface-2/30 transition">
                           <td className="p-4 font-mono text-gold font-bold">{p.id}</td>
                           <td className="p-4 font-bold text-text">{p.name}</td>
@@ -6108,7 +6240,6 @@ export default function App() {
                           <td className="p-4">
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
-                              {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
                             </div>
                           </td>
                         </tr>

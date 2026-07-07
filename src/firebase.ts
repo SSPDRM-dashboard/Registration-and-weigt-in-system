@@ -49,7 +49,7 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = initializeFirestore(app, { ignoreUndefinedProperties: true }, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
+const db = initializeFirestore(app, { ignoreUndefinedProperties: true, experimentalForceLongPolling: true }, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
 const auth = getAuth(app);
 
 export { db, auth };

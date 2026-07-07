@@ -2,6 +2,7 @@ export interface WeighIn {
   weight: number;
   time: string;
   result: 'PASS' | 'FAIL' | 'OVERRIDE PASS' | 'OVERRIDE FAIL' | 'MANUAL';
+  signature?: string;
 }
 
 export interface Player {
@@ -59,6 +60,7 @@ export interface Competition {
   virtualFee?: string;
   receipts?: Record<string, ClubReceipt>;
   publicViewPassword?: string;
+  hideScaleReadout?: boolean;
 }
 
 export interface Coach {
