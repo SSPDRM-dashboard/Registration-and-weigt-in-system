@@ -3,6 +3,7 @@ export interface WeighIn {
   time: string;
   result: 'PASS' | 'FAIL' | 'OVERRIDE PASS' | 'OVERRIDE FAIL' | 'MANUAL';
   signature?: string;
+  stationId?: string;
 }
 
 export interface Player {
@@ -79,3 +80,29 @@ export interface Organizer {
   name: string;
   compId: string;
 }
+
+export interface Referee {
+  id: string;
+  compId: string;
+  fullName: string;
+  nric: string;
+  phone: string;
+  clubName: string;
+  residentialLocation: string;
+  distance: number; // in km
+  bankName: string;
+  bankAccount: string;
+  accommodation: 'Yes' | 'No';
+  kyorugiStatus: 'IR' | 'NR' | 'SR' | 'TR';
+  poomsaeStatus: 'IR' | 'NR' | 'SR' | 'TR';
+  carPlate: string;
+  officiatingDays?: number;
+  kyorugiDays?: number;
+  poomsaeDays?: number;
+  photo?: string;
+  includeOvertime?: boolean;
+  includeOthers?: boolean;
+  specialRole?: 'None' | 'TD' | 'CSB' | 'RIC';
+  createdAt: string;
+}
+

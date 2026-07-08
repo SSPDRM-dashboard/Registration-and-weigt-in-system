@@ -48,6 +48,42 @@
       "dob": "string",
       "gender": "string",
       "club": "string"
+    },
+    "referees": {
+      "id": "string",
+      "compId": "string",
+      "fullName": "string",
+      "nric": "string",
+      "phone": "string",
+      "clubName": "string",
+      "residentialLocation": "string",
+      "distance": "number",
+      "bankName": "string",
+      "bankAccount": "string",
+      "accommodation": "string",
+      "kyorugiStatus": "string",
+      "poomsaeStatus": "string",
+      "carPlate": "string",
+      "specialRole": "string",
+      "createdAt": "string"
+    },
+    "refereeAccounts": {
+      "id": "string",
+      "fullName": "string",
+      "nric": "string",
+      "phone": "string",
+      "clubName": "string",
+      "residentialLocation": "string",
+      "distance": "number",
+      "bankName": "string",
+      "bankAccount": "string",
+      "accommodation": "string",
+      "kyorugiStatus": "string",
+      "poomsaeStatus": "string",
+      "carPlate": "string",
+      "photo": "string",
+      "specialRole": "string",
+      "createdAt": "string"
     }
   }
 }

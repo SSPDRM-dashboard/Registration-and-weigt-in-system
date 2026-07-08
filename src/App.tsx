@@ -4,12 +4,12 @@ import {
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
-  Printer, Database, X, Coins, PenTool
+  Printer, Database, X, Coins, PenTool, Home, Shield, Save
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
-import { Competition, Player, Coach, WeighIn, Organizer } from './types';
+import { Competition, Player, Coach, WeighIn, Organizer, Referee } from './types';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
 import { 
   fetchCompetitions, 
@@ -27,7 +27,16 @@ import {
   fetchPlayersForComp, 
   subscribeToPlayersForComp,
   savePlayerToFirestore, 
-  deletePlayerFromFirestore 
+  deletePlayerFromFirestore,
+  fetchRefereesForComp,
+  saveRefereeToFirestore,
+  deleteRefereeFromFirestore,
+  subscribeToRefereesForComp,
+  fetchRefereeAccounts,
+  saveRefereeAccount,
+  deleteRefereeAccount,
+  subscribeToRefereeAccounts,
+  subscribeToMyReferees
 } from './firebase';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -48,12 +57,125 @@ const formatCurrency = (amount: number, feeSample: string | undefined | null) =>
   return `${prefix}${amount.toLocaleString()}${suffix}`;
 };
 
+export const getRefereeAllowance = (r: Referee, fees: {
+  km_0_50: number;
+  km_50_100: number;
+  km_100_150: number;
+  km_150_200: number;
+  km_200_250: number;
+  km_250_300: number;
+  km_300_350: number;
+  km_350_above: number;
+  km_rate_special?: number;
+  overtime: number;
+  others: number;
+  rate_ir: number;
+  rate_nr: number;
+  rate_sr: number;
+  rate_tr: number;
+  rate_td: number;
+  rate_csb: number;
+  rate_ric: number;
+}) => {
+  const tiers = { 'IR': 4, 'NR': 3, 'SR': 2, 'TR': 1 };
+  const baseDailyRates = { 
+    'IR': fees.rate_ir, 
+    'NR': fees.rate_nr, 
+    'SR': fees.rate_sr, 
+    'TR': fees.rate_tr 
+  };
+  
+  const calculateTravelPay = (distance: number) => {
+    if (distance <= 0) return 0;
+    if (r.specialRole === 'TD' || r.specialRole === 'CSB') {
+      const specialRate = fees.km_rate_special !== undefined ? fees.km_rate_special : 0.85;
+      return distance * specialRate;
+    }
+    if (distance <= 50) return fees.km_0_50;
+    if (distance <= 100) return fees.km_50_100;
+    if (distance <= 150) return fees.km_100_150;
+    if (distance <= 200) return fees.km_150_200;
+    if (distance <= 250) return fees.km_200_250;
+    if (distance <= 300) return fees.km_250_300;
+    if (distance <= 350) return fees.km_300_350;
+    return fees.km_350_above;
+  };
+
+  const travelPay = calculateTravelPay(r.distance);
+  const otPay = r.includeOvertime ? fees.overtime : 0;
+  const othersPay = r.includeOthers ? fees.others : 0;
+  
+  const kRank = tiers[r.kyorugiStatus] || 1;
+  const pRank = tiers[r.poomsaeStatus] || 1;
+  const higherStatus = kRank >= pRank ? r.kyorugiStatus : r.poomsaeStatus;
+  
+  const stdDailyRate = r.specialRole === 'TD' 
+    ? fees.rate_td 
+    : r.specialRole === 'CSB' 
+    ? fees.rate_csb 
+    : r.specialRole === 'RIC' 
+    ? fees.rate_ric 
+    : (baseDailyRates[higherStatus] || 80);
+
+  const hasSplitDays = (r.kyorugiDays !== undefined && r.kyorugiDays > 0) || (r.poomsaeDays !== undefined && r.poomsaeDays > 0);
+  
+  let baseDutyPay = 0;
+  let totalDays = r.officiatingDays || 1;
+  let splitExplanation = "";
+
+  if (hasSplitDays) {
+    const kDays = r.kyorugiDays || 0;
+    const pDays = r.poomsaeDays || 0;
+    totalDays = kDays + pDays;
+    
+    let kRate = baseDailyRates[r.kyorugiStatus] || 80;
+    let pRate = baseDailyRates[r.poomsaeStatus] || 80;
+    
+    if (r.specialRole && r.specialRole !== 'None') {
+      kRate = stdDailyRate;
+      pRate = stdDailyRate;
+    }
+    
+    const kPay = kDays * kRate;
+    const pPay = pDays * pRate;
+    baseDutyPay = kPay + pPay;
+    
+    const explanations: string[] = [];
+    if (kDays > 0) explanations.push(`${kDays}d Kyorugi (${r.specialRole && r.specialRole !== 'None' ? r.specialRole : r.kyorugiStatus}) @ RM ${kRate}`);
+    if (pDays > 0) explanations.push(`${pDays}d Poomsae (${r.specialRole && r.specialRole !== 'None' ? r.specialRole : r.poomsaeStatus}) @ RM ${pRate}`);
+    splitExplanation = explanations.join(" + ");
+  } else if (r.specialRole && r.specialRole !== 'None') {
+    baseDutyPay = stdDailyRate * totalDays;
+    splitExplanation = `${totalDays} days as ${r.specialRole} @ RM ${stdDailyRate}/day`;
+  } else {
+    baseDutyPay = stdDailyRate * totalDays;
+    splitExplanation = `${totalDays} days (${higherStatus}) @ RM ${stdDailyRate}/day`;
+  }
+  
+  const totalPay = baseDutyPay + travelPay + otPay + othersPay;
+  
+  return {
+    baseDutyPay,
+    travelPay,
+    otPay,
+    othersPay,
+    totalPay,
+    dailyRate: stdDailyRate,
+    days: totalDays,
+    isSplit: hasSplitDays,
+    splitExplanation,
+    kyorugiDays: r.kyorugiDays || 0,
+    poomsaeDays: r.poomsaeDays || 0,
+    higherStatus
+  };
+};
+
 export default function App() {
   // --- STATE ---
   const [screen, setScreen] = useState<string>('login'); // login, coachHome, coachRoster, coachPlayerForm, idCard, adminHome, adminCompDetail, adminCompForm, officialScan, officialLog, organizerDashboard, publicView
-  const [loginTab, setLoginTab] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public'>('coach');
-  const [organizerTab, setOrganizerTab] = useState<'dashboard' | 'idCard'>('dashboard');
-  const [role, setRole] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | null>(null);
+  const [loginTab, setLoginTab] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | 'referee'>('coach');
+  const [organizerTab, setOrganizerTab] = useState<'dashboard' | 'idCard' | 'staffPasses' | 'referees'>('dashboard');
+  const [role, setRole] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | 'referee' | null>(null);
   const [user, setUser] = useState<string | null>(null); // username
   const [compId, setCompId] = useState<string | null>(null);
   
@@ -61,7 +183,34 @@ export default function App() {
   const [coaches, setCoaches] = useState<Record<string, Coach>>({});
   const [organizers, setOrganizers] = useState<Record<string, Organizer>>({});
   const [players, setPlayers] = useState<Player[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  const [refereeAccounts, setRefereeAccounts] = useState<Referee[]>([]);
+  const [staffPasses, setStaffPasses] = useState<Player[]>([]);
+  const [staffPassName, setStaffPassName] = useState('');
+  const [staffPassRole, setStaffPassRole] = useState('Coach');
+  const [staffPassClub, setStaffPassClub] = useState('');
   const [masterAthletes, setMasterAthletes] = useState<Record<string, Partial<Player>>>({});
+
+  // Referee login / registration state
+  const [refereeLoginNric, setRefereeLoginNric] = useState('');
+  const [refereeLoginComp, setRefereeLoginComp] = useState('');
+  const [activeReferee, setActiveReferee] = useState<Referee | null>(null);
+
+  // Referee Registration fields
+  const [refereeFullName, setRefereeFullName] = useState('');
+  const [refereeNric, setRefereeNric] = useState('');
+  const [refereePhone, setRefereePhone] = useState('');
+  const [refereeClubName, setRefereeClubName] = useState('');
+  const [refereeResidential, setRefereeResidential] = useState('');
+  const [refereeDistance, setRefereeDistance] = useState('');
+  const [refereeBankName, setRefereeBankName] = useState('');
+  const [refereeBankAccount, setRefereeBankAccount] = useState('');
+  const [refereeAccommodation, setRefereeAccommodation] = useState<'Yes' | 'No'>('No');
+  const [refereeKyorugiStatus, setRefereeKyorugiStatus] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
+  const [refereePoomsaeStatus, setRefereePoomsaeStatus] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
+  const [refereeCarPlate, setRefereeCarPlate] = useState('');
+  const [refereeSpecialRole, setRefereeSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
+  const [refereeConsent, setRefereeConsent] = useState(false);
 
 
   
@@ -78,7 +227,118 @@ export default function App() {
   const [confirmDeleteCoachUsername, setConfirmDeleteCoachUsername] = useState<string | null>(null);
   const [confirmDeleteOrganizerUsername, setConfirmDeleteOrganizerUsername] = useState<string | null>(null);
   const [confirmDeleteAthleteId, setConfirmDeleteAthleteId] = useState<string | null>(null);
+  const [confirmDeleteRefereeId, setConfirmDeleteRefereeId] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+
+  // Referee Fees Setup states (loaded from localStorage or initialized with defaults)
+  const [refereeFees, setRefereeFees] = useState<{
+    km_0_50: number;
+    km_50_100: number;
+    km_100_150: number;
+    km_150_200: number;
+    km_200_250: number;
+    km_250_300: number;
+    km_300_350: number;
+    km_350_above: number;
+    km_rate_special: number;
+    overtime: number;
+    others: number;
+    rate_ir: number;
+    rate_nr: number;
+    rate_sr: number;
+    rate_tr: number;
+    rate_td: number;
+    rate_csb: number;
+    rate_ric: number;
+  }>(() => {
+    return {
+      km_0_50: 55,
+      km_50_100: 75,
+      km_100_150: 95,
+      km_150_200: 115,
+      km_200_250: 135,
+      km_250_300: 155,
+      km_300_350: 175,
+      km_350_above: 220,
+      km_rate_special: 0.85,
+      overtime: 20,
+      others: 0,
+      rate_ir: 150,
+      rate_nr: 125,
+      rate_sr: 100,
+      rate_tr: 75,
+      rate_td: 250,
+      rate_csb: 200,
+      rate_ric: 175,
+    };
+  });
+
+  // Sync / Load referee fees on compId change
+  useEffect(() => {
+    if (compId) {
+      const stored = localStorage.getItem(`app:refereeFees:${compId}`);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed.km_200_300 !== undefined && parsed.km_200_250 === undefined) {
+            parsed.km_200_250 = parsed.km_200_300 - 30; // 150 default
+            parsed.km_250_300 = parsed.km_200_300; // 180 default
+            delete parsed.km_200_300;
+          }
+          setRefereeFees({
+            km_0_50: parsed.km_0_50 ?? 55,
+            km_50_100: parsed.km_50_100 ?? 75,
+            km_100_150: parsed.km_100_150 ?? 95,
+            km_150_200: parsed.km_150_200 ?? 115,
+            km_200_250: parsed.km_200_250 ?? 135,
+            km_250_300: parsed.km_250_300 ?? 155,
+            km_300_350: parsed.km_300_350 ?? 175,
+            km_350_above: parsed.km_350_above ?? 220,
+            km_rate_special: parsed.km_rate_special ?? 0.85,
+            overtime: parsed.overtime ?? 20,
+            others: parsed.others ?? 0,
+            rate_ir: parsed.rate_ir ?? 150,
+            rate_nr: parsed.rate_nr ?? 125,
+            rate_sr: parsed.rate_sr ?? 100,
+            rate_tr: parsed.rate_tr ?? 75,
+            rate_td: parsed.rate_td ?? 250,
+            rate_csb: parsed.rate_csb ?? 200,
+            rate_ric: parsed.rate_ric ?? 175,
+          });
+        } catch (e) {
+          console.error("Failed to parse stored referee fees", e);
+        }
+      } else {
+        setRefereeFees({
+          km_0_50: 55,
+          km_50_100: 75,
+          km_100_150: 95,
+          km_150_200: 115,
+          km_200_250: 135,
+          km_250_300: 155,
+          km_300_350: 175,
+          km_350_above: 220,
+          km_rate_special: 0.85,
+          overtime: 20,
+          others: 0,
+          rate_ir: 150,
+          rate_nr: 125,
+          rate_sr: 100,
+          rate_tr: 75,
+          rate_td: 250,
+          rate_csb: 200,
+          rate_ric: 175,
+        });
+      }
+    }
+  }, [compId]);
+
+  const updateRefereeFees = (newFees: typeof refereeFees) => {
+    setRefereeFees(newFees);
+    if (compId) {
+      localStorage.setItem(`app:refereeFees:${compId}`, JSON.stringify(newFees));
+    }
+  };
   
   // Theme state
   const [theme, setTheme] = useState<'emerald' | 'midnight' | 'crimson' | 'zen'>(() => {
@@ -195,9 +455,56 @@ export default function App() {
   const [cComp, setCComp] = useState('');
   const [oComp, setOComp] = useState('');
   const [oCode, setOCode] = useState('');
+  const [oStation, setOStation] = useState('Station 1');
   const [aUser, setAUser] = useState('admin');
   const [aPass, setAPass] = useState('');
   const [publicPassInput, setPublicPassInput] = useState('');
+
+  // Synchronize cComp, oComp, and refereeLoginComp with the list of active competitions
+  useEffect(() => {
+    const activeComps = competitions.filter(c => c.isActive !== false);
+    if (activeComps.length > 0) {
+      const isValidActiveC = activeComps.some(c => c.id === cComp);
+      if (!isValidActiveC) {
+        setCComp(activeComps[0].id);
+      }
+      const isValidActiveO = activeComps.some(c => c.id === oComp);
+      if (!isValidActiveO) {
+        setOComp(activeComps[0].id);
+      }
+      const isValidActiveR = activeComps.some(c => c.id === refereeLoginComp);
+      if (!isValidActiveR) {
+        setRefereeLoginComp(activeComps[0].id);
+      }
+    } else {
+      setCComp('');
+      setOComp('');
+      setRefereeLoginComp('');
+    }
+  }, [competitions, cComp, oComp, refereeLoginComp]);
+
+  // If the active tournament is set to inactive, prevent coach, official, and public access, redirecting them.
+  useEffect(() => {
+    if (compId) {
+      const currentComp = competitions.find(c => c.id === compId);
+      if (currentComp && currentComp.isActive === false) {
+        if (role === 'coach') {
+          setCompId(null);
+          if (screen === 'coachRoster' || screen === 'coachPlayerForm') {
+            setScreen('coachHome');
+          }
+          triggerMsg('This tournament is inactive. Access is disabled.', 'error');
+        } else if (role === 'official' || role === 'public' || role === 'referee') {
+          setCompId(null);
+          setRole(null);
+          setUser(null);
+          setScreen('login');
+          setActiveReferee(null);
+          triggerMsg('This tournament is inactive. Session expired.', 'error');
+        }
+      }
+    }
+  }, [role, compId, competitions, screen]);
 
   // Admin coach edit
   const [editingCoachUsername, setEditingCoachUsername] = useState<string | null>(null);
@@ -208,7 +515,7 @@ export default function App() {
   const [editCoachEmail, setEditCoachEmail] = useState('');
   
   // Admin Navigation
-  const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security'>('tournaments');
+  const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security' | 'referees'>('tournaments');
 
   const [adminPassword, setAdminPassword] = useState<string>(() => {
     return localStorage.getItem('app:adminPassword') || 'admin123';
@@ -221,6 +528,40 @@ export default function App() {
   const [orgPass, setOrgPass] = useState('');
   const [orgName, setOrgName] = useState('');
   const [orgCompId, setOrgCompId] = useState('');
+
+  // Admin Referee Accounts states
+  const [editingRefereeNric, setEditingRefereeNric] = useState<string | null>(null);
+  const [confirmDeleteRefereeAccountNric, setConfirmDeleteRefereeAccountNric] = useState<string | null>(null);
+  const [adminRefName, setAdminRefName] = useState('');
+  const [adminRefNric, setAdminRefNric] = useState('');
+  const [adminRefPhone, setAdminRefPhone] = useState('');
+  const [adminRefClub, setAdminRefClub] = useState('');
+  const [adminRefResidential, setAdminRefResidential] = useState('');
+  const [adminRefDistance, setAdminRefDistance] = useState('');
+  const [adminRefBankName, setAdminRefBankName] = useState('');
+  const [adminRefBankAccount, setAdminRefBankAccount] = useState('');
+  const [adminRefAccommodation, setAdminRefAccommodation] = useState<'Yes' | 'No'>('No');
+  const [adminRefKyorugi, setAdminRefKyorugi] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
+  const [adminRefPoomsae, setAdminRefPoomsae] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
+  const [adminRefCarPlate, setAdminRefCarPlate] = useState('');
+  const [adminRefSpecialRole, setAdminRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
+
+  // Organizer Referee Accounts and Registration states
+  const [orgEditingRefereeNric, setOrgEditingRefereeNric] = useState<string | null>(null);
+  const [orgRefName, setOrgRefName] = useState('');
+  const [orgRefNric, setOrgRefNric] = useState('');
+  const [orgRefPhone, setOrgRefPhone] = useState('');
+  const [orgRefClub, setOrgRefClub] = useState('');
+  const [orgRefResidential, setOrgRefResidential] = useState('');
+  const [orgRefDistance, setOrgRefDistance] = useState('');
+  const [orgRefBankName, setOrgRefBankName] = useState('');
+  const [orgRefBankAccount, setOrgRefBankAccount] = useState('');
+  const [orgRefAccommodation, setOrgRefAccommodation] = useState<'Yes' | 'No'>('No');
+  const [orgRefKyorugi, setOrgRefKyorugi] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
+  const [orgRefPoomsae, setOrgRefPoomsae] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
+  const [orgRefCarPlate, setOrgRefCarPlate] = useState('');
+  const [orgRefSpecialRole, setOrgRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
+  const [orgAssignSearch, setOrgAssignSearch] = useState('');
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -310,9 +651,9 @@ export default function App() {
       setCompetitions(loadedComps);
 
       if (loadedComps.length > 0) {
-        setOComp(loadedComps[0].id);
         const activeComps = loadedComps.filter(c => c.isActive !== false);
-        setCComp(activeComps[0]?.id || loadedComps[0]?.id || '');
+        setCComp(activeComps[0]?.id || '');
+        setOComp(activeComps[0]?.id || loadedComps[0]?.id || '');
       }
 
       // 2. Fetch coaches
@@ -380,6 +721,21 @@ export default function App() {
     };
 
     initData();
+  }, []);
+
+  // Subscribe to referee accounts in real-time
+  useEffect(() => {
+    const unsubscribe = subscribeToRefereeAccounts(
+      (accounts) => {
+        setRefereeAccounts(accounts);
+      },
+      (err) => {
+        console.error("Failed to sync referee accounts", err);
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Sync theme, density, and colors
@@ -470,6 +826,15 @@ export default function App() {
           }
         }
         setPlayers(loadedPlayers);
+        
+        const storedStaff = localStorage.getItem(`app:staffPasses:${compId}`);
+        if (storedStaff) {
+          try {
+            setStaffPasses(JSON.parse(storedStaff));
+          } catch (e) {}
+        } else {
+          setStaffPasses([]);
+        }
       }, (err) => {
         console.error("Failed to sync players", err);
       });
@@ -483,6 +848,32 @@ export default function App() {
       }
     };
   }, [compId]);
+
+  // Fetch referees dynamically based on role and compId
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    if (role === 'referee' && user) {
+      const cleanUser = user.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      unsubscribe = subscribeToMyReferees(cleanUser, (myReferees) => {
+        setReferees(myReferees);
+        if (compId) {
+          const matched = myReferees.find(r => r.compId === compId);
+          if (matched) setActiveReferee(matched);
+        }
+      }, (err) => console.error("Failed to sync my referees", err));
+    } else if (compId) {
+      unsubscribe = subscribeToRefereesForComp(compId, (cloudReferees) => {
+        setReferees(cloudReferees);
+      }, (err) => console.error("Failed to sync referees", err));
+    } else {
+      setReferees([]);
+    }
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [compId, role, user]);
 
   // --- NOTIFICATION HELPER ---
   const triggerMsg = (text: string, type: 'error' | 'ok') => {
@@ -683,6 +1074,11 @@ export default function App() {
     }
   };
 
+  const saveStaffPassesToStorage = (id: string, list: Player[]) => {
+    setStaffPasses(list);
+    localStorage.setItem(`app:staffPasses:${id}`, JSON.stringify(list));
+  };
+
   const savePlayersToStorage = async (id: string, list: Player[]) => {
     const prevPlayers = [...players];
     setPlayers(list);
@@ -847,13 +1243,13 @@ export default function App() {
       triggerMsg('Invalid username or password.', 'error');
       return;
     }
-    if (!cComp) {
-      triggerMsg('No active tournament selected.', 'error');
+    if (!acc.compId) {
+      triggerMsg('No tournament assigned to this organizer account.', 'error');
       return;
     }
     setRole('organizer');
     setUser(u);
-    setCompId(cComp);
+    setCompId(acc.compId);
     setScreen('organizerDashboard');
     triggerMsg(`Welcome, Organizer ${acc.name}!`, 'ok');
   };
@@ -870,6 +1266,11 @@ export default function App() {
       triggerMsg('No active tournament selected.', 'error');
       return;
     }
+    const targetComp = competitions.find(c => c.id === cComp);
+    if (!targetComp || targetComp.isActive === false) {
+      triggerMsg('The selected tournament is not active.', 'error');
+      return;
+    }
     setRole('coach');
     setUser(u);
     setScreen('coachRoster');
@@ -883,6 +1284,10 @@ export default function App() {
       return;
     }
     const targetComp = competitions.find(c => c.id === cComp);
+    if (!targetComp || targetComp.isActive === false) {
+      triggerMsg('The selected tournament is not active.', 'error');
+      return;
+    }
     if (targetComp && targetComp.publicViewPassword) {
       if (publicPassInput !== targetComp.publicViewPassword) {
         triggerMsg('Invalid public access password.', 'error');
@@ -901,6 +1306,160 @@ export default function App() {
     const updated = competitions.map(c => c.id === compId ? { ...c, publicViewPassword: password } : c);
     saveCompsToStorage(updated);
     triggerMsg('Public View access password updated.', 'ok');
+  };
+
+  const handleRefereeLogin = () => {
+    const ic = refereeLoginNric.trim();
+    if (!ic) {
+      triggerMsg('Please enter your NRIC Number.', 'error');
+      return;
+    }
+    const cleanIc = ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    // Check global referee accounts first
+    const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    if (account) {
+      setRole('referee');
+      setUser(account.nric);
+      
+      const userRefs = referees.filter(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+      if (userRefs.length === 1) {
+        setCompId(userRefs[0].compId);
+        setActiveReferee(userRefs[0]);
+      } else {
+        setCompId(null);
+        setActiveReferee({
+          ...account,
+          id: `TEMP_GLOBAL_${cleanIc}`,
+          compId: 'GLOBAL',
+        });
+      }
+      setScreen('refereeDashboard');
+      triggerMsg(`Welcome, Referee ${account.fullName}!`, 'ok');
+      return;
+    }
+
+    // Fallback/Legacy lookup
+    const legacyMatched = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    if (!legacyMatched) {
+      triggerMsg('No referee account found with this NRIC. Please register first.', 'error');
+      return;
+    }
+
+    // Create a referee account on the fly for them from their legacy tournament registration!
+    saveRefereeAccount(legacyMatched);
+    setRole('referee');
+    setUser(legacyMatched.nric);
+    
+    const userRefsLegacy = referees.filter(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    if (userRefsLegacy.length === 1) {
+      setCompId(userRefsLegacy[0].compId);
+      setActiveReferee(userRefsLegacy[0]);
+    } else {
+      setCompId(null);
+      setActiveReferee({
+        ...legacyMatched,
+        id: `TEMP_GLOBAL_${cleanIc}`,
+        compId: 'GLOBAL',
+      });
+    }
+    setScreen('refereeDashboard');
+    triggerMsg(`Welcome, Referee ${legacyMatched.fullName}!`, 'ok');
+  };
+
+  const handleRefereeRegister = async () => {
+    const compToRegister = refereeLoginComp || cComp;
+    if (!compToRegister) {
+      triggerMsg('No active tournament selected.', 'error');
+      return;
+    }
+    const targetComp = competitions.find(c => c.id === compToRegister);
+    if (!targetComp || targetComp.isActive === false) {
+      triggerMsg('The selected tournament is not active.', 'error');
+      return;
+    }
+    const name = refereeFullName.trim();
+    const ic = refereeNric.trim();
+    const phone = refereePhone.trim();
+    const club = refereeClubName.trim();
+    const resLocation = refereeResidential.trim();
+    
+    // Parse distance as optional (defaults to 0 if left blank)
+    const distVal = refereeDistance.trim() === '' ? 0 : parseFloat(refereeDistance);
+    const bank = refereeBankName.trim();
+    const account = refereeBankAccount.trim();
+    const plate = refereeCarPlate.trim();
+
+    if (!name || !ic || !phone || !club || !resLocation || !refereeKyorugiStatus || !refereePoomsaeStatus) {
+      triggerMsg('Please fill in all required (*) fields with valid values.', 'error');
+      return;
+    }
+    if (isNaN(distVal)) {
+      triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
+      return;
+    }
+    if (!refereeConsent) {
+      triggerMsg('You must agree to the PDPA consent statement to register.', 'error');
+      return;
+    }
+
+    const cleanIc = ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const alreadyExists = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === compToRegister);
+    if (alreadyExists) {
+      triggerMsg('A referee with this NRIC is already registered for this tournament.', 'error');
+      return;
+    }
+
+    const newRef: Referee = {
+      id: `${compToRegister}_${ic.replace(/[^a-zA-Z0-9]/g, '')}`,
+      compId: compToRegister,
+      fullName: name,
+      nric: ic,
+      phone: phone,
+      clubName: club,
+      residentialLocation: resLocation,
+      distance: distVal,
+      bankName: bank,
+      bankAccount: account,
+      accommodation: refereeAccommodation,
+      kyorugiStatus: refereeKyorugiStatus,
+      poomsaeStatus: refereePoomsaeStatus,
+      carPlate: plate,
+      photo: pendingPhoto || undefined,
+      specialRole: refereeSpecialRole,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await saveRefereeToFirestore(newRef);
+      await saveRefereeAccount(newRef);
+      setRole('referee');
+      setUser(newRef.nric);
+      setCompId(compToRegister);
+      setActiveReferee(newRef);
+      setScreen('refereeDashboard');
+      triggerMsg(`Registration successful! Welcome, Referee ${name}!`, 'ok');
+
+      setRefereeFullName('');
+      setRefereeNric('');
+      setRefereePhone('');
+      setRefereeClubName('');
+      setRefereeResidential('');
+      setRefereeDistance('');
+      setRefereeBankName('');
+      setRefereeBankAccount('');
+      setRefereeAccommodation('No');
+      setRefereeKyorugiStatus('TR');
+      setRefereePoomsaeStatus('TR');
+      setRefereeCarPlate('');
+      setRefereeSpecialRole('None');
+      setRefereeConsent(false);
+      setPendingPhoto(null);
+    } catch (e: any) {
+      console.error(e);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      triggerMsg(`Failed to complete registration: ${errMsg}`, 'error');
+    }
   };
 
   const handleCoachSignup = () => {
@@ -934,7 +1493,11 @@ export default function App() {
       return;
     }
     const targetComp = competitions.find(c => c.id === oComp);
-    if (!targetComp || targetComp.staffCode !== oCode) {
+    if (!targetComp || targetComp.isActive === false) {
+      triggerMsg('The selected tournament is not active.', 'error');
+      return;
+    }
+    if (targetComp.staffCode !== oCode) {
       triggerMsg('Incorrect staff passcode.', 'error');
       return;
     }
@@ -1031,6 +1594,191 @@ export default function App() {
     triggerMsg('Organizer account deleted.', 'ok');
   };
 
+  const handleAdminSaveRefereeAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminRefName.trim() || !adminRefNric.trim() || !adminRefPhone.trim()) {
+      triggerMsg('Name, NRIC, and Phone are required.', 'error');
+      return;
+    }
+    
+    const distVal = parseFloat(adminRefDistance) || 0;
+    
+    const refAcc: Referee = {
+      id: `ACC_${adminRefNric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`,
+      compId: 'GLOBAL',
+      fullName: adminRefName.trim(),
+      nric: adminRefNric.trim(),
+      phone: adminRefPhone.trim(),
+      clubName: adminRefClub.trim(),
+      residentialLocation: adminRefResidential.trim(),
+      distance: distVal,
+      bankName: adminRefBankName.trim(),
+      bankAccount: adminRefBankAccount.trim(),
+      accommodation: adminRefAccommodation,
+      kyorugiStatus: adminRefKyorugi,
+      poomsaeStatus: adminRefPoomsae,
+      carPlate: adminRefCarPlate.trim(),
+      specialRole: adminRefSpecialRole,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await saveRefereeAccount(refAcc);
+      
+      // Update any active tournament registrations for this referee
+      const matchingTournaments = referees.filter(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === refAcc.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+      for (const tRef of matchingTournaments) {
+        await saveRefereeToFirestore({
+          ...tRef,
+          fullName: refAcc.fullName,
+          phone: refAcc.phone,
+          clubName: refAcc.clubName,
+          residentialLocation: refAcc.residentialLocation,
+          distance: refAcc.distance,
+          bankName: refAcc.bankName,
+          bankAccount: refAcc.bankAccount,
+          accommodation: refAcc.accommodation,
+          kyorugiStatus: refAcc.kyorugiStatus,
+          poomsaeStatus: refAcc.poomsaeStatus,
+          carPlate: refAcc.carPlate,
+          specialRole: refAcc.specialRole
+        });
+      }
+
+      triggerMsg(editingRefereeNric ? 'Referee account updated!' : 'Referee account created!', 'ok');
+      
+      setEditingRefereeNric(null);
+      setAdminRefName('');
+      setAdminRefNric('');
+      setAdminRefPhone('');
+      setAdminRefClub('');
+      setAdminRefResidential('');
+      setAdminRefDistance('');
+      setAdminRefBankName('');
+      setAdminRefBankAccount('');
+      setAdminRefAccommodation('No');
+      setAdminRefKyorugi('TR');
+      setAdminRefPoomsae('TR');
+      setAdminRefCarPlate('');
+      setAdminRefSpecialRole('None');
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Failed to save referee account.', 'error');
+    }
+  };
+
+  const handleAdminDeleteRefereeAccount = async (nric: string) => {
+    try {
+      await deleteRefereeAccount(nric);
+      setConfirmDeleteRefereeAccountNric(null);
+      triggerMsg('Referee account deleted.', 'ok');
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Failed to delete referee account.', 'error');
+    }
+  };
+
+  const handleOrgSaveRefereeAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgRefName.trim() || !orgRefNric.trim() || !orgRefPhone.trim()) {
+      triggerMsg('Name, NRIC, and Phone are required.', 'error');
+      return;
+    }
+    
+    const distVal = parseFloat(orgRefDistance) || 0;
+    const cleanIc = orgRefNric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    
+    const refAcc: Referee = {
+      id: `ACC_${cleanIc}`,
+      compId: 'GLOBAL',
+      fullName: orgRefName.trim(),
+      nric: orgRefNric.trim(),
+      phone: orgRefPhone.trim(),
+      clubName: orgRefClub.trim(),
+      residentialLocation: orgRefResidential.trim(),
+      distance: distVal,
+      bankName: orgRefBankName.trim(),
+      bankAccount: orgRefBankAccount.trim(),
+      accommodation: orgRefAccommodation,
+      kyorugiStatus: orgRefKyorugi,
+      poomsaeStatus: orgRefPoomsae,
+      carPlate: orgRefCarPlate.trim(),
+      specialRole: orgRefSpecialRole,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      // 1. Save global account
+      await saveRefereeAccount(refAcc);
+      
+      // 2. If organizer is inside an active tournament, also save to this tournament's ledger!
+      if (compId) {
+        // Find existing registration or create new
+        const existingReg = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+        const tournamentRef: Referee = {
+          id: existingReg?.id || `REF_${compId}_${cleanIc}`,
+          compId: compId,
+          fullName: orgRefName.trim(),
+          nric: orgRefNric.trim(),
+          phone: orgRefPhone.trim(),
+          clubName: orgRefClub.trim(),
+          residentialLocation: orgRefResidential.trim(),
+          distance: distVal,
+          bankName: orgRefBankName.trim(),
+          bankAccount: orgRefBankAccount.trim(),
+          accommodation: orgRefAccommodation,
+          kyorugiStatus: orgRefKyorugi,
+          poomsaeStatus: orgRefPoomsae,
+          carPlate: orgRefCarPlate.trim(),
+          specialRole: orgRefSpecialRole,
+          officiatingDays: existingReg?.officiatingDays || 1,
+          includeOvertime: existingReg?.includeOvertime || false,
+          includeOthers: existingReg?.includeOthers || false,
+          createdAt: existingReg?.createdAt || new Date().toISOString()
+        };
+        await saveRefereeToFirestore(tournamentRef);
+      }
+
+      triggerMsg(orgEditingRefereeNric ? 'Referee account & tournament entry updated!' : 'Referee account created & assigned to tournament!', 'ok');
+      
+      // Reset form
+      setOrgEditingRefereeNric(null);
+      setOrgRefName('');
+      setOrgRefNric('');
+      setOrgRefPhone('');
+      setOrgRefClub('');
+      setOrgRefResidential('');
+      setOrgRefDistance('');
+      setOrgRefBankName('');
+      setOrgRefBankAccount('');
+      setOrgRefAccommodation('No');
+      setOrgRefKyorugi('TR');
+      setOrgRefPoomsae('TR');
+      setOrgRefCarPlate('');
+      setOrgRefSpecialRole('None');
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Failed to save referee account.', 'error');
+    }
+  };
+
+  const handleOrgEditRefereeAccount = (refAcc: Referee) => {
+    setOrgEditingRefereeNric(refAcc.nric);
+    setOrgRefName(refAcc.fullName);
+    setOrgRefNric(refAcc.nric);
+    setOrgRefPhone(refAcc.phone);
+    setOrgRefClub(refAcc.clubName || '');
+    setOrgRefResidential(refAcc.residentialLocation || '');
+    setOrgRefDistance(refAcc.distance ? String(refAcc.distance) : '');
+    setOrgRefBankName(refAcc.bankName || '');
+    setOrgRefBankAccount(refAcc.bankAccount || '');
+    setOrgRefAccommodation(refAcc.accommodation || 'No');
+    setOrgRefKyorugi(refAcc.kyorugiStatus || 'TR');
+    setOrgRefPoomsae(refAcc.poomsaeStatus || 'TR');
+    setOrgRefCarPlate(refAcc.carPlate || '');
+    setOrgRefSpecialRole(refAcc.specialRole || 'None');
+  };
+
   const handleAdminChangePassword = () => {
     if (!newAdminPass) {
       triggerMsg('New password cannot be empty.', 'error');
@@ -1055,6 +1803,8 @@ export default function App() {
     setScreen('login');
     setSelectedPlayerId(null);
     setScanResult(null);
+    setActiveReferee(null);
+    setRefereeLoginNric('');
     // Reset forms
     setCUser(''); setCPass(''); setSUser(''); setSPass(''); setSName(''); setSClub(''); setOCode(''); setAPass('');
   };
@@ -1320,6 +2070,10 @@ export default function App() {
     if (playerId) {
       const p = players.find(pl => pl.id === playerId);
       if (p) {
+        if (p.weighIn) {
+          triggerMsg('This athlete has already completed their weigh-in and cannot be edited.', 'error');
+          return;
+        }
         setSelectedPlayerId(playerId);
         setPName(p.name);
         setPIc(p.ic);
@@ -1378,6 +2132,14 @@ export default function App() {
       return;
     }
     if (!compId) return;
+
+    if (selectedPlayerId) {
+      const existingP = players.find(p => p.id === selectedPlayerId);
+      if (existingP?.weighIn) {
+        triggerMsg('This athlete has already completed their weigh-in and cannot be edited.', 'error');
+        return;
+      }
+    }
 
     // Check for duplicate player, category, and event
     const isDuplicate = players.some(p => {
@@ -1471,6 +2233,10 @@ export default function App() {
 
   const handleDeletePlayer = (playerId: string) => {
     if (!compId) return;
+    if (role === 'coach') {
+      triggerMsg('Coaches are not permitted to delete athlete records.', 'error');
+      return;
+    }
     const updated = players.filter(p => p.id !== playerId);
     savePlayersToStorage(compId, updated);
     setConfirmDeleteId(null);
@@ -1503,7 +2269,8 @@ export default function App() {
             weight: val,
             time: new Date().toISOString(),
             result: autoResult as any,
-            signature: signatureData
+            signature: signatureData,
+            stationId: oStation
           }
         };
       }
@@ -1561,7 +2328,7 @@ export default function App() {
     const p = players.find(pl => pl.id === selectedPlayerId);
     if (!p) return;
     
-    htmlToImage.toPng(cardRef.current, { backgroundColor: '#12211C', pixelRatio: 3 }).then(dataUrl => {
+    htmlToImage.toPng(cardRef.current, { backgroundColor: '#12211C', pixelRatio: 3.125 }).then(dataUrl => {
       const link = document.createElement('a');
       link.download = `DOJANG_REG_${p.id}_${p.name.replace(/\s+/g, '_')}.png`;
       link.href = dataUrl;
@@ -1594,7 +2361,7 @@ export default function App() {
       if (el) {
         try {
           await new Promise(resolve => setTimeout(resolve, 150));
-          const dataUrl = await htmlToImage.toPng(el, { backgroundColor: '#12211C', pixelRatio: 3 });
+          const dataUrl = await htmlToImage.toPng(el, { backgroundColor: '#12211C', pixelRatio: 3.125 });
           const base64Data = dataUrl.split(',')[1];
           const fileName = `DOJANG_ID_${p.id}_${p.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
           if (imgFolder) {
@@ -1643,7 +2410,8 @@ export default function App() {
           'Target Weight Class': p.weightClass,
           'Scale Weight (kg)': p.weighIn ? p.weighIn.weight : '—',
           'Weigh-In Decision': p.weighIn ? p.weighIn.result : 'NOT WEIGHED',
-          'Timestamp': p.weighIn ? new Date(p.weighIn.time).toLocaleString() : '—'
+          'Timestamp': p.weighIn ? new Date(p.weighIn.time).toLocaleString() : '—',
+          'Station ID': p.weighIn?.stationId || '—'
         };
       };
 
@@ -1893,6 +2661,14 @@ export default function App() {
                 Official
               </button>
               <button 
+                onClick={() => setLoginTab('referee')}
+                className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                  loginTab === 'referee' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
+                }`}
+              >
+                Referee
+              </button>
+              <button 
                 onClick={() => setLoginTab('admin')}
                 className={`flex-1 min-w-[60px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'admin' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
@@ -1974,24 +2750,42 @@ export default function App() {
                 </div>
               )}
 
-              {loginTab === 'organizer' && (
+              {loginTab === 'referee' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Select active tournament</label>
-                    <select 
-                      value={cComp}
-                      onChange={(e) => setCComp(e.target.value)}
-                      className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                    >
-                      {competitions.filter(c => c.isActive !== false).length === 0 ? (
-                        <option value="">No active tournaments available...</option>
-                      ) : (
-                        competitions.filter(c => c.isActive !== false).map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))
-                      )}
-                    </select>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">NRIC Number (e.g. 850101-14-5555)</label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        placeholder="Enter registered NRIC"
+                        value={refereeLoginNric} 
+                        onChange={(e) => setRefereeLoginNric(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleRefereeLogin(); }}
+                        className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
+                      />
+                      <User className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
+                    </div>
                   </div>
+                  <button 
+                    onClick={handleRefereeLogin}
+                    className="w-full bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition mt-2 cursor-pointer shadow-md hover:shadow"
+                  >
+                    Enter Referee Dashboard
+                  </button>
+                  <p className="text-center text-xs text-text-dim pt-2">
+                    Not registered as a referee yet? {' '}
+                    <button 
+                      onClick={() => { setPendingPhoto(null); setScreen('refereeSignup'); }}
+                      className="text-gold underline font-semibold hover:text-opacity-80"
+                    >
+                      Register New Referee
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {loginTab === 'organizer' && (
+                <div className="space-y-3">
                   <div>
                     <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Organizer Username</label>
                     <div className="relative">
@@ -2036,10 +2830,10 @@ export default function App() {
                       onChange={(e) => setOComp(e.target.value)}
                       className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
                     >
-                      {competitions.length === 0 ? (
-                        <option value="">No configurations loaded...</option>
+                      {competitions.filter(c => c.isActive !== false).length === 0 ? (
+                        <option value="">No active tournaments available...</option>
                       ) : (
-                        competitions.map(c => (
+                        competitions.filter(c => c.isActive !== false).map(c => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))
                       )}
@@ -2056,6 +2850,19 @@ export default function App() {
                         className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
                       />
                       <Lock className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Station ID (e.g., Station 1)</label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        value={oStation} 
+                        onChange={(e) => setOStation(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleOfficialLogin(); }}
+                        className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
+                      />
+                      <MapPin className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
                     </div>
                   </div>
                   <button 
@@ -2263,6 +3070,251 @@ export default function App() {
           </div>
         )}
 
+        {/* REFEREE SIGNUP */}
+        {screen === 'refereeSignup' && (
+          <div className="max-w-3xl mx-auto my-8 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
+            <div className="p-6 bg-gradient-to-b from-surface-2/50 to-transparent border-b border-line text-center">
+              <Scale className="w-10 h-10 text-gold mx-auto mb-2 animate-pulse" />
+              <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">Referee Registration</h2>
+              <p className="text-xs text-text-dim mt-1">Register your officiating credentials for the tournament</p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Tournament Selection */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Officiating Tournament *</label>
+                  <select 
+                    value={refereeLoginComp}
+                    onChange={(e) => setRefereeLoginComp(e.target.value)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  >
+                    {competitions.filter(c => c.isActive !== false).length === 0 ? (
+                      <option value="">No active tournaments available...</option>
+                    ) : (
+                      competitions.filter(c => c.isActive !== false).map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {/* Referee Photograph */}
+                <div className="md:col-span-2 bg-ink/30 p-4 rounded-xl border border-line">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Referee Portrait Photograph (4:5 ratio) (Optional)</label>
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={handlePhotoSelect}
+                    className="w-full text-xs text-text-dim bg-ink border border-line file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-surface-2 file:text-gold hover:file:opacity-90 transition cursor-pointer"
+                  />
+                  {pendingPhoto && (
+                    <div className="mt-4 flex items-center space-x-3">
+                      <img 
+                        src={pendingPhoto} 
+                        alt="Crop preview" 
+                        className="w-20 h-24 object-cover rounded-lg border border-line" 
+                      />
+                      <span className="text-xs text-text-dim">Portrait automatically optimized and cropped (192 x 240 pixels) for your referee pass.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Personal Information */}
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Full Name (as per NRIC) *</label>
+                  <input 
+                    type="text" 
+                    value={refereeFullName} 
+                    onChange={(e) => setRefereeFullName(e.target.value)}
+                    placeholder="e.g. TAN KIAN MENG"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">NRIC Number *</label>
+                  <input 
+                    type="text" 
+                    value={refereeNric} 
+                    onChange={(e) => setRefereeNric(e.target.value)}
+                    placeholder="e.g. 850101-14-5555"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number *</label>
+                  <input 
+                    type="tel" 
+                    value={refereePhone} 
+                    onChange={(e) => setRefereePhone(e.target.value)}
+                    placeholder="e.g. 012-3456789"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">State / Club Name *</label>
+                  <input 
+                    type="text" 
+                    value={refereeClubName} 
+                    onChange={(e) => setRefereeClubName(e.target.value)}
+                    placeholder="e.g. PERAK TKD CLUB"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                {/* Logistics */}
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Residential Location *</label>
+                  <input 
+                    type="text" 
+                    value={refereeResidential} 
+                    onChange={(e) => setRefereeResidential(e.target.value)}
+                    placeholder="e.g. Ipoh, Perak"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) (Optional)</label>
+                  <input 
+                    type="number" 
+                    value={refereeDistance} 
+                    onChange={(e) => setRefereeDistance(e.target.value)}
+                    placeholder="e.g. 120"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                  <p className="text-[10px] text-text-dim/80 mt-1">Total combined distance (return trip) base on Google Maps/Waze.</p>
+                </div>
+
+                {/* Bank details */}
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name</label>
+                  <input 
+                    type="text" 
+                    value={refereeBankName} 
+                    onChange={(e) => setRefereeBankName(e.target.value)}
+                    placeholder="e.g. Maybank"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number</label>
+                  <input 
+                    type="text" 
+                    value={refereeBankAccount} 
+                    onChange={(e) => setRefereeBankAccount(e.target.value)}
+                    placeholder="e.g. 164012345678"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                {/* Statuses */}
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Kyorugi Referee Status *</label>
+                  <select 
+                    value={refereeKyorugiStatus} 
+                    onChange={(e) => setRefereeKyorugiStatus(e.target.value as any)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  >
+                    <option value="TR">Trainee Referee (TR)</option>
+                    <option value="SR">State Referee (SR)</option>
+                    <option value="NR">National Referee (NR)</option>
+                    <option value="IR">International Referee (IR)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Poomsae Referee Status *</label>
+                  <select 
+                    value={refereePoomsaeStatus} 
+                    onChange={(e) => setRefereePoomsaeStatus(e.target.value as any)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  >
+                    <option value="TR">Trainee Referee (TR)</option>
+                    <option value="SR">State Referee (SR)</option>
+                    <option value="NR">National Referee (NR)</option>
+                    <option value="IR">International Referee (IR)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Accommodation Required? *</label>
+                  <select 
+                    value={refereeAccommodation} 
+                    onChange={(e) => setRefereeAccommodation(e.target.value as any)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  >
+                    <option value="No">No - I will arrange my own</option>
+                    <option value="Yes">Yes - Organizer to arrange</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Car Plate Number</label>
+                  <input 
+                    type="text" 
+                    value={refereeCarPlate} 
+                    onChange={(e) => setRefereeCarPlate(e.target.value)}
+                    placeholder="e.g. WQY 1234"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold uppercase"
+                  />
+                  <p className="text-[10px] text-text-dim/80 mt-1">Required to reserve car park space for referees.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Special Appointed Role</label>
+                  <select 
+                    value={refereeSpecialRole} 
+                    onChange={(e) => setRefereeSpecialRole(e.target.value as any)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  >
+                    <option value="None">None (Standard Referee)</option>
+                    <option value="TD">Technical Delegate (TD)</option>
+                    <option value="CSB">Supervisory Board (CSB)</option>
+                    <option value="RIC">Referee In-Charge (RIC)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* PDPA Consent Statement */}
+              <div className="bg-surface-2 p-4 rounded-xl border border-line text-xs text-text-dim space-y-3">
+                <p className="font-semibold text-gold uppercase tracking-wider text-[10px]">PDPA Personal Data Consent Statement</p>
+                <p className="leading-relaxed text-[11px]">
+                  I agree to the collection, processing and use of my personal data for the purpose of tournament registration, scheduling, officiating roles coordination, bank-in transactions, and accommodation/logistic arrangements, in accordance with the Personal Data Protection Act (PDPA).
+                </p>
+                <label className="flex items-start space-x-3 text-text cursor-pointer pt-1">
+                  <input 
+                    type="checkbox" 
+                    checked={refereeConsent} 
+                    onChange={(e) => setRefereeConsent(e.target.checked)}
+                    className="mt-0.5 rounded border-line text-gold focus:ring-gold bg-ink w-4 h-4 cursor-pointer"
+                  />
+                  <span className="font-semibold text-xs select-none">I agree to the collection, processing and use of my personal data *</span>
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setScreen('login')}
+                  className="flex-1 border border-line text-text font-bold py-2.5 rounded-xl text-sm transition hover:bg-surface-2 cursor-pointer text-center animate-none"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleRefereeRegister}
+                  className="flex-1 bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition cursor-pointer shadow-md"
+                >
+                  Submit Registration
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* COACH HOME - TOURNAMENT SELECTOR */}
         {screen === 'coachHome' && (
           <div className="space-y-6">
@@ -2282,25 +3334,32 @@ export default function App() {
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-text-dim uppercase tracking-wider">Select active championship tournament</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {competitions.map(c => {
-                  return (
-                    <div 
-                      key={c.id}
-                      onClick={() => { setCompId(c.id); setScreen('coachRoster'); }}
-                      className="bg-surface border border-line hover:border-gold/50 rounded-2xl p-5 cursor-pointer transition-all hover:-translate-y-1 shadow-sm hover:shadow group"
-                    >
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="bg-emerald-950 text-gold p-2.5 rounded-xl border border-emerald-900/50">
-                          <Trophy className="w-5 h-5" />
+                {competitions.filter(c => c.isActive !== false).length === 0 ? (
+                  <div className="col-span-full bg-surface p-8 rounded-2xl border border-line text-center">
+                    <Trophy className="w-8 h-8 text-text-dim/50 mx-auto mb-2" />
+                    <p className="text-sm text-text-dim uppercase tracking-wider">No active tournaments available</p>
+                  </div>
+                ) : (
+                  competitions.filter(c => c.isActive !== false).map(c => {
+                    return (
+                      <div 
+                        key={c.id}
+                        onClick={() => { setCompId(c.id); setScreen('coachRoster'); }}
+                        className="bg-surface border border-line hover:border-gold/50 rounded-2xl p-5 cursor-pointer transition-all hover:-translate-y-1 shadow-sm hover:shadow group"
+                      >
+                        <div className="flex justify-between items-start mb-4">
+                          <div className="bg-emerald-950 text-gold p-2.5 rounded-xl border border-emerald-900/50">
+                            <Trophy className="w-5 h-5" />
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-text-dim/70 group-hover:text-gold transition-colors" />
                         </div>
-                        <ChevronRight className="w-5 h-5 text-text-dim/70 group-hover:text-gold transition-colors" />
+                        <h4 className="text-base font-bold text-text font-sans uppercase leading-tight group-hover:text-gold transition-colors">{c.name}</h4>
+                        <p className="text-xs text-text-dim mt-2 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {c.venue}</p>
+                        <p className="text-xs text-text-dim mt-1 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {c.date}</p>
                       </div>
-                      <h4 className="text-base font-bold text-text font-sans uppercase leading-tight group-hover:text-gold transition-colors">{c.name}</h4>
-                      <p className="text-xs text-text-dim mt-2 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {c.venue}</p>
-                      <p className="text-xs text-text-dim mt-1 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {c.date}</p>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
@@ -2341,22 +3400,22 @@ export default function App() {
                   {/* Box 1: Bank Details provided by Organizer */}
                   <div className="space-y-4 flex flex-col justify-between">
                     <div>
-                      <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                      <h3 className="text-[15px] font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
                         <Lock className="w-4 h-4 text-gold" />
                         1. Bank details provided by organizer
                       </h3>
-                      <p className="text-[10px] text-text-dim uppercase tracking-wider mb-3">Please use these credentials to pay registration fees</p>
+                      <p className="text-[13px] text-text-dim uppercase tracking-wider mb-3">Please use these credentials to pay registration fees</p>
                     </div>
 
                     <div className="bg-ink/30 p-4 rounded-xl border border-line/50 space-y-3">
                       <div className="space-y-2">
                         <div className="flex justify-between items-center py-1.5 border-b border-line/30">
-                          <span className="text-[10px] font-semibold text-text-dim uppercase">Bank Name</span>
-                          <span className="text-xs font-bold text-text">{activeComp.bankName || <em className="text-text-dim">Not provided yet</em>}</span>
+                          <span className="text-[13px] font-semibold text-text-dim uppercase">Bank Name</span>
+                          <span className="text-[15px] font-bold text-text">{activeComp.bankName || <em className="text-text-dim">Not provided yet</em>}</span>
                         </div>
                         <div className="flex justify-between items-center py-1.5 border-b border-line/30">
-                          <span className="text-[10px] font-semibold text-text-dim uppercase">Bank Account</span>
-                          <span className="text-xs font-mono font-bold text-gold flex items-center gap-1.5">
+                          <span className="text-[13px] font-semibold text-text-dim uppercase">Bank Account</span>
+                          <span className="text-[15px] font-mono font-bold text-gold flex items-center gap-1.5">
                             {activeComp.bankAccount ? (
                               <>
                                 {activeComp.bankAccount}
@@ -2365,7 +3424,7 @@ export default function App() {
                                     navigator.clipboard.writeText(activeComp.bankAccount || '');
                                     triggerMsg('Bank account copied to clipboard!', 'ok');
                                   }}
-                                  className="text-[9px] text-gold/80 hover:text-gold uppercase tracking-widest border border-gold/30 px-1.5 py-0.5 rounded hover:bg-gold/10 transition cursor-pointer"
+                                  className="text-[12px] text-gold/80 hover:text-gold uppercase tracking-widest border border-gold/30 px-1.5 py-0.5 rounded hover:bg-gold/10 transition cursor-pointer"
                                 >
                                   Copy
                                 </button>
@@ -2380,8 +3439,8 @@ export default function App() {
                       {/* Event Fees block */}
                       {(activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee) && (
                         <div className="mt-2 p-2.5 bg-ink/20 rounded-xl border border-line/20 space-y-1.5">
-                          <span className="block text-[8px] font-bold text-gold uppercase tracking-wider">Participant Event Fees:</span>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                          <span className="block text-[11px] font-bold text-gold uppercase tracking-wider">Participant Event Fees:</span>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
                             {activeComp.kyorugiFee && (
                               <div className="flex justify-between items-center py-0.5 border-b border-line/10">
                                 <span className="text-text-dim">Kyorugi:</span>
@@ -2420,8 +3479,8 @@ export default function App() {
                           referrerPolicy="no-referrer"
                         />
                         <div>
-                          <p className="text-[10px] font-bold text-text uppercase tracking-wider">Scan to Pay QR</p>
-                          <p className="text-[8px] text-text-dim">Scan with your banking app to transfer fees</p>
+                          <p className="text-[13px] font-bold text-text uppercase tracking-wider">Scan to Pay QR</p>
+                          <p className="text-[11px] text-text-dim">Scan with your banking app to transfer fees</p>
                         </div>
                       </div>
                     )}
@@ -2430,11 +3489,11 @@ export default function App() {
                   {/* Box 2: Coach Receipt Upload */}
                   <div className="flex flex-col justify-between">
                     <div>
-                      <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                      <h3 className="text-[15px] font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
                         <FileText className="w-4 h-4 text-gold" />
                         2. Coach to upload the payment receipt
                       </h3>
-                      <p className="text-[10px] text-text-dim uppercase tracking-wider mb-3">Upload bank transaction receipt for your club registration ({coachClub})</p>
+                      <p className="text-[13px] text-text-dim uppercase tracking-wider mb-3">Upload bank transaction receipt for your club registration ({coachClub})</p>
                     </div>
 
                     {(() => {
@@ -2453,11 +3512,11 @@ export default function App() {
                                   onClick={() => setSelectedClubReceipt({ clubName: coachClub, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
                                   referrerPolicy="no-referrer"
                                 />
-                                <div className="text-[8px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-0.5">
+                                <div className="text-[11px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-0.5">
                                   <CheckCircle className="w-2.5 h-2.5 text-green-400" />
                                   <span>Submitted</span>
                                 </div>
-                                <div className="text-[7px] text-text-dim text-center truncate w-full">
+                                <div className="text-[10px] text-text-dim text-center truncate w-full">
                                   {receipt.uploadedAt}
                                 </div>
                                 <button
@@ -2482,7 +3541,7 @@ export default function App() {
                             ) : (
                               <div className="text-center p-2">
                                 <FileText className="w-8 h-8 text-text-dim/50 mx-auto mb-1" />
-                                <span className="text-[10px] text-text-dim font-medium uppercase tracking-wider block">Pending</span>
+                                <span className="text-[13px] text-text-dim font-medium uppercase tracking-wider block">Pending</span>
                               </div>
                             )}
                           </div>
@@ -2491,8 +3550,8 @@ export default function App() {
                           <div className="space-y-2">
                             <label className="flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-lg p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-24">
                               <Upload className="w-5 h-5 text-gold mb-1" />
-                              <span className="text-[10px] font-bold text-text-dim uppercase">Upload Receipt</span>
-                              <span className="text-[8px] text-text-dim">PNG/JPG up to 3MB</span>
+                              <span className="text-[13px] font-bold text-text-dim uppercase">Upload Receipt</span>
+                              <span className="text-[11px] text-text-dim">PNG/JPG up to 3MB</span>
                               <input 
                                 type="file" 
                                 accept="image/*" 
@@ -2714,48 +3773,33 @@ export default function App() {
                                 )}
                               </div>
                             </td>
-                            <td className="p-4 text-right">
-                              <div className="flex items-center justify-end space-x-2">
-                                <button 
-                                  onClick={() => { setSelectedPlayerId(p.id); setScreen('idCard'); }}
-                                  className="bg-emerald-950/40 text-gold hover:bg-emerald-900/50 p-1.5 rounded border border-emerald-900/50 transition"
-                                  title="View QR ID Card"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </button>
-                                <button 
-                                  onClick={() => handleOpenCoachPlayerForm(p.id)}
-                                  className="bg-ink text-text-dim hover:text-text p-1.5 rounded border border-line transition"
-                                  title="Edit Competitor Info"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
-                                {confirmDeleteId === p.id ? (
-                                  <div className="flex items-center space-x-1">
-                                    <button 
-                                      onClick={() => handleDeletePlayer(p.id)}
-                                      className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-[10px] font-bold"
-                                    >
-                                      Confirm
-                                    </button>
-                                    <button 
-                                      onClick={() => setConfirmDeleteId(null)}
-                                      className="bg-surface-2 text-text px-2 py-1 rounded text-[10px]"
-                                    >
-                                      X
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button 
-                                    onClick={() => setConfirmDeleteId(p.id)}
-                                    className="bg-ink text-red-500 hover:bg-red-950/20 p-1.5 rounded border border-line transition"
-                                    title="Deregister competitor"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
+                             <td className="p-4 text-right">
+                               <div className="flex items-center justify-end space-x-2">
+                                 <button 
+                                   onClick={() => { setSelectedPlayerId(p.id); setScreen('idCard'); }}
+                                   className="bg-emerald-950/40 text-gold hover:bg-emerald-900/50 p-1.5 rounded border border-emerald-900/50 transition"
+                                   title="View QR ID Card"
+                                 >
+                                   <Eye className="w-4 h-4" />
+                                 </button>
+                                 {p.weighIn ? (
+                                   <div 
+                                     className="bg-ink/40 text-text-dim/40 p-1.5 rounded border border-line/30 cursor-not-allowed"
+                                     title="Editing locked (Weigh-in complete)"
+                                   >
+                                     <Lock className="w-4 h-4" />
+                                   </div>
+                                 ) : (
+                                   <button 
+                                     onClick={() => handleOpenCoachPlayerForm(p.id)}
+                                     className="bg-ink text-text-dim hover:text-text p-1.5 rounded border border-line transition"
+                                     title="Edit Competitor Info"
+                                   >
+                                     <Edit className="w-4 h-4" />
+                                   </button>
+                                 )}
+                               </div>
+                             </td>
                           </tr>
                         );
                       })}
@@ -3133,9 +4177,8 @@ export default function App() {
                   <div className="p-4 bg-ink border border-line rounded-2xl flex justify-center">
                     <div 
                       ref={cardRef}
-                      className="w-80 bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden shadow-2xl relative flex flex-col justify-between"
+                      className="w-[336px] h-[480px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden shadow-2xl relative flex flex-col justify-between shrink-0"
                       id="designed-id-card"
-                      style={{ minHeight: '440px' }}
                     >
                       {activeComp.idCardBgUrl && (
                         <>
@@ -3184,8 +4227,8 @@ export default function App() {
                                 <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-ink/85 border border-line rounded p-0.5 text-gold z-20 pointer-events-none">
                                   <GripVertical className="w-3.5 h-3.5" />
                                 </div>
-                                <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: getFontSizePx(field.fontSize, '10px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-2 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '10px'), color: field.color || '#ffffff' }}>{p.event}</span>
+                                <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '10px'), 10) + 3}px` : getFontSizePx(field.fontSize, '10px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                                {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-2 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '10px'), color: field.color || '#ffffff' }}>{p.event}</span>}
                               </div>
                             );
                           }
@@ -3305,6 +4348,7 @@ export default function App() {
                                   );
                                 }
                                 if (field.id === 'athleteId') {
+                                  if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
                                   return (
                                     <div className={
                                       field.align === 'left' ? 'text-left' :
@@ -3316,7 +4360,22 @@ export default function App() {
                                   );
                                 }
                                 if (field.id === 'metadata') {
-                                  return (
+                                  if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                                    return (
+                                      <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                                        <span 
+                                          className="font-display font-bold tracking-widest uppercase text-white" 
+                                          style={{ 
+                                            fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                            color: field.color || '#ffffff' 
+                                          }}
+                                        >
+                                          {p.event}
+                                        </span>
+                                      </div>
+                                    );
+                                  }
+    return (
                                     <div className={`grid grid-cols-2 gap-3 text-xs border-t border-line/30 pt-3 ${
                                       field.align === 'left' ? 'text-left' :
                                       field.align === 'right' ? 'text-right' :
@@ -3387,13 +4446,23 @@ export default function App() {
                       <Download className="w-4 h-4" />
                       <span>Download ID Card (PNG)</span>
                     </button>
-                    <button 
-                      onClick={() => handleOpenCoachPlayerForm(p.id)}
-                      className="w-full sm:w-auto bg-surface border border-line text-text-dim hover:text-text px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
-                    >
-                      <Edit className="w-4 h-4" />
-                      <span>Modify Athlete</span>
-                    </button>
+                    {p.weighIn ? (
+                      <div 
+                        className="w-full sm:w-auto bg-surface/40 border border-line/30 text-text-dim/40 px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-not-allowed"
+                        title="Editing locked (Weigh-in complete)"
+                      >
+                        <Lock className="w-4 h-4 text-text-dim/40" />
+                        <span>Modify Athlete (Locked)</span>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => handleOpenCoachPlayerForm(p.id)}
+                        className="w-full sm:w-auto bg-surface border border-line text-text-dim hover:text-text px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+                      >
+                        <Edit className="w-4 h-4" />
+                        <span>Modify Athlete</span>
+                      </button>
+                    )}
                   </div>
 
                 </div>
@@ -3412,7 +4481,7 @@ export default function App() {
                   <Scale className="w-5 h-5 text-gold animate-pulse" />
                   <span>Official Weigh-In Station terminal</span>
                 </h2>
-                <p className="text-xs text-text-dim">Tournament Active: <strong className="text-text">{activeComp.name}</strong></p>
+                <p className="text-xs text-text-dim">Tournament Active: <strong className="text-text">{activeComp.name}</strong> • Station: <strong className="text-text">{oStation}</strong></p>
               </div>
               <button 
                 onClick={() => setScreen('officialLog')}
@@ -3786,6 +4855,7 @@ export default function App() {
                         <th className="p-4">Scale Readout (kg)</th>
                         <th className="p-4">Result status</th>
                         <th className="p-4">Measurement Time</th>
+                        <th className="p-4">Station</th>
                         <th className="p-4 text-right">Official Decisions</th>
                       </tr>
                     </thead>
@@ -3811,6 +4881,7 @@ export default function App() {
                             <td className="p-4 font-mono font-bold text-sm text-text">{p.weighIn.weight} kg</td>
                             <td className="p-4">{renderBadge(p.weighIn.result)}</td>
                             <td className="p-4 text-text-dim">{new Date(p.weighIn.time).toLocaleTimeString()}</td>
+                            <td className="p-4 text-text-dim/80 text-sm">{p.weighIn.stationId || '—'}</td>
                             <td className="p-4 text-right">
                               <div className="flex items-center justify-end space-x-1">
                                 {isPass ? (
@@ -3879,6 +4950,17 @@ export default function App() {
               >
                 <UserPlus className="w-5 h-5" />
                 Organizer Accounts
+              </button>
+              <button
+                onClick={() => setAdminTab('referees')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
+                  adminTab === 'referees' 
+                    ? 'bg-gold text-ink shadow-sm' 
+                    : 'text-text-dim hover:bg-surface-2 hover:text-text'
+                }`}
+              >
+                <Scale className="w-5 h-5" />
+                Referee Accounts
               </button>
               <button
                 onClick={() => setAdminTab('security')}
@@ -4222,6 +5304,385 @@ export default function App() {
                       </table>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* REFEREE ACCOUNTS MANAGEMENT */}
+              {adminTab === 'referees' && (
+                <div className="space-y-6 animate-fade-in">
+                  
+                  {/* Stats Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-surface p-5 rounded-2xl border border-line shadow-sm flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider">Total Referee Accounts</span>
+                        <h4 className="text-2xl font-black text-gold mt-1">{refereeAccounts.length}</h4>
+                      </div>
+                      <div className="bg-gold/10 p-2.5 rounded-xl">
+                        <Scale className="w-5 h-5 text-gold" />
+                      </div>
+                    </div>
+
+                    <div className="bg-surface p-5 rounded-2xl border border-line shadow-sm flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider">International (IR)</span>
+                        <h4 className="text-2xl font-black text-emerald-400 mt-1">
+                          {refereeAccounts.filter(r => r.kyorugiStatus === 'IR' || r.poomsaeStatus === 'IR').length}
+                        </h4>
+                      </div>
+                      <div className="bg-emerald-500/10 p-2.5 rounded-xl">
+                        <Trophy className="w-5 h-5 text-emerald-400" />
+                      </div>
+                    </div>
+
+                    <div className="bg-surface p-5 rounded-2xl border border-line shadow-sm flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider">National (NR)</span>
+                        <h4 className="text-2xl font-black text-blue-400 mt-1">
+                          {refereeAccounts.filter(r => r.kyorugiStatus === 'NR' || r.poomsaeStatus === 'NR').length}
+                        </h4>
+                      </div>
+                      <div className="bg-blue-500/10 p-2.5 rounded-xl">
+                        <Shield className="w-5 h-5 text-blue-400" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Create / Edit Form */}
+                  <div className="bg-surface rounded-2xl border border-line shadow-sm p-6 space-y-4">
+                    <div className="flex justify-between items-center border-b border-line pb-3">
+                      <h3 className="text-xs font-bold text-text-dim uppercase tracking-widest flex items-center gap-2">
+                        <UserPlus className="w-4 h-4 text-gold" />
+                        {editingRefereeNric ? 'Edit Referee Account' : 'Create New Referee Account'}
+                      </h3>
+                      {editingRefereeNric && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRefereeNric(null);
+                            setAdminRefName('');
+                            setAdminRefNric('');
+                            setAdminRefPhone('');
+                            setAdminRefClub('');
+                            setAdminRefResidential('');
+                            setAdminRefDistance('');
+                            setAdminRefBankName('');
+                            setAdminRefBankAccount('');
+                            setAdminRefAccommodation('No');
+                            setAdminRefKyorugi('TR');
+                            setAdminRefPoomsae('TR');
+                            setAdminRefCarPlate('');
+                            setAdminRefSpecialRole('None');
+                          }}
+                          className="text-xs text-text-dim hover:text-text underline"
+                        >
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+
+                    <form onSubmit={handleAdminSaveRefereeAccount} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Full Name</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. John Doe"
+                          value={adminRefName}
+                          onChange={(e) => setAdminRefName(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">NRIC Number</label>
+                        <input
+                          type="text"
+                          required
+                          disabled={!!editingRefereeNric}
+                          placeholder="e.g. 900101-14-1234"
+                          value={adminRefNric}
+                          onChange={(e) => setAdminRefNric(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none disabled:opacity-55"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Contact Phone</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. +60123456789"
+                          value={adminRefPhone}
+                          onChange={(e) => setAdminRefPhone(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">State / Club Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Selangor Taekwondo"
+                          value={adminRefClub}
+                          onChange={(e) => setAdminRefClub(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Residential Town/City</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Kajang, Selangor"
+                          value={adminRefResidential}
+                          onChange={(e) => setAdminRefResidential(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Go-Return Travel Distance (KM)</label>
+                        <input
+                          type="number"
+                          placeholder="e.g. 150"
+                          value={adminRefDistance}
+                          onChange={(e) => setAdminRefDistance(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Bank Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Maybank"
+                          value={adminRefBankName}
+                          onChange={(e) => setAdminRefBankName(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Bank Account No.</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 164012345678"
+                          value={adminRefBankAccount}
+                          onChange={(e) => setAdminRefBankAccount(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Car Plate Number</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. ABC 1234"
+                          value={adminRefCarPlate}
+                          onChange={(e) => setAdminRefCarPlate(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none uppercase"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Kyorugi Status</label>
+                        <select
+                          value={adminRefKyorugi}
+                          onChange={(e) => setAdminRefKyorugi(e.target.value as any)}
+                          className="w-full bg-ink border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        >
+                          <option value="IR">International Referee (IR)</option>
+                          <option value="NR">National Referee (NR)</option>
+                          <option value="SR">State Referee (SR)</option>
+                          <option value="TR">Trainee Referee (TR)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Poomsae Status</label>
+                        <select
+                          value={adminRefPoomsae}
+                          onChange={(e) => setAdminRefPoomsae(e.target.value as any)}
+                          className="w-full bg-ink border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        >
+                          <option value="IR">International Referee (IR)</option>
+                          <option value="NR">National Referee (NR)</option>
+                          <option value="SR">State Referee (SR)</option>
+                          <option value="TR">Trainee Referee (TR)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Accommodation Option</label>
+                        <select
+                          value={adminRefAccommodation}
+                          onChange={(e) => setAdminRefAccommodation(e.target.value as any)}
+                          className="w-full bg-ink border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        >
+                          <option value="No">Self-Arranged</option>
+                          <option value="Yes">Requested (Arranged by Organizer)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Special Appointed Role</label>
+                        <select
+                          value={adminRefSpecialRole}
+                          onChange={(e) => setAdminRefSpecialRole(e.target.value as any)}
+                          className="w-full bg-ink border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        >
+                          <option value="None">None (Standard Referee)</option>
+                          <option value="TD">Technical Delegate (TD)</option>
+                          <option value="CSB">Supervisory Board (CSB)</option>
+                          <option value="RIC">Referee In-Charge (RIC)</option>
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-3 flex justify-end pt-2">
+                        <button
+                          type="submit"
+                          className="bg-gold hover:opacity-95 text-ink font-bold px-6 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-sm transition cursor-pointer"
+                        >
+                          <Save className="w-4 h-4" />
+                          {editingRefereeNric ? 'Save Changes' : 'Register Referee Account'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Referee Accounts List */}
+                  <div className="bg-surface rounded-2xl border border-line shadow-sm overflow-hidden">
+                    <div className="p-5 border-b border-line flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <h3 className="text-xs font-bold text-text uppercase tracking-widest flex items-center gap-2">
+                        <Scale className="w-4 h-4 text-gold" />
+                        Referee Accounts Database
+                      </h3>
+                      
+                      <div className="w-full sm:w-72">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-text-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Search referee by name, NRIC..."
+                            value={dbSearchQuery}
+                            onChange={(e) => setDbSearchQuery(e.target.value)}
+                            className="w-full bg-ink/30 border border-line/60 rounded-xl pl-9.5 pr-4 py-2 text-xs text-text outline-none focus:border-gold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {refereeAccounts.length === 0 ? (
+                      <div className="text-center p-8 text-text-dim text-xs">
+                        No referee accounts registered in the global system yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-ink/40 text-text-dim border-b border-line font-bold uppercase tracking-wider text-[10px]">
+                              <th className="p-4">Full Name</th>
+                              <th className="p-4">NRIC / Phone</th>
+                              <th className="p-4">State / Club</th>
+                              <th className="p-4">Travel / Distance</th>
+                              <th className="p-4">Qualifications</th>
+                              <th className="p-4">Bank Account</th>
+                              <th className="p-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-line/30">
+                            {refereeAccounts
+                              .filter(r => {
+                                const q = dbSearchQuery.toLowerCase().trim();
+                                if (!q) return true;
+                                return (
+                                  r.fullName.toLowerCase().includes(q) ||
+                                  r.nric.toLowerCase().includes(q) ||
+                                  (r.clubName && r.clubName.toLowerCase().includes(q)) ||
+                                  r.phone.includes(q)
+                                );
+                              })
+                              .map((ref) => (
+                                <tr key={ref.nric} className="hover:bg-surface-2/30 transition">
+                                  <td className="p-4 font-bold text-text uppercase">{ref.fullName}</td>
+                                  <td className="p-4">
+                                    <div className="font-mono text-gold font-bold">{ref.nric}</div>
+                                    <div className="text-text-dim text-[11px]">{ref.phone}</div>
+                                  </td>
+                                  <td className="p-4 uppercase text-text font-semibold">{ref.clubName || 'N/A'}</td>
+                                  <td className="p-4">
+                                    <div className="font-medium text-text">{ref.residentialLocation || 'N/A'}</div>
+                                    <div className="text-text-dim text-[11px] font-mono">{ref.distance} KM (Go/Return)</div>
+                                  </td>
+                                  <td className="p-4">
+                                    <div className="flex gap-1">
+                                      <span className="bg-gold/10 text-gold px-1.5 py-0.5 rounded text-[10px] font-bold">K: {ref.kyorugiStatus}</span>
+                                      <span className="bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-bold">P: {ref.poomsaeStatus}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-4">
+                                    <div className="text-text font-medium">{ref.bankName || 'N/A'}</div>
+                                    <div className="text-text-dim text-[11px] font-mono">{ref.bankAccount || 'N/A'}</div>
+                                  </td>
+                                  <td className="p-4 text-right whitespace-nowrap">
+                                    {confirmDeleteRefereeAccountNric === ref.nric ? (
+                                      <div className="flex items-center justify-end space-x-1">
+                                        <button 
+                                          onClick={() => handleAdminDeleteRefereeAccount(ref.nric)}
+                                          className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-sm cursor-pointer"
+                                        >
+                                          Confirm
+                                        </button>
+                                        <button 
+                                          onClick={() => setConfirmDeleteRefereeAccountNric(null)}
+                                          className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1 rounded-lg text-[10px] cursor-pointer"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <button
+                                          onClick={() => {
+                                            setEditingRefereeNric(ref.nric);
+                                            setAdminRefName(ref.fullName);
+                                            setAdminRefNric(ref.nric);
+                                            setAdminRefPhone(ref.phone);
+                                            setAdminRefClub(ref.clubName || '');
+                                            setAdminRefResidential(ref.residentialLocation || '');
+                                            setAdminRefDistance(String(ref.distance));
+                                            setAdminRefBankName(ref.bankName || '');
+                                            setAdminRefBankAccount(ref.bankAccount || '');
+                                            setAdminRefAccommodation(ref.accommodation || 'No');
+                                            setAdminRefKyorugi(ref.kyorugiStatus || 'TR');
+                                            setAdminRefPoomsae(ref.poomsaeStatus || 'TR');
+                                            setAdminRefCarPlate(ref.carPlate || '');
+                                            setAdminRefSpecialRole(ref.specialRole || 'None');
+                                          }}
+                                          className="text-gold hover:bg-gold/10 p-1.5 rounded transition"
+                                          title="Edit Account"
+                                        >
+                                          <Edit className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          onClick={() => setConfirmDeleteRefereeAccountNric(ref.nric)}
+                                          className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
+                                          title="Delete Account"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               )}
 
@@ -4625,8 +6086,8 @@ export default function App() {
                                     <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-ink/85 border border-line rounded p-0.5 text-gold z-20 pointer-events-none">
                                       <GripVertical className="w-3 h-3" />
                                     </div>
-                                    <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                    <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event}</span>
+                                    <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                                    {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
                                   </div>
                                 );
                               }
@@ -4739,6 +6200,7 @@ export default function App() {
                                       );
                                     }
                                     if (field.id === 'athleteId') {
+                                      if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
                                       return (
                                         <div className={
                                           field.align === 'left' ? 'text-left' :
@@ -4750,7 +6212,22 @@ export default function App() {
                                       );
                                     }
                                     if (field.id === 'metadata') {
-                                      return (
+                                      if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                                        return (
+                                          <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                                            <span 
+                                              className="font-display font-bold tracking-widest uppercase text-white" 
+                                              style={{ 
+                                                fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                                color: field.color || '#ffffff' 
+                                              }}
+                                            >
+                                              {p.event}
+                                            </span>
+                                          </div>
+                                        );
+                                      }
+    return (
                                         <div className={`grid grid-cols-2 gap-2 text-[10px] border-t border-line/30 pt-2.5 ${
                                           field.align === 'left' ? 'text-left' :
                                           field.align === 'right' ? 'text-right' :
@@ -4798,7 +6275,7 @@ export default function App() {
                                           </div>
                                           <div className={textAlignmentClass}>
                                             <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                                            <p className="mt-0.5 leading-normal" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
+                                            <p className="mt-0.5 leading-normal" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                                           </div>
                                         </div>
                                       );
@@ -5284,9 +6761,31 @@ export default function App() {
                 <Palette className="w-4 h-4" />
                 ID Card Design Studio
               </button>
+              <button
+                onClick={() => setOrganizerTab('staffPasses')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-px flex items-center gap-2 ${
+                  organizerTab === 'staffPasses'
+                    ? 'border-gold text-gold bg-gold/5 font-bold'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <UserPlus className="w-4 h-4" />
+                Staff Passes
+              </button>
+              <button
+                onClick={() => setOrganizerTab('referees')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-px flex items-center gap-2 ${
+                  organizerTab === 'referees'
+                    ? 'border-gold text-gold bg-gold/5 font-bold'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Scale className="w-4 h-4" />
+                Referees & Allowance
+              </button>
             </div>
 
-            {organizerTab === 'dashboard' ? (
+            {organizerTab === 'dashboard' && (
               <div className="flex flex-col lg:flex-row gap-6 items-start">
                 <div className="flex-1 space-y-6 w-full">
 
@@ -5751,7 +7250,9 @@ export default function App() {
             </div>
           </div>
         </div>
-        ) : (
+        )}
+        
+        {organizerTab === 'idCard' && (
           /* ID CARD DESIGN STUDIO - DEDICATED PAGE */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full animate-fade-in">
             {/* Left Column: Configs & Upload */}
@@ -6027,8 +7528,8 @@ export default function App() {
                               field.align === 'center' ? 'justify-center gap-1.5' :
                               'justify-between'
                             } items-center px-3.5 shrink-0 shadow-sm w-full`}>
-                              <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                              <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event}</span>
+                              <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                              {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
                             </div>
                           );
                         }
@@ -6078,6 +7579,7 @@ export default function App() {
                                 );
                               }
                               if (field.id === 'athleteId') {
+                                if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
                                 return (
                                   <div className={
                                     field.align === 'left' ? 'text-left' :
@@ -6089,7 +7591,22 @@ export default function App() {
                                 );
                               }
                               if (field.id === 'metadata') {
-                                return (
+                                if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                                  return (
+                                    <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                                      <span 
+                                        className="font-display font-bold tracking-widest uppercase text-white" 
+                                        style={{ 
+                                          fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                          color: field.color || '#ffffff' 
+                                        }}
+                                      >
+                                        {p.event}
+                                      </span>
+                                    </div>
+                                  );
+                                }
+    return (
                                   <div className={`grid grid-cols-2 gap-2 text-[9px] border-t border-line/30 pt-2 ${
                                     field.align === 'left' ? 'text-left' :
                                     field.align === 'right' ? 'text-right' :
@@ -6137,7 +7654,7 @@ export default function App() {
                                     </div>
                                     <div className={textAlignmentClass}>
                                       <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                                      <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
+                                      <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                                     </div>
                                   </div>
                                 );
@@ -6162,8 +7679,1448 @@ export default function App() {
           </div>
         )}
 
+        {organizerTab === 'staffPasses' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full animate-fade-in">
+            {/* Left Column: Form */}
+            <div className="lg:col-span-4 bg-surface rounded-2xl border border-line p-6 space-y-6 shadow-sm">
+              <div className="border-b border-line/50 pb-3">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-gold" />
+                  Add Custom Staff Pass
+                </h3>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Full Name</label>
+                  <input
+                    type="text"
+                    value={staffPassName}
+                    onChange={(e) => setStaffPassName(e.target.value)}
+                    placeholder="e.g. Ali Bin Abu"
+                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Role / Title</label>
+                  <select
+                    value={staffPassRole}
+                    onChange={(e) => setStaffPassRole(e.target.value)}
+                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
+                  >
+                    <option value="Coach">Coach</option>
+                    <option value="Team Manager">Team Manager</option>
+                    <option value="Referee">Referee</option>
+                    <option value="VIP">VIP</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Medical">Medical</option>
+                    <option value="Media">Media</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Organization / Club</label>
+                  <input
+                    type="text"
+                    value={staffPassClub}
+                    onChange={(e) => setStaffPassClub(e.target.value)}
+                    placeholder="e.g. Taekwondo Malaysia"
+                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    if (!staffPassName) {
+                      triggerMsg('Please enter a name.', 'error');
+                      return;
+                    }
+                    if (!compId) return;
+                    const newStaff: Player = {
+                      id: `STAFF-${Date.now().toString().slice(-6)}`,
+                      compId,
+                      name: staffPassName.toUpperCase(),
+                      club: staffPassClub.toUpperCase(),
+                      ic: '',
+                      dob: 'N/A',
+                      gender: 'N/A',
+                      coachUsername: '',
+                      event: staffPassRole.toUpperCase(),
+                      ageGroup: 'STAFF',
+                      weightClass: 'N/A',
+                      createdAt: new Date().toISOString(),
+                      weighIn: null
+                    };
+                    saveStaffPassesToStorage(compId, [...staffPasses, newStaff]);
+                    setStaffPassName('');
+                    setStaffPassClub('');
+                    triggerMsg('Staff pass generated.', 'ok');
+                  }}
+                  className="w-full bg-gold hover:opacity-90 text-ink font-bold py-3 rounded-xl transition duration-200 cursor-pointer text-xs uppercase tracking-wider"
+                >
+                  Generate Pass
+                </button>
+              </div>
+            </div>
+
+            {/* Right Column: Grid */}
+            <div className="lg:col-span-8 bg-surface rounded-2xl border border-line p-6 shadow-sm min-h-[400px]">
+              <div className="border-b border-line/50 pb-3 mb-6 flex justify-between items-center">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <Users className="w-4 h-4 text-gold" />
+                  Generated Passes
+                </h3>
+              </div>
+              
+              {staffPasses.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-text-dim space-y-3 bg-ink/30 border border-dashed border-line rounded-2xl">
+                  <UserPlus className="w-8 h-8 text-text-dim/40" />
+                  <p className="text-sm font-bold">No custom passes generated</p>
+                  <p className="text-xs">Use the form on the left to add staff passes.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {staffPasses.map(staff => (
+                    <div key={staff.id} className="bg-ink rounded-2xl border border-line p-4 flex flex-col justify-between shadow-sm relative group">
+                      <button
+                        onClick={() => {
+                          if (!compId) return;
+                          saveStaffPassesToStorage(compId, staffPasses.filter(s => s.id !== staff.id));
+                        }}
+                        className="absolute -top-2 -right-2 bg-hong text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow hover:scale-110 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <div>
+                        <div className="text-[10px] font-bold text-gold uppercase tracking-wider mb-1">{staff.event}</div>
+                        <h4 className="font-display font-bold text-text truncate mb-1" title={staff.name}>{staff.name}</h4>
+                        <div className="text-xs text-text-dim truncate" title={staff.club}>{staff.club || '-'}</div>
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-line/50 flex justify-end">
+                        <button
+                          onClick={() => {
+                            // Let's use the print functionality for single card. 
+                            // Since we don't have a single-card generator yet, we can add it or just re-use the global batch export for staff.
+                            // To keep it simple, we'll set it as a selected staff and open a modal, or just download it directly if we had a hidden container.
+                            // I'll implement a hidden container for staff passes specifically below.
+                            const el = document.getElementById(`staff-card-${staff.id}`);
+                            if (el) {
+                              triggerMsg('Generating PNG...', 'ok');
+                              htmlToImage.toPng(el, { backgroundColor: '#12211C', pixelRatio: 3.125 }).then(dataUrl => {
+                                const link = document.createElement('a');
+                                link.download = `DOJANG_STAFF_${staff.event}_${staff.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
+                                link.href = dataUrl;
+                                link.click();
+                              }).catch(err => {
+                                console.error('Failed to generate staff pass', err);
+                                triggerMsg('Failed to generate PNG', 'error');
+                              });
+                            }
+                          }}
+                          className="bg-surface-2 hover:bg-line border border-line text-text text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Download PNG
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
+
+        {organizerTab === 'referees' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Referee Event Fees Setup */}
+            <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-line pb-3">
+                <div className="flex items-center space-x-2">
+                  <Coins className="w-5 h-5 text-gold" />
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-text">Referee Event Fees & Allowances Setup</h3>
+                    <p className="text-[11px] text-text-dim mt-0.5">Configure mileage allowances, daily duty allowances, and supplemental officiating pay</p>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-gold/10 text-gold border border-gold/20 px-2.5 py-0.5 rounded font-mono font-bold">
+                  RM / Flat Rate
+                </span>
+              </div>
+              
+              <div>
+                <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">1. Travel Mileage Bracket Allowances</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">0 - 50 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_0_50}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_0_50: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">50 - 100 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_50_100}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_50_100: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">100 - 150 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_100_150}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_100_150: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">150 - 200 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_150_200}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_150_200: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">200 - 250 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_200_250}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_200_250: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">250 - 300 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_250_300}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_250_300: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">300 - 350 km</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_300_350}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_300_350: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">350 km & above</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        value={refereeFees.km_350_above}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_350_above: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gold uppercase tracking-wider mb-1">TD / CSB Rate (Per KM)</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
+                      <input 
+                        type="number"
+                        step="0.05"
+                        value={refereeFees.km_rate_special}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_rate_special: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-gold/50 rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-line/40 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">2. Daily Duty Allowance Rates</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-[9px] text-text-dim uppercase tracking-wider font-bold mb-1.5">Standard Referee Statuses</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">IR (International)</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_ir}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_ir: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">NR (National)</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_nr}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_nr: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">SR (State/Senior)</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_sr}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_sr: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">TR (Trainee)</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_tr}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_tr: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-line/20 pt-3">
+                      <div className="text-[9px] text-text-dim uppercase tracking-wider font-bold mb-1.5">Special Appointed Officials</div>
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Technical Delegate</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_td}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_td: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Supervisory Board</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_csb}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_csb: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Referee In-Charge</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_ric}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_ric: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">3. Supplemental Officiating Pay & Actions</h4>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Overtime Fee</label>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                        <input 
+                          type="number"
+                          value={refereeFees.overtime}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, overtime: parseFloat(e.target.value) || 0 })}
+                          className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Others Fee</label>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                        <input 
+                          type="number"
+                          value={refereeFees.others}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, others: parseFloat(e.target.value) || 0 })}
+                          className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-end">
+                      <button
+                        onClick={() => {
+                          updateRefereeFees({
+                            km_0_50: 55,
+                            km_50_100: 75,
+                            km_100_150: 95,
+                            km_150_200: 115,
+                            km_200_250: 135,
+                            km_250_300: 155,
+                            km_300_350: 175,
+                            km_350_above: 220,
+                            km_rate_special: 0.85,
+                            overtime: 20,
+                            others: 0,
+                            rate_ir: 150,
+                            rate_nr: 125,
+                            rate_sr: 100,
+                            rate_tr: 75,
+                            rate_td: 250,
+                            rate_csb: 200,
+                            rate_ric: 175,
+                          });
+                          triggerMsg('Fees setup reset to standard Malaysian Taekwondo defaults', 'ok');
+                        }}
+                        className="w-full bg-ink hover:bg-line border border-line text-text text-[10px] font-bold py-2 rounded-lg transition cursor-pointer text-center"
+                      >
+                        Reset Defaults
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Referee Account Database & Tournament Assignment */}
+            <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-line pb-3">
+                <div className="flex items-center space-x-2">
+                  <UserPlus className="w-5 h-5 text-gold" />
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-text">Referee Roles Configuration</h3>
+                    <p className="text-[11px] text-text-dim mt-0.5">Assign special roles to referees that have joined this tournament</p>
+                  </div>
+                </div>
+                <div className="flex bg-ink/50 p-0.5 rounded-lg border border-line/40">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrgEditingRefereeNric(null);
+                      setOrgRefName('');
+                      setOrgRefNric('');
+                      setOrgRefPhone('');
+                      setOrgRefClub('');
+                      setOrgRefResidential('');
+                      setOrgRefDistance('');
+                      setOrgRefBankName('');
+                      setOrgRefBankAccount('');
+                      setOrgRefAccommodation('No');
+                      setOrgRefKyorugi('TR');
+                      setOrgRefPoomsae('TR');
+                      setOrgRefCarPlate('');
+                      setOrgRefSpecialRole('None');
+                    }}
+                    className={`text-[10px] font-bold px-3 py-1.5 rounded-md transition cursor-pointer ${
+                      !orgEditingRefereeNric ? 'bg-gold text-ink' : 'text-text-dim hover:text-text'
+                    }`}
+                  >
+                    Assign Special Roles
+                  </button>
+                  {orgEditingRefereeNric && (
+                    <span className="text-[10px] font-bold px-3 py-1.5 rounded-md bg-gold text-ink animate-fade-in">
+                      Editing Account ({orgEditingRefereeNric})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Sub-panels */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Panel 1: Search & Assign Existing Accounts */}
+                <div className="lg:col-span-5 space-y-4 border-r border-line/30 pr-0 lg:pr-6">
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-gold">Configure Special Roles</h4>
+                    <p className="text-[10px] text-text-dim">Search tournament referees and configure their roles.</p>
+                  </div>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-text-dim/60" />
+                    <input 
+                      type="text"
+                      placeholder="Search referee by name or NRIC..."
+                      value={orgAssignSearch}
+                      onChange={(e) => setOrgAssignSearch(e.target.value)}
+                      className="w-full bg-ink/40 border border-line rounded-xl py-1.5 pl-9 pr-3 text-xs text-text focus:outline-none focus:border-gold"
+                    />
+                  </div>
+
+                  <div className="bg-ink/30 border border-line rounded-xl p-2 max-h-52 overflow-y-auto space-y-1.5">
+                    {(() => {
+                      const queryClean = orgAssignSearch.toLowerCase().trim();
+                      const filtered = referees.filter(a => {
+                        const nameMatch = a.fullName.toLowerCase().includes(queryClean);
+                        const nricMatch = a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(queryClean.replace(/[^a-zA-Z0-9]/g, ''));
+                        return nameMatch || nricMatch;
+                      });
+
+                      if (filtered.length === 0) {
+                        return <div className="text-[11px] text-text-dim text-center py-4">No matching referees found.</div>;
+                      }
+
+                      return filtered.map(a => {
+                        return (
+                          <div 
+                            key={a.nric} 
+                            className="flex items-center justify-between p-2 rounded-lg bg-surface/50 border border-line/40 hover:border-gold/30 transition text-xs"
+                          >
+                            <div className="space-y-0.5 min-w-0 pr-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-text truncate">{a.fullName}</span>
+                                <span className="text-[8px] px-1 bg-ink/80 border border-line rounded text-text-dim font-mono">{a.kyorugiStatus}</span>
+                              </div>
+                              <div className="text-[9px] text-text-dim flex items-center gap-2 font-mono">
+                                <span>{a.nric}</span>
+                                {a.specialRole && a.specialRole !== 'None' && (
+                                  <span className="text-[8px] bg-gold/10 text-gold px-1 rounded uppercase font-bold">
+                                    {a.specialRole}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleOrgEditRefereeAccount(a)}
+                                className="text-[10px] text-text hover:text-gold border border-line hover:bg-line/40 px-2 py-1 rounded font-bold cursor-pointer transition"
+                              >
+                                Edit Role
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {/* Panel 2: Assign Special Role */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-gold">
+                        {orgEditingRefereeNric ? `Assign Role: ${orgRefName}` : 'Assign Special Role'}
+                      </h4>
+                      <p className="text-[10px] text-text-dim">
+                        {orgEditingRefereeNric 
+                          ? 'Select a special appointed role for this referee.' 
+                          : 'Select a referee from the list to assign a special role.'}
+                      </p>
+                    </div>
+                    {orgEditingRefereeNric && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrgEditingRefereeNric(null);
+                          setOrgRefName('');
+                          setOrgRefNric('');
+                          setOrgRefPhone('');
+                          setOrgRefClub('');
+                          setOrgRefResidential('');
+                          setOrgRefDistance('');
+                          setOrgRefBankName('');
+                          setOrgRefBankAccount('');
+                          setOrgRefAccommodation('No');
+                          setOrgRefKyorugi('TR');
+                          setOrgRefPoomsae('TR');
+                          setOrgRefCarPlate('');
+                          setOrgRefSpecialRole('None');
+                        }}
+                        className="text-[10px] text-hong hover:underline font-bold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+
+                  {orgEditingRefereeNric ? (
+                    <form onSubmit={handleOrgSaveRefereeAccount} className="grid grid-cols-1 gap-3 text-xs bg-ink/30 border border-line rounded-xl p-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-2">Special Appointed Role</label>
+                        <select
+                          value={orgRefSpecialRole}
+                          onChange={(e) => setOrgRefSpecialRole(e.target.value as any)}
+                          className="w-full bg-ink border border-line focus:border-gold rounded-xl px-3 py-2.5 text-text outline-none cursor-pointer"
+                        >
+                          <option value="None">None (Standard Referee)</option>
+                          <option value="TD">Technical Delegate (TD)</option>
+                          <option value="CSB">Supervisory Board (CSB)</option>
+                          <option value="RIC">Referee In-Charge (RIC)</option>
+                        </select>
+                      </div>
+
+                      <div className="pt-2">
+                        <button
+                          type="submit"
+                          className="w-full bg-gold hover:bg-gold/90 text-ink text-xs font-bold py-2.5 rounded-xl transition cursor-pointer"
+                        >
+                          Update Special Role
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 px-4 bg-ink/20 border border-line/40 border-dashed rounded-xl text-center">
+                      <p className="text-xs text-text-dim font-medium max-w-[200px]">
+                        Click "Edit Profile" on an assigned referee to configure their special role.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            {(() => {
+              let totalRefereesCount = referees.length;
+              let totalAllowanceAmount = 0;
+              let totalAccommodationCount = 0;
+              
+              referees.forEach(r => {
+                const allowance = getRefereeAllowance(r, refereeFees);
+                totalAllowanceAmount += allowance.totalPay;
+                if (r.accommodation === 'Yes') {
+                  totalAccommodationCount++;
+                }
+              });
+              
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Total Registered Referees</span>
+                      <Users className="w-5 h-5 text-gold" />
+                    </div>
+                    <h3 className="text-2xl font-bold mt-2 text-text">{totalRefereesCount}</h3>
+                    <p className="text-[10px] text-text-dim mt-1">Qualified officials registered for this tournament</p>
+                  </div>
+
+                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Total Referee Allowance Budget</span>
+                      <Scale className="w-5 h-5 text-gold" />
+                    </div>
+                    <h3 className="text-2xl font-bold mt-2 text-gold">RM {totalAllowanceAmount.toFixed(2)}</h3>
+                    <p className="text-[10px] text-text-dim mt-1">Sum of base duties + custom mileage bracket + overtime + extras</p>
+                  </div>
+
+                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Accommodations Needed</span>
+                      <Home className="w-5 h-5 text-gold" />
+                    </div>
+                    <h3 className="text-2xl font-bold mt-2 text-text">{totalAccommodationCount}</h3>
+                    <p className="text-[10px] text-text-dim mt-1">Referees requesting organizer-provided lodging</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Main panel */}
+            <div className="bg-surface border border-line rounded-2xl shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-line bg-surface-2/40 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-gold" />
+                    Referee Officiating & Allowance Ledger
+                  </h3>
+                  <p className="text-xs text-text-dim mt-0.5">Calculate individual duty payouts, accommodation allocations, and banking info</p>
+                </div>
+                
+                <button
+                  onClick={() => {
+                    if (referees.length === 0) {
+                      triggerMsg('No referee record available to export', 'error');
+                      return;
+                    }
+                    // Excel generation using xlsx
+                    const headers = [
+                      "Name", "NRIC", "Phone", "Club", "Location", "Distance(KM)", 
+                      "Kyorugi", "Poomsae", "Special Role", "Accommodation", "Bank Name", "Bank Account", 
+                      "Car Plate", "Days", "Kyorugi Days", "Poomsae Days", "Duty Explanation", "Base Duty Pay(RM)", "Travel Pay(RM)", "Overtime Pay(RM)", "Others Pay(RM)", "Total Allowance(RM)"
+                    ];
+                    const rows = referees.map(r => {
+                      const allowance = getRefereeAllowance(r, refereeFees);
+                      
+                      return [
+                        r.fullName,
+                        r.nric,
+                        r.phone,
+                        r.clubName,
+                        r.residentialLocation,
+                        r.distance,
+                        r.kyorugiStatus,
+                        r.poomsaeStatus,
+                        r.specialRole || 'None',
+                        r.accommodation,
+                        r.bankName || 'N/A',
+                        r.bankAccount || 'N/A',
+                        r.carPlate || 'N/A',
+                        allowance.days,
+                        allowance.kyorugiDays,
+                        allowance.poomsaeDays,
+                        allowance.splitExplanation,
+                        allowance.baseDutyPay,
+                        allowance.travelPay,
+                        allowance.otPay,
+                        allowance.othersPay,
+                        allowance.totalPay
+                      ];
+                    });
+                    
+                    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Referee Ledger");
+                    XLSX.writeFile(wb, `REFEREE_ALLOWANCE_LEDGER_${activeComp.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`);
+                    
+                    triggerMsg('Allowance ledger exported to Excel successfully!', 'ok');
+                  }}
+                  className="bg-gold hover:opacity-90 text-ink font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer self-stretch sm:self-auto justify-center"
+                >
+                  <Download className="w-4 h-4" />
+                  Export Ledger to Excel
+                </button>
+              </div>
+
+              {referees.length === 0 ? (
+                <div className="p-12 text-center text-xs text-text-dim space-y-2">
+                  <Scale className="w-12 h-12 text-gold/30 mx-auto" />
+                  <p className="font-semibold text-text">No Referees Registered</p>
+                  <p className="max-w-md mx-auto">No referees have registered for this tournament yet. Encourage officials to sign up through the Referee portal tab.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-surface-2 border-b border-line text-[10px] font-bold text-text-dim uppercase tracking-wider">
+                        <th className="py-3 px-4">Referee / Club</th>
+                        <th className="py-3 px-4">NRIC & Phone</th>
+                        <th className="py-3 px-4 text-center">Status (K / P)</th>
+                        <th className="py-3 px-4 text-center">Accommodation</th>
+                        <th className="py-3 px-4 text-right">Distance (Go/Ret)</th>
+                        <th className="py-3 px-4 text-center">Officiating Days</th>
+                        <th className="py-3 px-4">Bank & Car Plate</th>
+                        <th className="py-3 px-4 text-right">Payout Total</th>
+                        <th className="py-3 px-4 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line/40">
+                      {referees.map(r => {
+                        const allowance = getRefereeAllowance(r, refereeFees);
+                        const { baseDutyPay, travelPay, otPay, othersPay, totalPay, dailyRate, days, isSplit, splitExplanation, kyorugiDays, poomsaeDays, higherStatus } = allowance;
+                        
+                        return (
+                          <tr key={r.id} className="hover:bg-surface-2/30 transition-colors">
+                             <td className="py-3 px-4">
+                               <div className="flex items-center space-x-2.5">
+                                 <div className="w-8 h-10 rounded bg-slate-950 overflow-hidden flex items-center justify-center border border-line shrink-0">
+                                   {r.photo ? (
+                                     <img src={r.photo} alt={r.fullName} className="w-full h-full object-cover" />
+                                   ) : (
+                                     <User className="w-4 h-4 text-text-dim/60" />
+                                   )}
+                                 </div>
+                                 <div>
+                                   <div className="font-bold text-text flex items-center gap-1.5">
+                                     {r.fullName}
+                                     {r.specialRole && r.specialRole !== 'None' && (
+                                       <span className="bg-gold text-ink text-[9px] px-1.5 py-0.5 rounded-md font-bold tracking-wider uppercase">
+                                         {r.specialRole}
+                                       </span>
+                                     )}
+                                   </div>
+                                   <div className="text-[10px] text-text-dim italic mt-0.5">{r.clubName}</div>
+                                 </div>
+                               </div>
+                             </td>
+                            <td className="py-3 px-4 font-mono text-[11px] text-text-dim">
+                              <div>{r.nric}</div>
+                              <div className="mt-0.5 text-text">{r.phone}</div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="inline-block bg-gold/10 text-gold px-2 py-0.5 rounded text-[9px] font-bold">
+                                K:{r.kyorugiStatus} | P:{r.poomsaeStatus}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold ${
+                                r.accommodation === 'Yes' 
+                                  ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
+                                  : 'bg-text-dim/10 text-text-dim'
+                              }`}>
+                                {r.accommodation === 'Yes' ? 'LODGING REQ' : 'No Lodge'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono font-bold text-text">
+                              {r.distance} KM
+                              <div className="text-[10px] text-text-dim font-normal">RM {travelPay.toFixed(2)}</div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {isSplit ? (
+                                <div className="space-y-1 max-w-[140px] mx-auto bg-ink/30 border border-line/40 rounded-xl p-1.5">
+                                  <div className="flex items-center justify-between gap-1 text-[10px]">
+                                    <span className="font-semibold text-text-dim">Kyorugi:</span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button 
+                                        type="button"
+                                        onClick={async () => {
+                                          const kDays = kyorugiDays;
+                                          await saveRefereeToFirestore({ ...r, kyorugiDays: Math.max(0, kDays - 1), officiatingDays: Math.max(0, kDays - 1) + poomsaeDays });
+                                        }}
+                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="font-bold font-mono px-1 text-text text-[10px]">{kyorugiDays}d</span>
+                                      <button 
+                                        type="button"
+                                        onClick={async () => {
+                                          const kDays = kyorugiDays;
+                                          await saveRefereeToFirestore({ ...r, kyorugiDays: kDays + 1, officiatingDays: kDays + 1 + poomsaeDays });
+                                        }}
+                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center justify-between gap-1 text-[10px]">
+                                    <span className="font-semibold text-text-dim">Poomsae:</span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button 
+                                        type="button"
+                                        onClick={async () => {
+                                          const pDays = poomsaeDays;
+                                          await saveRefereeToFirestore({ ...r, poomsaeDays: Math.max(0, pDays - 1), officiatingDays: kyorugiDays + Math.max(0, pDays - 1) });
+                                        }}
+                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="font-bold font-mono px-1 text-text text-[10px]">{poomsaeDays}d</span>
+                                      <button 
+                                        type="button"
+                                        onClick={async () => {
+                                          const pDays = poomsaeDays;
+                                          await saveRefereeToFirestore({ ...r, poomsaeDays: pDays + 1, officiatingDays: kyorugiDays + pDays + 1 });
+                                        }}
+                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await saveRefereeToFirestore({ 
+                                        ...r, 
+                                        kyorugiDays: 0, 
+                                        poomsaeDays: 0, 
+                                        officiatingDays: Math.max(1, kyorugiDays + poomsaeDays) 
+                                      });
+                                    }}
+                                    className="w-full text-center text-[9px] text-hong hover:underline pt-0.5"
+                                  >
+                                    Merge Standard
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-center gap-1 max-w-[90px] mx-auto">
+                                    <button 
+                                      type="button"
+                                      onClick={async () => {
+                                        if (days <= 1) return;
+                                        await saveRefereeToFirestore({ ...r, officiatingDays: days - 1 });
+                                      }}
+                                      className="w-5 h-5 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-xs"
+                                    >
+                                      -
+                                    </button>
+                                    <span className="font-bold font-mono px-2 text-text text-xs">{days}</span>
+                                    <button 
+                                      type="button"
+                                      onClick={async () => {
+                                        await saveRefereeToFirestore({ ...r, officiatingDays: days + 1 });
+                                      }}
+                                      className="w-5 h-5 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-xs"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await saveRefereeToFirestore({
+                                        ...r,
+                                        kyorugiDays: days,
+                                        poomsaeDays: 0
+                                      });
+                                    }}
+                                    className="text-[9px] text-gold hover:underline font-semibold block mx-auto pt-0.5"
+                                  >
+                                    Split Days
+                                  </button>
+                                </div>
+                              )}
+                              
+                              <div className="flex flex-col items-center gap-1.5 mt-2">
+                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                  <input 
+                                    type="checkbox"
+                                    checked={!!r.includeOvertime}
+                                    onChange={async (e) => {
+                                      await saveRefereeToFirestore({ ...r, includeOvertime: e.target.checked });
+                                    }}
+                                    className="accent-gold rounded text-ink cursor-pointer w-3 h-3"
+                                  />
+                                  <span className="text-[10px] text-text-dim">Overtime</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                  <input 
+                                    type="checkbox"
+                                    checked={!!r.includeOthers}
+                                    onChange={async (e) => {
+                                      await saveRefereeToFirestore({ ...r, includeOthers: e.target.checked });
+                                    }}
+                                    className="accent-gold rounded text-ink cursor-pointer w-3 h-3"
+                                  />
+                                  <span className="text-[10px] text-text-dim">Others</span>
+                                </label>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              {r.bankName ? (
+                                <div className="text-text-dim text-[11px]">
+                                  <span className="font-semibold text-text">{r.bankName}</span>: {r.bankAccount}
+                                </div>
+                              ) : (
+                                <span className="text-hong italic text-[10px]">No bank details</span>
+                              )}
+                              <div className="text-[10px] text-gold font-bold mt-0.5 uppercase">Plate: {r.carPlate || 'N/A'}</div>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono font-bold text-gold text-sm">
+                              RM {totalPay.toFixed(2)}
+                              <div className="text-[9px] text-text-dim font-normal leading-relaxed text-right">
+                                {isSplit ? (
+                                  <span className="block text-[8px] text-text-dim font-sans">{splitExplanation}</span>
+                                ) : (
+                                  <span>RM {dailyRate} * {days}d</span>
+                                )}
+                                <span className="block text-[9px] text-text-dim mt-0.5">
+                                  + RM {travelPay.toFixed(2)} travel
+                                </span>
+                                {r.includeOvertime && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.overtime} OT</span>}
+                                {r.includeOthers && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.others} Others</span>}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {confirmDeleteRefereeId === r.id ? (
+                                <div className="flex items-center justify-center gap-1.5 animate-fade-in">
+                                  <button
+                                    onClick={async () => {
+                                      await deleteRefereeFromFirestore(r.id);
+                                      setConfirmDeleteRefereeId(null);
+                                      triggerMsg('Referee registration deleted', 'ok');
+                                    }}
+                                    className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Yes
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDeleteRefereeId(null)}
+                                    className="bg-surface border border-line text-text px-2 py-1 rounded text-[10px] cursor-pointer"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmDeleteRefereeId(r.id)}
+                                  className="text-hong hover:text-white border border-hong/20 hover:bg-hong/90 px-2.5 py-1 rounded transition text-[10px] font-bold cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+          </div>
+        )}
+
+        {/* REFEREE DASHBOARD */}
+        {screen === 'refereeDashboard' && activeReferee && (
+          <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-surface p-6 rounded-2xl border border-line shadow-sm gap-4">
+              <div>
+                <span className="bg-gold/10 text-gold px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+                  Official Referee Terminal
+                </span>
+                <h2 className="text-xl font-bold uppercase tracking-wider text-text mt-1.5 flex items-center gap-2">
+                  <Scale className="w-5 h-5 text-gold" />
+                  Welcome, Ref. {activeReferee.fullName}
+                </h2>
+                <p className="text-sm font-semibold text-gold mt-0.5">{activeComp?.name || 'Tournament Hub'}</p>
+              </div>
+              <button
+                onClick={logout}
+                className="bg-Hong hover:opacity-90 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout Terminal
+              </button>
+            </div>
+
+            {/* Tournament Selector & Hub */}
+            <div className="bg-surface p-5 rounded-2xl border border-line shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-gold" />
+                    Tournament Hub
+                  </h3>
+                  <p className="text-xs text-text-dim mt-0.5">Select a tournament to view your credentials, or join active ones with a single click using your account profile details!</p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {competitions.filter(c => c.isActive !== false).map((comp) => {
+                  const isJoined = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() && r.compId === comp.id);
+                  const isSelected = comp.id === compId;
+                  
+                  return (
+                    <div 
+                      key={comp.id} 
+                      className={`p-3.5 rounded-xl border transition-all flex justify-between items-center ${
+                        isSelected 
+                          ? 'bg-gold/5 border-gold shadow-sm' 
+                          : 'bg-ink/50 border-line hover:border-text-dim/40'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <h4 className="text-xs font-bold text-text truncate uppercase">{comp.name}</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                            isJoined 
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {isJoined ? 'Joined' : 'Available'}
+                          </span>
+                          <span className="text-[10px] text-text-dim truncate">{comp.date} | {comp.venue}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="shrink-0 flex gap-2">
+                        {isJoined ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const matched = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() && r.compId === comp.id);
+                                if (matched) {
+                                  setCompId(comp.id);
+                                  setActiveReferee(matched);
+                                  triggerMsg(`Switched to ${comp.name} credentials`, 'ok');
+                                }
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition ${
+                                isSelected 
+                                  ? 'bg-gold text-ink' 
+                                  : 'bg-surface border border-line text-text hover:bg-surface-2'
+                              }`}
+                            >
+                              {isSelected ? 'Selected' : 'Select'}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const matched = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() && r.compId === comp.id);
+                                if (matched) {
+                                  try {
+                                    await deleteRefereeFromFirestore(matched.id);
+                                    triggerMsg(`Cancelled registration for ${comp.name}`, 'ok');
+                                    if (isSelected) {
+                                      setCompId(null);
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    triggerMsg('Failed to cancel registration', 'error');
+                                  }
+                                }
+                              }}
+                              className="px-2 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition text-hong border border-line bg-surface hover:bg-hong/10"
+                              title="Cancel Join"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={async () => {
+                              const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+                              if (!account) {
+                                triggerMsg("Could not find your referee account profile.", "error");
+                                return;
+                              }
+                              const newRef: Referee = {
+                                ...account,
+                                id: `${comp.id}_${account.nric.replace(/[^a-zA-Z0-9]/g, '')}`,
+                                compId: comp.id,
+                                createdAt: new Date().toISOString()
+                              };
+                              await saveRefereeToFirestore(newRef);
+                              setCompId(comp.id);
+                              setActiveReferee(newRef);
+                              triggerMsg(`Successfully joined ${comp.name}!`, "ok");
+                            }}
+                            className="bg-gold hover:opacity-90 text-ink px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            Join
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {competitions.filter(c => c.isActive !== false).length === 0 && (
+                  <p className="text-xs text-text-dim col-span-2 text-center py-4">No active tournaments currently available.</p>
+                )}
+              </div>
+            </div>
+
+            {activeReferee.id.startsWith('TEMP_') ? (
+              <div className="bg-surface p-8 rounded-2xl border border-line shadow-sm text-center max-w-xl mx-auto space-y-4 animate-fade-in">
+                <Scale className="w-12 h-12 text-gold mx-auto animate-bounce" />
+                <h3 className="text-base font-bold uppercase tracking-wider text-text">Tournament Officiating Credentials</h3>
+                <p className="text-xs text-text-dim leading-relaxed">
+                  {activeComp ? (
+                    <>You are logged into your Referee Account, but you are not registered to officiate for <strong>{activeComp.name}</strong> yet. Click below to register instantly using your saved credentials profile!</>
+                  ) : (
+                    <>You are logged into your Referee Account. Select a tournament from the hub above to view your credentials and officiating details.</>
+                  )}
+                </p>
+                <div className="pt-2">
+                  {activeComp && (
+                    <button
+                      onClick={async () => {
+                        const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+                        if (!account) {
+                          triggerMsg("Could not find your referee account profile.", "error");
+                          return;
+                        }
+                        const newRef: Referee = {
+                          ...account,
+                          id: `${activeComp.id}_${account.nric.replace(/[^a-zA-Z0-9]/g, '')}`,
+                          compId: activeComp.id,
+                          createdAt: new Date().toISOString()
+                        };
+                        await saveRefereeToFirestore(newRef);
+                        setActiveReferee(newRef);
+                        triggerMsg(`Successfully registered for ${activeComp.name}!`, "ok");
+                      }}
+                      className="bg-gold hover:opacity-90 text-ink px-5 py-2.5 rounded-xl text-xs font-bold shadow-md hover:shadow transition inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Join {activeComp.name} Now
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : !activeComp ? (
+              <div className="bg-surface p-8 rounded-2xl border border-line shadow-sm text-center max-w-xl mx-auto space-y-4 animate-fade-in">
+                <Scale className="w-12 h-12 text-gold/30 mx-auto" />
+                <h3 className="text-base font-bold uppercase tracking-wider text-text">Select a Tournament</h3>
+                <p className="text-xs text-text-dim leading-relaxed">
+                  Please select a tournament from the hub above to view your credentials and officiating details.
+                </p>
+              </div>
+            ) : (
+              /* Main Grid */
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              {/* Officiating Pass Column */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-text-dim">Your Officiating Pass</h3>
+                
+                {/* Official Card Layout */}
+                <div 
+                  id={`referee-pass-${activeReferee.id}`}
+                  className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 border-2 border-gold rounded-2xl p-5 shadow-lg text-center flex flex-col justify-between h-[445px] relative overflow-hidden"
+                >
+                  {/* Subtle decorative elements */}
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-gold/5 rounded-full blur-2xl"></div>
+                  <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-blue-500/5 rounded-full blur-xl"></div>
+                  
+                  {/* Card Header */}
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <Trophy className="w-6 h-6 text-gold" />
+                      <span className="text-[9px] font-bold text-white bg-gold/20 border border-gold/30 px-2 py-0.5 rounded uppercase tracking-widest">
+                        Official
+                      </span>
+                    </div>
+                    <p className="text-[20px] leading-tight text-gold font-bold uppercase tracking-wider truncate px-2 mt-3">{activeComp.name}</p>
+                  </div>
+
+                  {/* Referee Portrait Photo */}
+                  <div className="flex justify-center my-1.5">
+                    <div className="w-20 h-25 bg-slate-950 rounded-xl border border-gold/30 flex items-center justify-center shrink-0 overflow-hidden shadow-inner relative">
+                      {activeReferee.photo ? (
+                        <img 
+                          src={activeReferee.photo} 
+                          alt={activeReferee.fullName} 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="text-center p-2">
+                          <User className="w-8 h-8 text-white/30 mx-auto" />
+                          <span className="text-[8px] text-white/20 uppercase tracking-widest mt-1 block">No Photo</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Referee Info */}
+                  <div className="my-1.5">
+                    <h3 className="text-base font-bold text-white uppercase tracking-wider font-display truncate px-2">{activeReferee.fullName}</h3>
+                    <p className="text-[10px] text-gold font-bold uppercase tracking-widest mt-1">
+                      Kyorugi: {activeReferee.kyorugiStatus} | Poomsae: {activeReferee.poomsaeStatus}
+                    </p>
+                    {/* Wording "REFEREE" badge */}
+                    <div className="mt-3">
+                      <span className="text-sm font-black text-gold bg-gold/10 border border-gold/30 px-6 py-1 rounded-lg inline-block tracking-[0.2em] uppercase">
+                        REFEREE
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* QR / Footer */}
+                  <div className="flex justify-between items-end border-t border-white/10 pt-3.5 bg-transparent">
+                    <div className="text-left max-w-[70%]">
+                      <div className="text-[8px] text-white/40 uppercase font-bold tracking-widest">{activeComp.date}</div>
+                      <div className="text-xs font-bold text-white uppercase truncate">{activeComp.venue}</div>
+                    </div>
+                    <div className="bg-white p-1 rounded-lg shrink-0">
+                      <QRCodeSVG value={`REFEREE::${activeReferee.id}`} size={44} level="M" />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const el = document.getElementById(`referee-pass-${activeReferee.id}`);
+                    if (el) {
+                      triggerMsg('Generating Referee Pass PNG...', 'ok');
+                      htmlToImage.toPng(el, { pixelRatio: 3 }).then(dataUrl => {
+                        const link = document.createElement('a');
+                        link.download = `REFEREE_PASS_${activeReferee.fullName.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
+                        link.href = dataUrl;
+                        link.click();
+                      }).catch(err => {
+                        console.error('Failed to generate pass image', err);
+                        triggerMsg('Failed to export image.', 'error');
+                      });
+                    }
+                  }}
+                  className="w-full bg-surface hover:bg-surface-2 border border-line text-text font-bold py-2 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-gold" />
+                  Download Pass image
+                </button>
+              </div>
+
+              {/* Status and Allowance Details */}
+              <div className="md:col-span-2 space-y-6">
+                
+                {/* Section: Officiating Duty Info */}
+                <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-text flex items-center gap-2">
+                    <User className="w-4 h-4 text-gold" />
+                    Officiating Registry Information
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <span className="text-text-dim block mb-0.5">State / Club Name</span>
+                      <span className="font-semibold text-text text-sm">{activeReferee.clubName}</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">NRIC Number</span>
+                      <span className="font-semibold text-text text-sm">{activeReferee.nric}</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">Contact Phone</span>
+                      <span className="font-semibold text-text text-sm">{activeReferee.phone}</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">Residential Location</span>
+                      <span className="font-semibold text-text text-sm">{activeReferee.residentialLocation}</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">Go & Return Distance</span>
+                      <span className="font-semibold text-text text-sm">{activeReferee.distance} KM</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">Accommodation Option</span>
+                      <span className="font-semibold text-gold text-sm">{activeReferee.accommodation === 'Yes' ? 'Arranged by Organizer' : 'Self Arranged'}</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">Bank Information</span>
+                      <span className="font-semibold text-text text-sm">{activeReferee.bankName || 'N/A'} - {activeReferee.bankAccount || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-text-dim block mb-0.5">Car Plate / Parking Spot</span>
+                      <span className="font-semibold text-text text-sm uppercase">{activeReferee.carPlate || 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section: Estimated Allowance Breakdown */}
+                <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-text flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-gold" />
+                    Officiating Allowance Breakdown
+                  </h3>
+                  
+                  {(() => {
+                    const allowance = getRefereeAllowance(activeReferee, refereeFees);
+                    const { baseDutyPay, travelPay, otPay, othersPay, totalPay, dailyRate, days, isSplit, splitExplanation, kyorugiDays, poomsaeDays, higherStatus } = allowance;
+                    
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center text-xs pb-2 border-b border-line/60">
+                          <div>
+                            <span className="font-semibold text-text">Highest Ref Qualification</span>
+                            <p className="text-[10px] text-text-dim">Kyorugi: {activeReferee.kyorugiStatus} | Poomsae: {activeReferee.poomsaeStatus}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="bg-gold/10 text-gold px-2.5 py-1 rounded-lg font-bold">{higherStatus} Qualification</span>
+                            {activeReferee.specialRole && activeReferee.specialRole !== 'None' && (
+                              <span className="bg-gold text-ink px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
+                                Appointed: {activeReferee.specialRole}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2 text-xs">
+                          {isSplit ? (
+                            <div className="bg-ink/20 p-3 rounded-xl border border-line/40 space-y-1 text-text-dim mb-3">
+                              <span className="font-bold text-text-dim text-[10px] uppercase block">Split Discipline Days:</span>
+                              <div className="flex justify-between">
+                                <span>Kyorugi Officiating ({kyorugiDays} {kyorugiDays === 1 ? 'Day' : 'Days'} as {activeReferee.kyorugiStatus})</span>
+                                <span className="text-text font-semibold">RM {(kyorugiDays * (refereeFees[`rate_${activeReferee.kyorugiStatus.toLowerCase()}`] || 80)).toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Poomsae Officiating ({poomsaeDays} {poomsaeDays === 1 ? 'Day' : 'Days'} as {activeReferee.poomsaeStatus})</span>
+                                <span className="text-text font-semibold">RM {(poomsaeDays * (refereeFees[`rate_${activeReferee.poomsaeStatus.toLowerCase()}`] || 80)).toFixed(2)}</span>
+                              </div>
+                              <div className="text-[10px] text-gold italic pt-1">{splitExplanation}</div>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between text-text-dim">
+                              <span>Base Duty Allowance ({days} {days === 1 ? 'Day' : 'Days'})</span>
+                              <span className="text-text font-semibold">RM {baseDutyPay.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {travelPay > 0 && (
+                            <div className="flex justify-between text-text-dim">
+                              <span>Travel Mileage Allowance ({activeReferee.distance} KM Bracket)</span>
+                              <span className="text-text font-semibold">RM {travelPay.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {otPay > 0 && (
+                            <div className="flex justify-between text-text-dim">
+                              <span>Overtime Supplemental Pay</span>
+                              <span className="text-text font-semibold">RM {otPay.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {othersPay > 0 && (
+                            <div className="flex justify-between text-text-dim">
+                              <span>Other Supplemental Pay</span>
+                              <span className="text-text font-semibold">RM {othersPay.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-text-dim">
+                            <span>Accommodation Status</span>
+                            <span className="text-text font-semibold">{activeReferee.accommodation === 'Yes' ? 'Free (Provided)' : 'No expense (Own)'}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex justify-between items-center pt-3 border-t border-line font-bold text-sm">
+                          <span className="text-gold uppercase tracking-wider">Estimated Payout Total</span>
+                          <span className="text-xl text-gold">RM {totalPay.toFixed(2)}</span>
+                        </div>
+                        
+                        <p className="text-[10px] text-text-dim leading-relaxed italic bg-surface-2 p-3 rounded-lg border border-line mt-2">
+                          Note: This breakdown is an estimate based on standard tournament officiating rates. Final payout balances may vary if officiating days are updated by the tournament organizer.
+                        </p>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+              </div>
+
+            </div>
+          )}
+        </div>
+      )}
 
         {/* PUBLIC VIEW SCREEN */}
         {screen === 'publicView' && activeComp && (
@@ -7058,8 +10015,8 @@ export default function App() {
                                         field.align === 'center' ? 'justify-center gap-2' :
                                         'justify-between'
                                       } items-center px-3 shrink-0 shadow-sm w-full`}>
-                                        <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                        <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>
+                                        <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                                        {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
                                       </div>
                                     );
                                   }
@@ -7104,6 +10061,7 @@ export default function App() {
                                     );
                                   }
                                   if (field.id === 'athleteId') {
+                                    if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
                                     return (
                                       <div key="athleteId" className={`px-4 py-1 shrink-0 ${
                                         field.align === 'left' ? 'text-left' :
@@ -7115,7 +10073,22 @@ export default function App() {
                                     );
                                   }
                                   if (field.id === 'metadata') {
-                                    return (
+                                    if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                                      return (
+                                        <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                                          <span 
+                                            className="font-display font-bold tracking-widest uppercase text-white" 
+                                            style={{ 
+                                              fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                              color: field.color || '#ffffff' 
+                                            }}
+                                          >
+                                            {p.event}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+    return (
                                       <div key="metadata" className={`px-4 py-1 shrink-0 grid grid-cols-2 gap-1.5 text-[9px] border-t border-line/30 pt-2 ${
                                         field.align === 'left' ? 'text-left' :
                                         field.align === 'right' ? 'text-right' :
@@ -7163,7 +10136,7 @@ export default function App() {
                                         </div>
                                         <div className={textAlignmentClass}>
                                           <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                                          <p className="mt-0.5 leading-normal text-[5.5px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '5.5px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
+                                          <p className="mt-0.5 leading-normal text-[5.5px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '5.5px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                                         </div>
                                       </div>
                                     );
@@ -7217,7 +10190,7 @@ export default function App() {
               return (
                 <div 
                   key={`print-card-${p.id}`}
-                  className="w-[320px] h-[448px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border-2 border-dashed border-gray-400 rounded-3xl overflow-hidden relative flex flex-col justify-between break-inside-avoid page-break-inside-avoid"
+                  className="w-[336px] h-[480px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border-2 border-dashed border-gray-400 rounded-3xl overflow-hidden relative flex flex-col justify-between break-inside-avoid page-break-inside-avoid"
                 >
                   {activeComp.idCardBgUrl && (
                     <>
@@ -7236,8 +10209,8 @@ export default function App() {
                             field.align === 'center' ? 'justify-center gap-2' :
                             'justify-between'
                           } items-center px-3 shrink-0 shadow-sm w-full`}>
-                            <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                            <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>
+                            <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                            {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
                           </div>
                         );
                       }
@@ -7282,6 +10255,7 @@ export default function App() {
                         );
                       }
                       if (field.id === 'athleteId') {
+                        if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
                         return (
                           <div key="athleteId" className={`px-4 py-1 shrink-0 ${
                             field.align === 'left' ? 'text-left' :
@@ -7293,7 +10267,22 @@ export default function App() {
                         );
                       }
                       if (field.id === 'metadata') {
-                        return (
+                        if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                          return (
+                            <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                              <span 
+                                className="font-display font-bold tracking-widest uppercase text-white" 
+                                style={{ 
+                                  fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                  color: field.color || '#ffffff' 
+                                }}
+                              >
+                                {p.event}
+                              </span>
+                            </div>
+                          );
+                        }
+    return (
                           <div key="metadata" className={`px-4 py-1 shrink-0 grid grid-cols-2 gap-2 text-[10px] border-t border-line/30 pt-2.5 ${
                             field.align === 'left' ? 'text-left' :
                             field.align === 'right' ? 'text-right' :
@@ -7341,7 +10330,7 @@ export default function App() {
                             </div>
                             <div className={textAlignmentClass}>
                               <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                              <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
+                              <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                             </div>
                           </div>
                         );
@@ -7359,7 +10348,7 @@ export default function App() {
       {/* Off-screen elements for batch image snapshots */}
       {activeComp && (
         <div className="absolute left-[-9999px] top-[-9999px] pointer-events-none print:hidden" aria-hidden="true">
-          {players.map(p => {
+          {[...players, ...staffPasses].map(p => {
             const belt = beltColorFor(p.ageGroup || '');
             const fields = getIdCardFields(activeComp);
             
@@ -7379,8 +10368,8 @@ export default function App() {
             return (
               <div 
                 key={`batch-wrapper-${p.id}`}
-                id={`batch-card-${p.id}`}
-                className="w-[320px] h-[448px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden relative flex flex-col justify-between"
+                id={p.id.startsWith('STAFF-') ? `staff-card-${p.id}` : `batch-card-${p.id}`}
+                className="w-[336px] h-[480px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden relative flex flex-col justify-between"
               >
                 {activeComp.idCardBgUrl && (
                   <>
@@ -7398,8 +10387,8 @@ export default function App() {
                           field.align === 'center' ? 'justify-center gap-2' :
                           'justify-between'
                         } items-center px-3 shrink-0 shadow-sm w-full`}>
-                          <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                          <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>
+                          <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                          {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
                         </div>
                       );
                     }
@@ -7444,6 +10433,7 @@ export default function App() {
                       );
                     }
                     if (field.id === 'athleteId') {
+                      if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
                       return (
                         <div key="athleteId" className={`px-4 py-1 shrink-0 ${
                           field.align === 'left' ? 'text-left' :
@@ -7455,7 +10445,22 @@ export default function App() {
                       );
                     }
                     if (field.id === 'metadata') {
-                      return (
+                      if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                        return (
+                          <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                            <span 
+                              className="font-display font-bold tracking-widest uppercase text-white" 
+                              style={{ 
+                                fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                color: field.color || '#ffffff' 
+                              }}
+                            >
+                              {p.event}
+                            </span>
+                          </div>
+                        );
+                      }
+    return (
                         <div key="metadata" className={`px-4 py-1 shrink-0 grid grid-cols-2 gap-2 text-[10px] border-t border-line/30 pt-2.5 ${
                           field.align === 'left' ? 'text-left' :
                           field.align === 'right' ? 'text-right' :
@@ -7503,7 +10508,7 @@ export default function App() {
                           </div>
                           <div className={textAlignmentClass}>
                             <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                            <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify athlete.</p>
+                            <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                           </div>
                         </div>
                       );

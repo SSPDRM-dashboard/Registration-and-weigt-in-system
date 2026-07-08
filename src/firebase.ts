@@ -11,7 +11,7 @@ import {
   where,
   onSnapshot
 } from 'firebase/firestore';
-import { Competition, Player, Coach, Organizer } from './types';
+import { Competition, Player, Coach, Organizer, Referee } from './types';
 
 export enum OperationType {
   CREATE = 'create',
@@ -270,5 +270,130 @@ export function subscribeToPlayersForComp(compId: string, callback: (players: Pl
     onError(error as Error);
   });
   
+  return unsubscribe;
+}
+
+export async function fetchRefereesForComp(compId: string): Promise<Referee[]> {
+  try {
+    const colRef = collection(db, 'referees');
+    const q = query(colRef, where('compId', '==', compId));
+    const snap = await getDocs(q);
+    const referees: Referee[] = [];
+    snap.forEach((doc) => {
+      referees.push(doc.data() as Referee);
+    });
+    return referees;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
+    return [];
+  }
+}
+
+export async function saveRefereeToFirestore(referee: Referee): Promise<void> {
+  try {
+    const docRef = doc(db, 'referees', referee.id);
+    await setDoc(docRef, referee);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `referees/${referee.id}`);
+  }
+}
+
+export async function deleteRefereeFromFirestore(refereeId: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'referees', refereeId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `referees/${refereeId}`);
+  }
+}
+
+export function subscribeToRefereesForComp(compId: string, callback: (referees: Referee[]) => void, onError: (error: Error) => void): () => void {
+  const colRef = collection(db, 'referees');
+  const q = query(colRef, where('compId', '==', compId));
+  
+  const unsubscribe = onSnapshot(q, (snap) => {
+    const referees: Referee[] = [];
+    snap.forEach((doc) => {
+      referees.push(doc.data() as Referee);
+    });
+    callback(referees);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
+    onError(error as Error);
+  });
+  
+  return unsubscribe;
+}
+
+// --- REFEREE ACCOUNTS HELPERS ---
+
+export async function fetchRefereeAccounts(): Promise<Referee[]> {
+  try {
+    const colRef = collection(db, 'refereeAccounts');
+    const snap = await getDocs(colRef);
+    const accounts: Referee[] = [];
+    snap.forEach((doc) => {
+      accounts.push(doc.data() as Referee);
+    });
+    return accounts;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
+    return [];
+  }
+}
+
+export async function saveRefereeAccount(ref: Referee): Promise<void> {
+  try {
+    const docId = ref.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const docRef = doc(db, 'refereeAccounts', docId);
+    await setDoc(docRef, ref);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `refereeAccounts/${ref.nric}`);
+  }
+}
+
+export async function deleteRefereeAccount(nric: string): Promise<void> {
+  try {
+    const docId = nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const docRef = doc(db, 'refereeAccounts', docId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `refereeAccounts/${nric}`);
+  }
+}
+
+export function subscribeToRefereeAccounts(callback: (accounts: Referee[]) => void, onError: (error: Error) => void): () => void {
+  const colRef = collection(db, 'refereeAccounts');
+  const unsubscribe = onSnapshot(colRef, (snap) => {
+    const accounts: Referee[] = [];
+    snap.forEach((doc) => {
+      accounts.push(doc.data() as Referee);
+    });
+    callback(accounts);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
+    onError(error as Error);
+  });
+  return unsubscribe;
+}
+
+
+
+export function subscribeToMyReferees(nricCleaned: string, callback: (referees: Referee[]) => void, onError: (error: Error) => void): () => void {
+  const colRef = collection(db, 'referees');
+  
+  const unsubscribe = onSnapshot(colRef, (snap) => {
+    const referees: Referee[] = [];
+    snap.forEach((doc) => {
+      const data = doc.data() as Referee;
+      if (data.nric && data.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === nricCleaned) {
+        referees.push(data);
+      }
+    });
+    callback(referees);
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, `referees`);
+    onError(error as Error);
+  });
   return unsubscribe;
 }
