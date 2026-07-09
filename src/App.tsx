@@ -4,7 +4,7 @@ import {
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
-  Printer, Database, X, Coins, PenTool, Home, Shield, Save
+  Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
@@ -169,6 +169,18 @@ export const getRefereeAllowance = (r: Referee, fees: {
     higherStatus
   };
 };
+
+export function formatDateRange(start: string, end?: string): string {
+  if (!end) return start;
+  return `${start} to ${end}`;
+}
+
+export function isRegistrationClosed(comp: Competition | undefined): boolean {
+  if (!comp || !comp.registrationCloseDate) return false;
+  const closeDate = new Date(comp.registrationCloseDate);
+  closeDate.setHours(23, 59, 59, 999);
+  return new Date() > closeDate;
+}
 
 export default function App() {
   // --- STATE ---
@@ -350,6 +362,10 @@ export default function App() {
   });
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showRefereeEditProfile, setShowRefereeEditProfile] = useState<boolean>(false);
+  const [showOrganizerAddReferee, setShowOrganizerAddReferee] = useState<boolean>(false);
+  const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
+  const [selectedExistingRefereeNric, setSelectedExistingRefereeNric] = useState<string>('');
+  const [searchRegisteredQuery, setSearchRegisteredQuery] = useState('');
 
   // Custom layout & background color states
   const [layoutDensity, setLayoutDensity] = useState<'bento' | 'compact'>(() => {
@@ -427,6 +443,8 @@ export default function App() {
   const [ncName, setNcName] = useState('');
   const [ncVenue, setNcVenue] = useState('');
   const [ncDate, setNcDate] = useState('');
+  const [ncEndDate, setNcEndDate] = useState('');
+  const [ncRegistrationCloseDate, setNcRegistrationCloseDate] = useState('');
   const [ncCode, setNcCode] = useState('weighin123');
   
   // Category additions
@@ -1463,6 +1481,135 @@ export default function App() {
     }
   };
 
+  const handleOpenOrganizerAddReferee = () => {
+    setAddRefereeModalTab('existing');
+    setSelectedExistingRefereeNric('');
+    setSearchRegisteredQuery('');
+    setRefereeFullName('');
+    setRefereeNric('');
+    setRefereePhone('');
+    setRefereeClubName('');
+    setRefereeResidential('');
+    setRefereeDistance('');
+    setRefereeBankName('');
+    setRefereeBankAccount('');
+    setRefereeAccommodation('No');
+    setRefereeKyorugiStatus('TR');
+    setRefereePoomsaeStatus('TR');
+    setRefereeCarPlate('');
+    setRefereeSpecialRole('None');
+    setRefereeConsent(false);
+    setShowOrganizerAddReferee(true);
+  };
+  
+  const handleOrganizerAddExistingReferee = async () => {
+    if (!compId) {
+      triggerMsg('No active tournament selected.', 'error');
+      return;
+    }
+    if (!selectedExistingRefereeNric) {
+      triggerMsg('Please select a referee from the list.', 'error');
+      return;
+    }
+
+    const selectedAcc = refereeAccounts.find(
+      a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === selectedExistingRefereeNric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+    );
+
+    if (!selectedAcc) {
+      triggerMsg('Selected referee account not found.', 'error');
+      return;
+    }
+
+    const cleanIc = selectedAcc.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const alreadyExists = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === compId);
+    if (alreadyExists) {
+      triggerMsg('This referee is already registered for this tournament.', 'error');
+      return;
+    }
+
+    const tournamentRef: Referee = {
+      ...selectedAcc,
+      id: `${compId}_${cleanIc}`,
+      compId: compId,
+      specialRole: refereeSpecialRole,
+      createdAt: new Date().toISOString()
+    };
+
+    // Remove old tournament-specific fields if any existed in the profile
+    delete tournamentRef.officiatingDays;
+    delete tournamentRef.kyorugiDays;
+    delete tournamentRef.poomsaeDays;
+
+    try {
+      await saveRefereeToFirestore(tournamentRef);
+      setShowOrganizerAddReferee(false);
+      triggerMsg(`Added existing referee ${selectedAcc.fullName} to the tournament`, 'ok');
+    } catch (e: any) {
+      console.error(e);
+      triggerMsg(`Failed to add referee: ${e.message || String(e)}`, 'error');
+    }
+  };
+
+  const handleOrganizerSaveNewReferee = async () => {
+    if (!compId) return;
+    const name = refereeFullName.trim();
+    const ic = refereeNric.trim();
+    const phone = refereePhone.trim();
+    const club = refereeClubName.trim();
+    const resLocation = refereeResidential.trim();
+    
+    const distVal = refereeDistance.toString().trim() === '' ? 0 : parseFloat(refereeDistance as string);
+    const bank = refereeBankName.trim();
+    const account = refereeBankAccount.trim();
+    const plate = refereeCarPlate.trim();
+
+    if (!name || !ic || !phone || !club || !resLocation || !refereeKyorugiStatus || !refereePoomsaeStatus) {
+      triggerMsg('Please fill in all required (*) fields with valid values.', 'error');
+      return;
+    }
+    if (isNaN(distVal)) {
+      triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
+      return;
+    }
+
+    const cleanIc = ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const alreadyExists = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === compId);
+    if (alreadyExists) {
+      triggerMsg('A referee with this NRIC is already registered for this tournament.', 'error');
+      return;
+    }
+
+    const newRef: Referee = {
+      id: `${compId}_${ic.replace(/[^a-zA-Z0-9]/g, '')}`,
+      compId: compId,
+      fullName: name,
+      nric: ic,
+      phone: phone,
+      clubName: club,
+      residentialLocation: resLocation,
+      distance: distVal,
+      bankName: bank,
+      bankAccount: account,
+      accommodation: refereeAccommodation,
+      kyorugiStatus: refereeKyorugiStatus,
+      poomsaeStatus: refereePoomsaeStatus,
+      carPlate: plate,
+      specialRole: refereeSpecialRole,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await saveRefereeToFirestore(newRef);
+      await saveRefereeAccount(newRef);
+      setShowOrganizerAddReferee(false);
+      triggerMsg(`Added new referee ${name}`, 'ok');
+    } catch (e: any) {
+      console.error(e);
+      triggerMsg(`Failed to add referee: ${e.message || String(e)}`, 'error');
+    }
+  };
+
   const handleCoachSignup = () => {
     const u = sUser.trim();
     const p = sPass;
@@ -1823,6 +1970,8 @@ export default function App() {
       name,
       venue: ncVenue.trim() || 'TBD Venue',
       date: ncDate || new Date().toISOString().split('T')[0],
+      endDate: ncEndDate || '',
+      registrationCloseDate: ncRegistrationCloseDate || '',
       staffCode: ncCode || 'weighin123',
       events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'],
       genders: ['Male', 'Female', 'Mix'],
@@ -1836,7 +1985,7 @@ export default function App() {
     setScreen('adminCompDetail');
     triggerMsg('Tournament configured successfully.', 'ok');
     // Clear form
-    setNcName(''); setNcVenue(''); setNcDate(''); setNcCode('weighin123');
+    setNcName(''); setNcVenue(''); setNcDate(''); setNcEndDate(''); setNcRegistrationCloseDate(''); setNcCode('weighin123');
   };
 
   const handleToggleCompActive = (id: string) => {
@@ -2067,6 +2216,11 @@ export default function App() {
   const handleOpenCoachPlayerForm = (playerId?: string) => {
     const comp = competitions.find(c => c.id === compId);
     if (!comp) return;
+
+    if (role === 'coach' && isRegistrationClosed(comp)) {
+      triggerMsg('Registration is closed for this tournament.', 'error');
+      return;
+    }
 
     if (playerId) {
       const p = players.find(pl => pl.id === playerId);
@@ -3356,7 +3510,7 @@ export default function App() {
                         </div>
                         <h4 className="text-base font-bold text-text font-sans uppercase leading-tight group-hover:text-gold transition-colors">{c.name}</h4>
                         <p className="text-xs text-text-dim mt-2 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {c.venue}</p>
-                        <p className="text-xs text-text-dim mt-1 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {c.date}</p>
+                        <p className="text-xs text-text-dim mt-1 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {formatDateRange(c.date, c.endDate)}</p>
                       </div>
                     );
                   })
@@ -3384,13 +3538,20 @@ export default function App() {
                   <p className="text-xs text-text-dim">Club: <strong className="text-text">{coaches[user || '']?.club}</strong></p>
                 </div>
               </div>
-              <button
-                onClick={() => handleOpenCoachPlayerForm()}
-                className="w-full sm:w-auto bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Register New Athlete</span>
-              </button>
+              {isRegistrationClosed(activeComp) ? (
+                <div className="w-full sm:w-auto bg-surface-2 border border-line text-text-dim font-bold text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-2 cursor-not-allowed">
+                  <Lock className="w-4 h-4" />
+                  <span>Registration Closed</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleOpenCoachPlayerForm()}
+                  className="w-full sm:w-auto bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Register New Athlete</span>
+                </button>
+              )}
             </div>
 
             {/* PAYMENT & BANKING SECTION FOR COACH */}
@@ -5022,7 +5183,7 @@ export default function App() {
                               </div>
                               <h4 className="text-base font-bold text-text uppercase tracking-wide font-display pt-2 line-clamp-1">{c.name}</h4>
                               <p className="text-xs text-text-dim flex items-center gap-1"><MapPin className="w-3.5 h-3.5 shrink-0" /> {c.venue}</p>
-                              <p className="text-xs text-text-dim flex items-center gap-1"><Calendar className="w-3.5 h-3.5 shrink-0" /> {c.date}</p>
+                              <p className="text-xs text-text-dim flex items-center gap-1"><Calendar className="w-3.5 h-3.5 shrink-0" /> {formatDateRange(c.date, c.endDate)}</p>
                             </div>
 
                             <div className="border-t border-line/40 pt-4 mt-4 flex items-center justify-between gap-2">
@@ -5769,7 +5930,7 @@ export default function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Venue Location</label>
                   <input 
@@ -5782,11 +5943,31 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Date</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Start Date</label>
                   <input 
                     type="date" 
                     value={ncDate}
                     onChange={(e) => setNcDate(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament End Date</label>
+                  <input 
+                    type="date" 
+                    value={ncEndDate}
+                    onChange={(e) => setNcEndDate(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Registration Close Date</label>
+                  <input 
+                    type="date" 
+                    value={ncRegistrationCloseDate}
+                    onChange={(e) => setNcRegistrationCloseDate(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
                     className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
                   />
@@ -5829,7 +6010,10 @@ export default function App() {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-surface p-4 rounded-2xl border border-line shadow-sm">
               <div>
                 <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">{activeComp.name}</h2>
-                <p className="text-xs text-text-dim">Venue: {activeComp.venue} · Date: {activeComp.date}</p>
+                <p className="text-xs text-text-dim">Venue: {activeComp.venue} · Date: {formatDateRange(activeComp.date, activeComp.endDate)}</p>
+                {activeComp.registrationCloseDate && (
+                  <p className="text-xs text-text-dim mt-0.5">Registration Closes: {activeComp.registrationCloseDate}</p>
+                )}
               </div>
               <button 
                 onClick={() => setScreen('adminHome')}
@@ -8368,9 +8552,17 @@ export default function App() {
                   <p className="text-xs text-text-dim mt-0.5">Calculate individual duty payouts, accommodation allocations, and banking info</p>
                 </div>
                 
-                <button
-                  onClick={() => {
-                    if (referees.length === 0) {
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => handleOpenOrganizerAddReferee()}
+                    className="bg-ink hover:bg-surface-2 text-gold border border-gold/30 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer self-stretch sm:self-auto justify-center"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Referee
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (referees.length === 0) {
                       triggerMsg('No referee record available to export', 'error');
                       return;
                     }
@@ -8421,13 +8613,14 @@ export default function App() {
                   <Download className="w-4 h-4" />
                   Export Ledger to Excel
                 </button>
+                </div>
               </div>
 
               {referees.length === 0 ? (
                 <div className="p-12 text-center text-xs text-text-dim space-y-2">
                   <Scale className="w-12 h-12 text-gold/30 mx-auto" />
                   <p className="font-semibold text-text">No Referees Registered</p>
-                  <p className="max-w-md mx-auto">No referees have registered for this tournament yet. Encourage officials to sign up through the Referee portal tab.</p>
+                  <p className="max-w-md mx-auto">No referees have registered for this tournament yet. Encourage officials to sign up through the Referee portal, or add them manually using the button above.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -8786,7 +8979,7 @@ export default function App() {
                           }`}>
                             {isJoined ? 'Joined' : 'Available'}
                           </span>
-                          <span className="text-[10px] text-text-dim truncate">{comp.date} | {comp.venue}</span>
+                          <span className="text-[10px] text-text-dim truncate">{formatDateRange(comp.date, comp.endDate)} | {comp.venue}</span>
                         </div>
                       </div>
                       
@@ -8975,7 +9168,7 @@ export default function App() {
                   {/* QR / Footer */}
                   <div className="flex justify-between items-end border-t border-white/10 pt-3.5 bg-transparent">
                     <div className="text-left max-w-[70%]">
-                      <div className="text-[8px] text-white/40 uppercase font-bold tracking-widest">{activeComp.date}</div>
+                      <div className="text-[8px] text-white/40 uppercase font-bold tracking-widest">{formatDateRange(activeComp.date, activeComp.endDate)}</div>
                       <div className="text-xs font-bold text-white uppercase truncate">{activeComp.venue}</div>
                     </div>
                     <div className="bg-white p-1 rounded-lg shrink-0">
@@ -9891,6 +10084,312 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ORGANIZER ADD REFEREE MODAL */}
+      {showOrganizerAddReferee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+            
+            {/* Header */}
+            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
+              <h2 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
+                <User className="w-5 h-5 text-gold" />
+                Add Referee to Tournament
+              </h2>
+              <button 
+                onClick={() => setShowOrganizerAddReferee(false)}
+                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-line bg-surface-2/20">
+              <button
+                type="button"
+                onClick={() => setAddRefereeModalTab('existing')}
+                className={`flex-1 py-3 px-4 text-center text-sm font-semibold border-b-2 transition ${
+                  addRefereeModalTab === 'existing'
+                    ? 'border-gold text-gold bg-gold/5'
+                    : 'border-transparent text-text-dim hover:text-text hover:bg-surface-2/10'
+                }`}
+              >
+                Select Registered Referee
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddRefereeModalTab('new')}
+                className={`flex-1 py-3 px-4 text-center text-sm font-semibold border-b-2 transition ${
+                  addRefereeModalTab === 'new'
+                    ? 'border-gold text-gold bg-gold/5'
+                    : 'border-transparent text-text-dim hover:text-text hover:bg-surface-2/10'
+                }`}
+              >
+                Create New Referee Profile
+              </button>
+            </div>
+
+            {/* Content */}
+            {addRefereeModalTab === 'existing' ? (
+              <div className="p-6 overflow-y-auto space-y-6 flex-1 flex flex-col min-h-0">
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-dim" />
+                    <input
+                      type="text"
+                      placeholder="Search registered referees by name, NRIC, or club..."
+                      value={searchRegisteredQuery}
+                      onChange={(e) => setSearchRegisteredQuery(e.target.value)}
+                      className="w-full bg-ink border border-line text-sm rounded-xl py-2.5 pl-10 pr-4 text-text focus:outline-none focus:border-gold placeholder:text-text-dim/60"
+                    />
+                  </div>
+
+                  <div className="border border-line rounded-2xl overflow-hidden bg-ink/30 flex flex-col max-h-[220px]">
+                    <div className="p-3 bg-surface border-b border-line text-[10px] font-bold uppercase tracking-wider text-text-dim flex justify-between shrink-0">
+                      <span>Name & NRIC</span>
+                      <span>Club & Qualifications</span>
+                    </div>
+                    <div className="overflow-y-auto divide-y divide-line flex-1">
+                      {(() => {
+                        const availableRegisteredReferees = refereeAccounts.filter(acc => {
+                          const cleanAccNric = acc.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                          const isAlreadyInComp = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanAccNric);
+                          if (isAlreadyInComp) return false;
+                          
+                          if (searchRegisteredQuery.trim()) {
+                            const q = searchRegisteredQuery.toLowerCase();
+                            return (
+                              acc.fullName.toLowerCase().includes(q) ||
+                              acc.nric.toLowerCase().includes(q) ||
+                              (acc.clubName && acc.clubName.toLowerCase().includes(q))
+                            );
+                          }
+                          return true;
+                        });
+
+                        if (availableRegisteredReferees.length === 0) {
+                          return (
+                            <div className="p-8 text-center text-sm text-text-dim">
+                              No registered referees found matching your search.
+                            </div>
+                          );
+                        }
+
+                        return availableRegisteredReferees.map((acc) => {
+                          const isSelected = selectedExistingRefereeNric === acc.nric;
+                          return (
+                            <button
+                              key={acc.nric}
+                              type="button"
+                              onClick={() => {
+                                setSelectedExistingRefereeNric(acc.nric);
+                                setRefereeSpecialRole(acc.specialRole || 'None');
+                              }}
+                              className={`w-full text-left p-3.5 flex items-center justify-between text-sm transition cursor-pointer ${
+                                isSelected 
+                                  ? 'bg-gold/10 hover:bg-gold/15 border-l-4 border-gold' 
+                                  : 'hover:bg-surface-2/40 border-l-4 border-transparent'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+                                  isSelected ? 'border-gold bg-gold text-ink' : 'border-line'
+                                }`}>
+                                  {isSelected && <Check className="w-3.5 h-3.5 font-bold" />}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-text text-sm">{acc.fullName}</div>
+                                  <div className="text-xs text-text-dim font-mono">{acc.nric}</div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-xs font-semibold text-text">{acc.clubName || 'N/A'}</div>
+                                <div className="flex gap-1.5 mt-1 justify-end">
+                                  <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
+                                    Kyorugi: {acc.kyorugiStatus}
+                                  </span>
+                                  <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
+                                    Poomsae: {acc.poomsaeStatus}
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedExistingRefereeNric && (() => {
+                  const acc = refereeAccounts.find(a => a.nric === selectedExistingRefereeNric);
+                  if (!acc) return null;
+                  return (
+                    <div className="border border-line rounded-2xl p-5 bg-surface-2/20 space-y-4 animate-fade-in text-sm">
+                      <h4 className="text-xs font-bold text-gold uppercase tracking-wider">
+                        Referee Selection Profile Details
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-3 gap-x-4 text-xs">
+                        <div>
+                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Phone</span>
+                          <span className="font-semibold text-text">{acc.phone || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Residential Location</span>
+                          <span className="font-semibold text-text">{acc.residentialLocation || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Distance to Venue</span>
+                          <span className="font-semibold text-text">{acc.distance !== undefined ? `${acc.distance} KM` : 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Bank Information</span>
+                          <span className="font-semibold text-text">
+                            {acc.bankName ? `${acc.bankName} - ${acc.bankAccount || 'No Acct'}` : 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Car Plate</span>
+                          <span className="font-semibold text-text uppercase">{acc.carPlate || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Accommodation Preference</span>
+                          <span className="font-semibold text-text">{acc.accommodation || 'No'}</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-line/60">
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">
+                          Assign Special Appointed Role for This Tournament
+                        </label>
+                        <select 
+                          value={refereeSpecialRole} 
+                          onChange={(e) => setRefereeSpecialRole(e.target.value as any)} 
+                          className="w-full sm:max-w-xs bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        >
+                          <option value="None">None (Standard Referee)</option>
+                          <option value="TD">Technical Delegate (TD)</option>
+                          <option value="CSB">Supervisory Board (CSB)</option>
+                          <option value="RIC">Referee In-Charge (RIC)</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="p-6 overflow-y-auto space-y-6 flex-1 min-h-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Full Name *</label>
+                    <input type="text" value={refereeFullName} onChange={(e) => setRefereeFullName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">NRIC Number *</label>
+                    <input type="text" value={refereeNric} onChange={(e) => setRefereeNric(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number *</label>
+                    <input type="tel" value={refereePhone} onChange={(e) => setRefereePhone(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">State / Club Name *</label>
+                    <input type="text" value={refereeClubName} onChange={(e) => setRefereeClubName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Residential Location *</label>
+                    <input type="text" value={refereeResidential} onChange={(e) => setRefereeResidential(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM)</label>
+                    <input type="number" value={refereeDistance} onChange={(e) => setRefereeDistance(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name</label>
+                    <input type="text" value={refereeBankName} onChange={(e) => setRefereeBankName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number</label>
+                    <input type="text" value={refereeBankAccount} onChange={(e) => setRefereeBankAccount(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Kyorugi Referee Status *</label>
+                    <select value={refereeKyorugiStatus} onChange={(e) => setRefereeKyorugiStatus(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
+                      <option value="TR">Trainee Referee (TR)</option>
+                      <option value="SR">State Referee (SR)</option>
+                      <option value="NR">National Referee (NR)</option>
+                      <option value="IR">International Referee (IR)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Poomsae Referee Status *</label>
+                    <select value={refereePoomsaeStatus} onChange={(e) => setRefereePoomsaeStatus(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
+                      <option value="TR">Trainee Referee (TR)</option>
+                      <option value="SR">State Referee (SR)</option>
+                      <option value="NR">National Referee (NR)</option>
+                      <option value="IR">International Referee (IR)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Accommodation Required? *</label>
+                    <select value={refereeAccommodation} onChange={(e) => setRefereeAccommodation(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
+                      <option value="No">No - I will arrange my own</option>
+                      <option value="Yes">Yes - Organizer to arrange</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Car Plate Number</label>
+                    <input type="text" value={refereeCarPlate} onChange={(e) => setRefereeCarPlate(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold uppercase" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Special Appointed Role</label>
+                    <select value={refereeSpecialRole} onChange={(e) => setRefereeSpecialRole(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
+                      <option value="None">None (Standard Referee)</option>
+                      <option value="TD">Technical Delegate (TD)</option>
+                      <option value="CSB">Supervisory Board (CSB)</option>
+                      <option value="RIC">Referee In-Charge (RIC)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Footer Actions */}
+            <div className="p-6 border-t border-line flex justify-end gap-3 bg-surface-2/30 shrink-0">
+              <button 
+                onClick={() => setShowOrganizerAddReferee(false)}
+                className="text-text-dim border border-line px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-surface-2 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              {addRefereeModalTab === 'existing' ? (
+                <button 
+                  onClick={handleOrganizerAddExistingReferee}
+                  disabled={!selectedExistingRefereeNric}
+                  className={`px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2 ${
+                    selectedExistingRefereeNric
+                      ? 'bg-gold hover:bg-yellow-400 text-ink cursor-pointer'
+                      : 'bg-gold/40 text-ink/50 cursor-not-allowed'
+                  }`}
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Referee
+                </button>
+              ) : (
+                <button 
+                  onClick={handleOrganizerSaveNewReferee}
+                  className="bg-gold hover:bg-yellow-400 text-ink px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Referee
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* BATCH PRINT & EXPORT PORTAL MODAL */}
       {showPrintAllCardsModal && activeComp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">

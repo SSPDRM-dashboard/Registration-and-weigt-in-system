@@ -1,5 +1,5 @@
 {
-  "name": "Remix: MY-TKD REGS",
+  "name": "MY-TKD REGS",
   "description": "Taekwondo competition registration and real-time digital weigh-in management system with QR code generator, ID cards, and live camera scanners.",
   "requestFramePermissions": [
     "camera"

@@ -44,6 +44,8 @@ export interface Competition {
   name: string;
   venue: string;
   date: string;
+  endDate?: string;
+  registrationCloseDate?: string;
   staffCode: string;
   events: string[];
   genders: string[];
