@@ -493,6 +493,7 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const athleteId = params.get('indemnity');
+    const compIdParam = params.get('indemnityComp');
     if (athleteId) {
       setIndemnityLoading(true);
       setScreen('parentIndemnity');
@@ -511,6 +512,22 @@ export default function App() {
         console.error(err);
         setIndemnityLoading(false);
         triggerMsg('Error loading athlete record.', 'error');
+      });
+    } else if (compIdParam) {
+      setIndemnityLoading(true);
+      setScreen('parentIndemnity');
+      fetchCompetitionById(compIdParam).then((comp) => {
+        if (comp) {
+          setIndemnityComp(comp);
+          setIndemnityPlayer(null);
+        } else {
+          triggerMsg('Tournament record not found for indemnity form.', 'error');
+        }
+        setIndemnityLoading(false);
+      }).catch(err => {
+        console.error(err);
+        setIndemnityLoading(false);
+        triggerMsg('Error loading tournament record.', 'error');
       });
     }
   }, []);
@@ -9719,6 +9736,55 @@ export default function App() {
                         </div>
                         <AlertCircle className="w-8 h-8 text-amber-400/30" />
                       </div>
+                    </div>
+
+                    {/* Tournament-wide Shared Indemnity Link Card */}
+                    <div className="bg-gradient-to-r from-gold/10 via-gold/5 to-transparent p-5 rounded-2xl border border-gold/20 space-y-3.5">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gold/15 border border-gold/30 flex items-center justify-center text-gold shrink-0 mt-0.5">
+                          <ExternalLink className="w-5 h-5" />
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-text uppercase tracking-wider">Tournament-Wide Shared Parental Consent Link</h4>
+                          <p className="text-xs text-text-dim leading-relaxed">
+                            Instead of copying individual links for each athlete, you can share this **single link** to your club's WhatsApp or Telegram group. Parents will click it, search and select their child, and fill up the indemnity waiver instantly.
+                          </p>
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const sharedUrl = window.location.origin + window.location.pathname + '?indemnityComp=' + (compId || '');
+                        const waShareText = encodeURIComponent(`Dear Parents/Guardians, please click this official link to select your child and fill up the required Parental Consent & Indemnity Form for the ${activeComp?.name || 'upcoming tournament'}: ${sharedUrl}`);
+                        return (
+                          <div className="flex flex-col sm:flex-row items-center gap-3 bg-ink/50 p-2.5 rounded-xl border border-line">
+                            <input 
+                              type="text" 
+                              readOnly 
+                              value={sharedUrl} 
+                              className="w-full bg-transparent text-xs text-text border-none focus:outline-none focus:ring-0 select-all px-2 font-mono"
+                            />
+                            <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(sharedUrl);
+                                  triggerMsg('Tournament-wide indemnity link copied to clipboard!', 'ok');
+                                }}
+                                className="w-full sm:w-auto bg-gold text-ink hover:bg-gold/90 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <Copy className="w-4 h-4" />
+                                <span>Copy Link</span>
+                              </button>
+                              <button
+                                onClick={() => window.open(`https://api.whatsapp.com/send?text=${waShareText}`, '_blank')}
+                                className="w-full sm:w-auto bg-emerald-650 hover:opacity-95 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <Share2 className="w-4 h-4" />
+                                <span>WhatsApp</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Filter and Search controls */}

@@ -1,11 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Trophy, ShieldAlert, CheckCircle, Calendar, MapPin, User, 
-  PenTool, Check, Activity, FileText, AlertCircle 
+  PenTool, Check, Activity, FileText, AlertCircle, Search, ArrowLeft, ShieldCheck 
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import { Player, Competition } from '../types';
-import { savePlayerToFirestore } from '../firebase';
+import { savePlayerToFirestore, subscribeToPlayersForComp } from '../firebase';
 
 interface ParentIndemnityFormProps {
   indemnityPlayer: Player | null;
@@ -22,6 +22,12 @@ export default function ParentIndemnityForm({
   triggerMsg,
   setScreen
 }: ParentIndemnityFormProps) {
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [playersList, setPlayersList] = useState<Player[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loadingPlayers, setLoadingPlayers] = useState(false);
+
+  // Form Inputs
   const [parentName, setParentName] = useState('');
   const [parentIc, setParentIc] = useState('');
   const [parentPhone, setParentPhone] = useState('');
@@ -38,17 +44,48 @@ export default function ParentIndemnityForm({
 
   const sigCanvasRef = useRef<SignatureCanvas>(null);
 
+  // Sync selected player if prop changes
+  useEffect(() => {
+    if (indemnityPlayer) {
+      setSelectedPlayer(indemnityPlayer);
+    } else {
+      setSelectedPlayer(null);
+    }
+  }, [indemnityPlayer]);
+
+  // Load players if competition is provided and no specific athlete is pre-selected
+  useEffect(() => {
+    if (indemnityComp && !indemnityPlayer) {
+      setLoadingPlayers(true);
+      const unsubscribe = subscribeToPlayersForComp(
+        indemnityComp.id,
+        (players) => {
+          // Sort players by name alphabetically
+          const sorted = [...players].sort((a, b) => a.name.localeCompare(b.name));
+          setPlayersList(sorted);
+          setLoadingPlayers(false);
+        },
+        (err) => {
+          console.error(err);
+          setLoadingPlayers(false);
+        }
+      );
+      return () => unsubscribe();
+    }
+  }, [indemnityComp, indemnityPlayer]);
+
   if (indemnityLoading) {
     return (
       <div className="max-w-md mx-auto my-12 p-8 bg-surface rounded-2xl border border-line shadow-xl text-center space-y-4">
         <Activity className="w-12 h-12 text-gold animate-spin mx-auto" />
-        <h3 className="text-lg font-bold text-text uppercase tracking-widest">Verifying Athlete Credentials</h3>
+        <h3 className="text-lg font-bold text-text uppercase tracking-widest">Verifying Credentials</h3>
         <p className="text-xs text-text-dim">Retrieving secure digital registration and tournament parameters from cloud servers...</p>
       </div>
     );
   }
 
-  if (!indemnityPlayer) {
+  // If no competition record is found at all, we show access denied
+  if (!indemnityComp) {
     return (
       <div className="max-w-md mx-auto my-12 p-8 bg-surface rounded-2xl border border-line shadow-xl text-center space-y-6">
         <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
@@ -57,7 +94,7 @@ export default function ParentIndemnityForm({
         <div className="space-y-2">
           <h3 className="text-lg font-bold text-text uppercase tracking-wider">Access Denied</h3>
           <p className="text-xs text-text-dim leading-relaxed">
-            We could not locate an athlete record matching this digital indemnity token.
+            We could not locate an active tournament record matching this digital indemnity token.
           </p>
         </div>
         <p className="text-[11px] bg-ink/50 p-3 rounded-lg text-text-dim text-left border border-line">
@@ -65,7 +102,7 @@ export default function ParentIndemnityForm({
         </p>
         <button 
           onClick={() => setScreen('login')}
-          className="w-full bg-surface-2 hover:bg-line text-xs font-bold uppercase tracking-wider py-2.5 rounded-xl border border-line transition text-text"
+          className="w-full bg-surface-2 hover:bg-line text-xs font-bold uppercase tracking-wider py-2.5 rounded-xl border border-line transition text-text cursor-pointer"
         >
           Return to Portal Login
         </button>
@@ -81,6 +118,10 @@ export default function ParentIndemnityForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!selectedPlayer) {
+      triggerMsg('Please select a competitor to proceed.', 'error');
+      return;
+    }
     if (!parentName.trim()) {
       triggerMsg('Please enter parent/guardian full name.', 'error');
       return;
@@ -108,7 +149,7 @@ export default function ParentIndemnityForm({
       const signatureDataUrl = sigCanvasRef.current?.getTrimmedCanvas().toDataURL('image/png') || '';
 
       const updatedPlayer: Player = {
-        ...indemnityPlayer,
+        ...selectedPlayer,
         indemnityStatus: 'Completed',
         indemnityParentName: parentName.trim(),
         indemnityParentIc: parentIc.trim(),
@@ -131,7 +172,8 @@ export default function ParentIndemnityForm({
     }
   };
 
-  if (submitted) {
+  // SUCCESS SUBMITTED VIEW
+  if (submitted && selectedPlayer) {
     return (
       <div className="max-w-md mx-auto my-12 p-8 bg-surface rounded-2xl border border-emerald-500/20 shadow-2xl text-center space-y-6 animate-fade-in">
         <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30">
@@ -141,11 +183,11 @@ export default function ParentIndemnityForm({
           <h3 className="text-xl font-bold text-text uppercase tracking-widest">Form Received</h3>
           <p className="text-sm font-semibold text-emerald-400">Indemnity Authenticated Successfully</p>
           <p className="text-xs text-text-dim leading-relaxed">
-            Thank you. Parental consent for <strong className="text-text">{indemnityPlayer.name}</strong> has been secured and digitally appended to their registration profile.
+            Thank you. Parental consent for <strong className="text-text">{selectedPlayer.name}</strong> has been secured and digitally appended to their registration profile.
           </p>
         </div>
         <div className="bg-ink/50 p-4 rounded-xl border border-line text-left text-[11px] space-y-1.5 font-mono text-text-dim">
-          <div><span className="text-gold">Athlete Name:</span> {indemnityPlayer.name}</div>
+          <div><span className="text-gold">Athlete Name:</span> {selectedPlayer.name}</div>
           <div><span className="text-gold">Guardian:</span> {parentName}</div>
           <div><span className="text-gold">Timestamp:</span> {new Date().toLocaleString()}</div>
           <div><span className="text-gold">Verification Status:</span> Cloud Active</div>
@@ -157,10 +199,141 @@ export default function ParentIndemnityForm({
     );
   }
 
+  // SELECT CHILD VIEW (when indemnityPlayer prop was null and parent must choose their child)
+  if (!selectedPlayer) {
+    const filteredPlayers = playersList.filter(p => 
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.club.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.ic.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    return (
+      <div className="max-w-xl mx-auto my-6 bg-surface rounded-2xl border border-line shadow-xl overflow-hidden animate-fade-in">
+        {/* Banner */}
+        <div className="p-6 bg-gradient-to-b from-gold/10 to-transparent border-b border-line text-center relative">
+          <Trophy className="w-8 h-8 text-gold mx-auto mb-1.5" />
+          <h2 className="text-lg font-bold uppercase tracking-wider text-text">{indemnityComp.name}</h2>
+          <p className="text-xs text-text-dim">Parental Consent & Liability Release Portal</p>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Tournament details */}
+          <div className="bg-ink/40 p-4 rounded-xl border border-line/50 space-y-2 text-xs">
+            <span className="text-gold font-bold uppercase tracking-wider block">Championship Venue & Schedule</span>
+            <div className="flex flex-col sm:flex-row gap-3 justify-between font-medium text-text-dim">
+              <span className="flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-gold shrink-0" />
+                <span>{indemnityComp.venue}</span>
+              </span>
+              <span className="flex items-center gap-1 font-mono">
+                <Calendar className="w-3.5 h-3.5 text-gold shrink-0" />
+                <span>{indemnityComp.date}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Search Field */}
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-gold uppercase tracking-wider">
+              1. Search & Select Your Child
+            </label>
+            <p className="text-xs text-text-dim leading-relaxed">
+              Type your child's full registered name, NRIC/Passport, or Club to find their profile from the tournament registrations.
+            </p>
+            <div className="relative mt-2">
+              <input 
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search athlete name or NRIC..."
+                className="w-full bg-ink border border-line text-sm rounded-xl py-3 pl-10 pr-4 text-text focus:outline-none focus:border-gold transition"
+              />
+              <Search className="w-4 h-4 text-text-dim absolute left-3.5 top-3.5" />
+            </div>
+          </div>
+
+          {/* Player Roster Matches */}
+          <div className="space-y-3">
+            <span className="text-xs font-semibold text-text-dim uppercase tracking-wider block">
+              Tournament Competitors List ({filteredPlayers.length} matches)
+            </span>
+
+            {loadingPlayers ? (
+              <div className="p-8 text-center text-xs text-text-dim flex items-center justify-center gap-2">
+                <Activity className="w-4 h-4 text-gold animate-spin" />
+                <span>Loading competitors list from live servers...</span>
+              </div>
+            ) : filteredPlayers.length === 0 ? (
+              <div className="p-8 text-center border border-dashed border-line rounded-xl text-text-dim space-y-2">
+                <AlertCircle className="w-6 h-6 text-text-dim/60 mx-auto" />
+                <p className="text-xs font-bold">No registered competitors found matching "{searchQuery}".</p>
+                <p className="text-[11px]">Please double-check the spelling, ensure they are registered for this tournament, or ask your Head Coach to register them.</p>
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto space-y-2 pr-1 divide-y divide-line/20 scrollbar-thin">
+                {filteredPlayers.map((p) => (
+                  <div 
+                    key={p.id} 
+                    className="pt-3 first:pt-0 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="font-bold text-sm text-text uppercase flex items-center gap-1.5">
+                        <span>{p.name}</span>
+                        {p.indemnityStatus === 'Completed' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 font-mono">
+                            ✓ SECURED
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-text-dim">
+                        <div>Club: <strong className="text-text uppercase">{p.club}</strong></div>
+                        <div>Class: <strong className="text-text">{p.weightClass} ({p.ageGroup})</strong></div>
+                        <div>Category: <strong className="text-text">{p.event}</strong></div>
+                        <div className="font-mono">NRIC: {p.ic}</div>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 w-full sm:w-auto">
+                      {p.indemnityStatus === 'Completed' ? (
+                        <span className="w-full sm:w-auto inline-flex items-center justify-center px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/10 font-mono">
+                          Waiver Signed
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setSelectedPlayer(p)}
+                          className="w-full sm:w-auto bg-gold text-ink hover:bg-gold/90 font-bold px-4 py-1.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer text-center"
+                        >
+                          Select & Fill
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // INDEMNITY FORM FOR THE CHOSEN CHILD
   return (
     <div className="max-w-2xl mx-auto my-6 bg-surface rounded-2xl border border-line shadow-xl overflow-hidden animate-fade-in">
       {/* Banner */}
       <div className="p-6 bg-gradient-to-b from-gold/10 to-transparent border-b border-line text-center relative">
+        {/* Back Link if the parent loaded via comp link */}
+        {indemnityComp && !indemnityPlayer && (
+          <button
+            type="button"
+            onClick={() => setSelectedPlayer(null)}
+            className="absolute left-4 top-6 text-xs text-text-dim hover:text-gold flex items-center gap-1 font-semibold transition cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Choose another</span>
+          </button>
+        )}
+
         <Trophy className="w-8 h-8 text-gold mx-auto mb-1.5" />
         <h2 className="text-lg font-bold uppercase tracking-wider text-text">Parental Consent & Indemnity</h2>
         <p className="text-xs text-text-dim">Official Taekwondo Tournament Authorization Terminal</p>
@@ -177,13 +350,13 @@ export default function ParentIndemnityForm({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="space-y-1">
               <span className="text-text-dim block">Championship:</span>
-              <span className="font-bold text-text block">{indemnityComp?.name || 'Loading tournament...'}</span>
+              <span className="font-bold text-text block">{indemnityComp.name}</span>
             </div>
             <div className="space-y-1">
               <span className="text-text-dim block">Date & Venue:</span>
               <span className="font-semibold text-text block flex items-center gap-1">
                 <MapPin className="w-3 h-3 text-gold" />
-                <span>{indemnityComp?.venue || 'Host Arena'} · {indemnityComp?.date || 'Schedule'}</span>
+                <span>{indemnityComp.venue} · {indemnityComp.date}</span>
               </span>
             </div>
           </div>
@@ -197,24 +370,24 @@ export default function ParentIndemnityForm({
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
             <div>
-              <span className="text-text-dim">Competitor Name:</span>
-              <p className="font-bold text-text uppercase text-sm mt-0.5">{indemnityPlayer.name}</p>
+              <span className="text-text-dim font-sans">Competitor Name:</span>
+              <p className="font-bold text-text uppercase text-sm mt-0.5">{selectedPlayer.name}</p>
             </div>
             <div>
-              <span className="text-text-dim">NRIC / Passport No:</span>
-              <p className="font-bold text-text mt-0.5">{indemnityPlayer.ic}</p>
+              <span className="text-text-dim font-sans">NRIC / Passport No:</span>
+              <p className="font-bold text-text mt-0.5">{selectedPlayer.ic}</p>
             </div>
             <div>
-              <span className="text-text-dim">Division / Event:</span>
-              <p className="font-bold text-gold mt-0.5">{indemnityPlayer.event} ({indemnityPlayer.ageGroup})</p>
+              <span className="text-text-dim font-sans">Division / Event:</span>
+              <p className="font-bold text-gold mt-0.5">{selectedPlayer.event} ({selectedPlayer.ageGroup})</p>
             </div>
             <div>
-              <span className="text-text-dim">Target Weight Class:</span>
-              <p className="font-bold text-text mt-0.5">{indemnityPlayer.weightClass}</p>
+              <span className="text-text-dim font-sans">Target Weight Class:</span>
+              <p className="font-bold text-text mt-0.5">{selectedPlayer.weightClass}</p>
             </div>
             <div className="sm:col-span-2 pt-1.5 border-t border-line/20">
-              <span className="text-text-dim">Representing Club:</span>
-              <p className="font-bold text-text uppercase mt-0.5">{indemnityPlayer.club}</p>
+              <span className="text-text-dim font-sans">Representing Club:</span>
+              <p className="font-bold text-text uppercase mt-0.5">{selectedPlayer.club}</p>
             </div>
           </div>
         </div>
@@ -346,8 +519,9 @@ export default function ParentIndemnityForm({
           <label className="block text-xs font-bold text-gold uppercase tracking-wider flex justify-between items-center">
             <span>5. Parent / Guardian Digital Signature *</span>
             <button 
+              type="button"
               onClick={handleClearSignature}
-              className="text-[10px] text-text-dim hover:text-gold border border-line rounded-lg px-2 py-0.5 bg-ink font-mono transition"
+              className="text-[10px] text-text-dim hover:text-gold border border-line rounded-lg px-2 py-0.5 bg-ink font-mono transition cursor-pointer"
             >
               Clear Drawing Board
             </button>
@@ -369,7 +543,7 @@ export default function ParentIndemnityForm({
         <button
           type="submit"
           disabled={submitting}
-          className="w-full bg-gold text-ink hover:bg-gold/90 disabled:opacity-50 font-bold uppercase tracking-wider py-3.5 rounded-xl text-xs transition duration-300 shadow-md flex items-center justify-center gap-2"
+          className="w-full bg-gold text-ink hover:bg-gold/90 disabled:opacity-50 font-bold uppercase tracking-wider py-3.5 rounded-xl text-xs transition duration-300 shadow-md flex items-center justify-center gap-2 cursor-pointer"
         >
           {submitting ? (
             <>
