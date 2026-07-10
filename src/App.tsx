@@ -4,13 +4,14 @@ import {
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
-  Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check
+  Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check, Copy, ExternalLink, Share2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
 import { Competition, Player, Coach, WeighIn, Organizer, Referee } from './types';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
+import ParentIndemnityForm from './components/ParentIndemnityForm';
 import { 
   fetchCompetitions, 
   saveCompetition, 
@@ -28,6 +29,8 @@ import {
   subscribeToPlayersForComp,
   savePlayerToFirestore, 
   deletePlayerFromFirestore,
+  fetchPlayerById,
+  fetchCompetitionById,
   fetchRefereesForComp,
   saveRefereeToFirestore,
   deleteRefereeFromFirestore,
@@ -460,6 +463,9 @@ export default function App() {
   const [pEvent, setPEvent] = useState('');
   const [pAgeGroup, setPAgeGroup] = useState('');
   const [pWeightClass, setPWeightClass] = useState('');
+  const [pSchoolName, setPSchoolName] = useState('');
+  const [pSchoolCode, setPSchoolCode] = useState('');
+  const [pRace, setPRace] = useState('Malay');
   const [selectedMasterId, setSelectedMasterId] = useState<string | null>(null);
 
   // Login inputs
@@ -478,6 +484,36 @@ export default function App() {
   const [aUser, setAUser] = useState('admin');
   const [aPass, setAPass] = useState('');
   const [publicPassInput, setPublicPassInput] = useState('');
+  
+  // Parent Indemnity Form States
+  const [indemnityPlayer, setIndemnityPlayer] = useState<Player | null>(null);
+  const [indemnityComp, setIndemnityComp] = useState<Competition | null>(null);
+  const [indemnityLoading, setIndemnityLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const athleteId = params.get('indemnity');
+    if (athleteId) {
+      setIndemnityLoading(true);
+      setScreen('parentIndemnity');
+      fetchPlayerById(athleteId).then(async (player) => {
+        if (player) {
+          setIndemnityPlayer(player);
+          const comp = await fetchCompetitionById(player.compId);
+          if (comp) {
+            setIndemnityComp(comp);
+          }
+        } else {
+          triggerMsg('Athlete record not found for indemnity form.', 'error');
+        }
+        setIndemnityLoading(false);
+      }).catch(err => {
+        console.error(err);
+        setIndemnityLoading(false);
+        triggerMsg('Error loading athlete record.', 'error');
+      });
+    }
+  }, []);
 
   // Synchronize cComp, oComp, and refereeLoginComp with the list of active competitions
   useEffect(() => {
@@ -581,6 +617,13 @@ export default function App() {
   const [orgRefCarPlate, setOrgRefCarPlate] = useState('');
   const [orgRefSpecialRole, setOrgRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
   const [orgAssignSearch, setOrgAssignSearch] = useState('');
+
+  // Coach Indemnity Dashboard States
+  const [showIndemnityDashboardModal, setShowIndemnityDashboardModal] = useState(false);
+  const [selectedIndemnityPlayer, setSelectedIndemnityPlayer] = useState<Player | null>(null);
+  const [showViewIndemnityModal, setShowViewIndemnityModal] = useState(false);
+  const [indemnityFilterStatus, setIndemnityFilterStatus] = useState<'All' | 'Completed' | 'Pending'>('All');
+  const [indemnitySearchQuery, setIndemnitySearchQuery] = useState('');
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -2239,6 +2282,9 @@ export default function App() {
         setPAgeGroup(p.ageGroup);
         setPWeightClass(p.weightClass);
         setPendingPhoto(p.photo || null);
+        setPSchoolName(p.schoolName || '');
+        setPSchoolCode(p.schoolCode || '');
+        setPRace(p.race || 'Malay');
       }
     } else {
       setSelectedPlayerId(null);
@@ -2252,6 +2298,9 @@ export default function App() {
       setPAgeGroup(comp.ageGroups[0] || '');
       setPWeightClass(comp.weightClasses[0] || '');
       setPendingPhoto(null);
+      setPSchoolName('');
+      setPSchoolCode('');
+      setPRace('Malay');
     }
     setScreen('coachPlayerForm');
   };
@@ -2326,6 +2375,9 @@ export default function App() {
       ageGroup: pAgeGroup,
       weightClass: pWeightClass,
       photo: pendingPhoto || undefined,
+      schoolName: pSchoolName.trim(),
+      schoolCode: pSchoolCode.trim(),
+      race: pRace,
     };
 
     let updatedList = [...players];
@@ -2357,7 +2409,10 @@ export default function App() {
         weightClass: pWeightClass,
         photo: pendingPhoto || undefined,
         createdAt: new Date().toISOString(),
-        weighIn: null
+        weighIn: null,
+        schoolName: pSchoolName.trim(),
+        schoolCode: pSchoolCode.trim(),
+        race: pRace,
       };
       updatedList.push(newPlayer);
       setSelectedPlayerId(finalId);
@@ -2378,6 +2433,9 @@ export default function App() {
           club: pClub.trim(),
           photo: pendingPhoto || undefined,
           coachUsername: user || undefined,
+          schoolName: pSchoolName.trim(),
+          schoolCode: pSchoolCode.trim(),
+          race: pRace,
         }
       });
     }
@@ -2560,6 +2618,9 @@ export default function App() {
           'DOB': p.dob,
           'Gender': p.gender,
           'Club Represented': p.club,
+          'School Name': p.schoolName || '—',
+          'School Code': p.schoolCode || '—',
+          'Race': p.race || '—',
           'Event': p.event,
           'Division Bracket': p.ageGroup,
           'Target Weight Class': p.weightClass,
@@ -2596,6 +2657,9 @@ export default function App() {
           'DOB': '',
           'Gender': '',
           'Club Represented': '',
+          'School Name': '',
+          'School Code': '',
+          'Race': '',
           'Event': '',
           'Division Bracket': '',
           'Target Weight Class': '',
@@ -2619,6 +2683,9 @@ export default function App() {
           'DOB': '',
           'Gender': '',
           'Club Represented': '',
+          'School Name': '',
+          'School Code': '',
+          'Race': '',
           'Event': '',
           'Division Bracket': '',
           'Target Weight Class': '',
@@ -2642,6 +2709,9 @@ export default function App() {
           'DOB': '',
           'Gender': '',
           'Club Represented': '',
+          'School Name': '',
+          'School Code': '',
+          'Race': '',
           'Event': '',
           'Division Bracket': '',
           'Target Weight Class': '',
@@ -2682,14 +2752,20 @@ export default function App() {
     const matchesUser = role === 'coach' ? p.coachUsername === user : true;
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.club.toLowerCase().includes(searchQuery.toLowerCase());
+                          p.club.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (p.schoolName && p.schoolName.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                          (p.schoolCode && p.schoolCode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                          (p.race && p.race.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesUser && matchesSearch;
   });
 
   const publicFilteredPlayers = players.filter(p => {
     return p.name.toLowerCase().includes(publicSearchQuery.toLowerCase()) || 
            p.id.toLowerCase().includes(publicSearchQuery.toLowerCase()) ||
-           p.club.toLowerCase().includes(publicSearchQuery.toLowerCase());
+           p.club.toLowerCase().includes(publicSearchQuery.toLowerCase()) ||
+           (p.schoolName && p.schoolName.toLowerCase().includes(publicSearchQuery.toLowerCase())) ||
+           (p.schoolCode && p.schoolCode.toLowerCase().includes(publicSearchQuery.toLowerCase())) ||
+           (p.race && p.race.toLowerCase().includes(publicSearchQuery.toLowerCase()));
   });
 
   const activeComp = competitions.find(c => c.id === compId);
@@ -3867,16 +3943,26 @@ export default function App() {
                   <p className="text-xs text-text-dim">Verify skill matrices, print QR ID cards, and monitor live weigh-in feedback.</p>
                 </div>
                 
-                {/* Search Bar */}
-                <div className="relative w-full md:w-72">
-                  <input 
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by name or code..."
-                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 pl-8 pr-4 text-text focus:outline-none focus:border-gold"
-                  />
-                  <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-2.5 top-2.5" />
+                {/* Search Bar & Indemnity Forms */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+                  <div className="relative w-full md:w-64">
+                    <input 
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by name or code..."
+                      className="w-full bg-ink border border-line text-xs rounded-xl py-2 pl-8 pr-4 text-text focus:outline-none focus:border-gold"
+                    />
+                    <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-2.5 top-2.5" />
+                  </div>
+                  <button
+                    onClick={() => { setShowIndemnityDashboardModal(true); }}
+                    className="bg-gold text-ink font-bold hover:bg-gold/95 px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap shadow-md cursor-pointer"
+                    title="Manage Athlete Indemnity Forms"
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>Indemnity Forms</span>
+                  </button>
                 </div>
               </div>
 
@@ -3897,6 +3983,7 @@ export default function App() {
                         <th className="p-4">Age Group</th>
                         <th className="p-4">Weight Class</th>
                         <th className="p-4">Weigh-in Feedback</th>
+                        <th className="p-4">Indemnity Form</th>
                         <th className="p-4 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -3917,6 +4004,13 @@ export default function App() {
                                 <div>
                                   <div className="font-bold text-text text-sm">{p.name}</div>
                                   <div className="text-[10px] text-text-dim">Club: {p.club}</div>
+                                  {(p.schoolName || p.race) && (
+                                    <div className="text-[10px] text-gold/80 font-mono mt-0.5">
+                                      {p.schoolName && `School: ${p.schoolName} ${p.schoolCode ? `(${p.schoolCode})` : ''}`}
+                                      {p.schoolName && p.race && ' · '}
+                                      {p.race && `Race: ${p.race}`}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -3932,6 +4026,40 @@ export default function App() {
                                   <span className="text-[10px] text-text-dim">
                                     Observed: <strong>{p.weighIn.weight}kg</strong>
                                   </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold font-mono ${
+                                  p.indemnityStatus === 'Completed'
+                                    ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20'
+                                    : 'bg-amber-950/50 text-amber-400 border border-amber-500/20'
+                                }`}>
+                                  {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
+                                </span>
+                                {p.indemnityStatus === 'Completed' ? (
+                                  <button
+                                    onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
+                                    className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                    title="View completed parental indemnity form"
+                                  >
+                                    <Eye className="w-3 h-3 text-gold" />
+                                    <span>View</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      const url = window.location.origin + window.location.pathname + '?indemnity=' + p.id;
+                                      navigator.clipboard.writeText(url);
+                                      triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
+                                    }}
+                                    className="text-text-dim hover:text-gold text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                    title="Copy parental indemnity form link"
+                                  >
+                                    <Copy className="w-3 h-3 text-text-dim" />
+                                    <span>Copy Link</span>
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -4024,6 +4152,9 @@ export default function App() {
                           setPDob('');
                           setPGender('');
                           setPClub('');
+                          setPSchoolName('');
+                          setPSchoolCode('');
+                          setPRace('Malay');
                           setPendingPhoto(null);
                           setMasterSearchQuery('');
                         }}
@@ -4120,6 +4251,9 @@ export default function App() {
                                     setPDob(ma.dob || '');
                                     setPGender(ma.gender || '');
                                     setPClub(ma.club || '');
+                                    setPSchoolName(ma.schoolName || '');
+                                    setPSchoolCode(ma.schoolCode || '');
+                                    setPRace(ma.race || 'Malay');
                                     setPendingPhoto(ma.photo || null);
                                     setShowMasterDropdown(false);
                                     setMasterSearchQuery('');
@@ -4212,6 +4346,46 @@ export default function App() {
                     placeholder="e.g. Smart Ma Taekwondo" 
                     className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Name</label>
+                  <input 
+                    type="text" 
+                    value={pSchoolName}
+                    onChange={(e) => setPSchoolName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
+                    placeholder="e.g. SMK Saujana Utama" 
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Code</label>
+                  <input 
+                    type="text" 
+                    value={pSchoolCode}
+                    onChange={(e) => setPSchoolCode(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
+                    placeholder="e.g. BEA1234" 
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Race *</label>
+                  <select 
+                    value={pRace}
+                    onChange={(e) => setPRace(e.target.value)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                  >
+                    <option value="Malay">Malay</option>
+                    <option value="Chinese">Chinese</option>
+                    <option value="Indian">Indian</option>
+                    <option value="Bumiputera Sabah">Bumiputera Sabah</option>
+                    <option value="Bumiputera Sarawak">Bumiputera Sarawak</option>
+                    <option value="Others">Others</option>
+                  </select>
                 </div>
               </div>
 
@@ -5034,7 +5208,16 @@ export default function App() {
                         return (
                           <tr key={p.id} className="hover:bg-surface-2/30 transition">
                             <td className="p-4 font-mono text-gold font-bold">{p.id}</td>
-                            <td className="p-4 font-bold text-text">{p.name}</td>
+                            <td className="p-4 font-bold text-text">
+                              <div>{p.name}</div>
+                              {(p.schoolName || p.race) && (
+                                <div className="text-[10px] text-gold/80 font-mono mt-0.5 font-normal">
+                                  {p.schoolName && `School: ${p.schoolName} ${p.schoolCode ? `(${p.schoolCode})` : ''}`}
+                                  {p.schoolName && p.race && ' · '}
+                                  {p.race && `Race: ${p.race}`}
+                                </div>
+                              )}
+                            </td>
                             <td className="p-4 text-text">{p.club}</td>
                             <td className="p-4 text-text-dim">
                               <div className="font-semibold text-text">{p.weightClass}</div>
@@ -6831,7 +7014,16 @@ export default function App() {
                               {p.id}
                             </button>
                           </td>
-                          <td className="p-4 font-bold text-text">{p.name}</td>
+                          <td className="p-4 font-bold text-text">
+                            <div>{p.name}</div>
+                            {(p.schoolName || p.race) && (
+                              <div className="text-[10px] text-gold/80 font-mono mt-0.5 font-normal">
+                                {p.schoolName && `School: ${p.schoolName} ${p.schoolCode ? `(${p.schoolCode})` : ''}`}
+                                {p.schoolName && p.race && ' · '}
+                                {p.race && `Race: ${p.race}`}
+                              </div>
+                            )}
+                          </td>
                           <td className="p-4 text-text">{p.club}</td>
                           <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
                           <td className="p-4 text-text-dim">{p.weightClass}</td>
@@ -7365,7 +7557,16 @@ export default function App() {
                               {p.id}
                             </button>
                           </td>
-                          <td className="p-4 font-bold text-text">{p.name}</td>
+                          <td className="p-4 font-bold text-text">
+                            <div>{p.name}</div>
+                            {(p.schoolName || p.race) && (
+                              <div className="text-[10px] text-gold/80 font-mono mt-0.5 font-normal">
+                                {p.schoolName && `School: ${p.schoolName} ${p.schoolCode ? `(${p.schoolCode})` : ''}`}
+                                {p.schoolName && p.race && ' · '}
+                                {p.race && `Race: ${p.race}`}
+                              </div>
+                            )}
+                          </td>
                           <td className="p-4 text-text">{p.club}</td>
                           <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
                           <td className="p-4 text-text-dim">{p.weightClass}</td>
@@ -9338,6 +9539,17 @@ export default function App() {
         </div>
       )}
 
+        {/* PARENT INDEMNITY SCREEN */}
+        {screen === 'parentIndemnity' && (
+          <ParentIndemnityForm
+            indemnityPlayer={indemnityPlayer}
+            indemnityComp={indemnityComp}
+            indemnityLoading={indemnityLoading}
+            triggerMsg={triggerMsg}
+            setScreen={setScreen}
+          />
+        )}
+
         {/* PUBLIC VIEW SCREEN */}
         {screen === 'publicView' && activeComp && (
           <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
@@ -9406,7 +9618,16 @@ export default function App() {
                       {publicFilteredPlayers.map(p => (
                         <tr key={p.id} className="hover:bg-surface-2/30 transition">
                           <td className="p-4 font-mono text-gold font-bold">{p.id}</td>
-                          <td className="p-4 font-bold text-text">{p.name}</td>
+                          <td className="p-4 font-bold text-text">
+                            <div>{p.name}</div>
+                            {(p.schoolName || p.race) && (
+                              <div className="text-[10px] text-gold/80 font-mono mt-0.5 font-normal">
+                                {p.schoolName && `School: ${p.schoolName} ${p.schoolCode ? `(${p.schoolCode})` : ''}`}
+                                {p.schoolName && p.race && ' · '}
+                                {p.race && `Race: ${p.race}`}
+                              </div>
+                            )}
+                          </td>
                           <td className="p-4 text-text">{p.club}</td>
                           <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
                           <td className="p-4 text-text-dim">{p.weightClass}</td>
@@ -9427,6 +9648,375 @@ export default function App() {
         )}
 
       </main>
+
+      {/* COACH ATHLETE INDEMNITY DASHBOARD MODAL */}
+      {showIndemnityDashboardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="p-6 border-b border-line bg-gradient-to-b from-surface-2/50 to-transparent flex justify-between items-center shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display flex items-center gap-2">
+                    <span>Athlete Indemnity Dashboard</span>
+                  </h2>
+                  <p className="text-xs text-text-dim">Generate parent links, track real-time authorization status, and review signed consent certificates.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowIndemnityDashboardModal(false)}
+                className="text-text-dim hover:text-text p-1.5 hover:bg-surface-2 rounded-xl border border-transparent hover:border-line transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-grow space-y-6">
+              {(() => {
+                const coachAthletesForIndemnity = players.filter(p => p.coachUsername === user);
+                const totalCount = coachAthletesForIndemnity.length;
+                const completedCount = coachAthletesForIndemnity.filter(p => p.indemnityStatus === 'Completed').length;
+                const pendingCount = totalCount - completedCount;
+
+                const filteredIndemnityAthletes = coachAthletesForIndemnity.filter(p => {
+                  const matchesSearch = p.name.toLowerCase().includes(indemnitySearchQuery.toLowerCase()) || 
+                                        (p.id && p.id.toLowerCase().includes(indemnitySearchQuery.toLowerCase()));
+                  const matchesStatus = indemnityFilterStatus === 'All' || 
+                                        (indemnityFilterStatus === 'Completed' && p.indemnityStatus === 'Completed') ||
+                                        (indemnityFilterStatus === 'Pending' && p.indemnityStatus !== 'Completed');
+                  return matchesSearch && matchesStatus;
+                });
+
+                return (
+                  <>
+                    {/* Stats Bar */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-surface-2 p-4 rounded-2xl border border-line flex items-center justify-between">
+                        <div>
+                          <span className="block text-[10px] text-text-dim font-bold uppercase tracking-wider">Total Team Roster</span>
+                          <span className="text-2xl font-black text-text mt-0.5 block">{totalCount} Athletes</span>
+                        </div>
+                        <Users className="w-8 h-8 text-text-dim/40" />
+                      </div>
+                      
+                      <div className="bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20 flex items-center justify-between">
+                        <div>
+                          <span className="block text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Consent Secured</span>
+                          <span className="text-2xl font-black text-emerald-400 mt-0.5 block">{completedCount} Forms</span>
+                        </div>
+                        <CheckCircle className="w-8 h-8 text-emerald-400/30" />
+                      </div>
+
+                      <div className="bg-amber-950/20 p-4 rounded-2xl border border-amber-500/20 flex items-center justify-between">
+                        <div>
+                          <span className="block text-[10px] text-amber-400 font-bold uppercase tracking-wider">Awaiting Parent Signing</span>
+                          <span className="text-2xl font-black text-amber-400 mt-0.5 block">{pendingCount} Pending</span>
+                        </div>
+                        <AlertCircle className="w-8 h-8 text-amber-400/30" />
+                      </div>
+                    </div>
+
+                    {/* Filter and Search controls */}
+                    <div className="flex flex-col md:flex-row gap-3 justify-between items-center bg-surface-2 p-4 rounded-2xl border border-line">
+                      <div className="flex gap-1.5 bg-ink/40 p-1 rounded-xl border border-line shrink-0 w-full md:w-auto">
+                        {(['All', 'Completed', 'Pending'] as const).map((st) => (
+                          <button
+                            key={st}
+                            onClick={() => setIndemnityFilterStatus(st)}
+                            className={`flex-grow md:flex-none px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition cursor-pointer ${
+                              indemnityFilterStatus === st 
+                                ? 'bg-gold text-ink' 
+                                : 'text-text-dim hover:text-text'
+                            }`}
+                          >
+                            {st}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="relative w-full md:w-72">
+                        <input 
+                          type="text"
+                          value={indemnitySearchQuery}
+                          onChange={(e) => setIndemnitySearchQuery(e.target.value)}
+                          placeholder="Search athlete by name..."
+                          className="w-full bg-ink border border-line text-xs rounded-xl py-2 pl-8 pr-4 text-text focus:outline-none focus:border-gold"
+                        />
+                        <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-2.5 top-2.5" />
+                      </div>
+                    </div>
+
+                    {/* Table */}
+                    <div className="border border-line rounded-2xl overflow-hidden bg-surface-2">
+                      {filteredIndemnityAthletes.length === 0 ? (
+                        <div className="p-12 text-center text-text-dim space-y-2">
+                          <Shield className="w-10 h-10 text-text-dim/40 mx-auto" />
+                          <p className="text-sm font-bold">No matching athlete records found.</p>
+                          <p className="text-xs">Adjust filters or add new athletes to your roster list.</p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="border-b border-line bg-ink/30 text-text-dim font-semibold font-mono uppercase tracking-wider">
+                                <th className="p-4">Competitor</th>
+                                <th className="p-4">Division / Event</th>
+                                <th className="p-4">Status</th>
+                                <th className="p-4 text-right">Indemnity Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-line/30">
+                              {filteredIndemnityAthletes.map(p => {
+                                const parentUrl = window.location.origin + window.location.pathname + '?indemnity=' + p.id;
+                                const waText = encodeURIComponent(`Dear Parent/Guardian, please review and sign the required Parental Consent & Indemnity Form for ${p.name} participating in the ${activeComp?.name || 'Tournament'}: ${parentUrl}`);
+                                return (
+                                  <tr key={p.id} className="hover:bg-ink/10 transition">
+                                    <td className="p-4">
+                                      <div className="font-bold text-text text-sm">{p.name}</div>
+                                      <div className="text-[10px] text-text-dim font-mono">ID: {p.id}</div>
+                                    </td>
+                                    <td className="p-4">
+                                      <div className="font-medium text-text">{p.event}</div>
+                                      <div className="text-[10px] text-gold font-mono">{p.weightClass}</div>
+                                    </td>
+                                    <td className="p-4">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
+                                        p.indemnityStatus === 'Completed'
+                                          ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20'
+                                          : 'bg-amber-950/50 text-amber-400 border border-amber-500/20'
+                                      }`}>
+                                        {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
+                                      </span>
+                                    </td>
+                                    <td className="p-4 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        {p.indemnityStatus === 'Completed' ? (
+                                          <button
+                                            onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
+                                            className="bg-emerald-950/40 text-emerald-400 hover:bg-emerald-900/40 border border-emerald-900/40 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-wide uppercase transition cursor-pointer flex items-center gap-1"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            <span>View Certificate</span>
+                                          </button>
+                                        ) : (
+                                          <>
+                                            <button
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(parentUrl);
+                                                triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
+                                              }}
+                                              className="bg-ink hover:bg-surface border border-line text-text font-bold px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-wide transition cursor-pointer flex items-center gap-1"
+                                              title="Copy direct form URL to clipboard"
+                                            >
+                                              <Copy className="w-3.5 h-3.5" />
+                                              <span>Copy Link</span>
+                                            </button>
+                                            <button
+                                              onClick={() => window.open(`https://api.whatsapp.com/send?text=${waText}`, '_blank')}
+                                              className="bg-emerald-650 hover:opacity-90 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-wide transition cursor-pointer flex items-center gap-1"
+                                              title="Send link instantly via WhatsApp"
+                                            >
+                                              <Share2 className="w-3.5 h-3.5" />
+                                              <span>WhatsApp</span>
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-line bg-surface-2 text-right shrink-0 flex justify-between items-center text-[10px] text-text-dim">
+              <span className="italic">Protip: You can text or email parents directly with the copied links.</span>
+              <button 
+                onClick={() => setShowIndemnityDashboardModal(false)}
+                className="bg-ink hover:bg-surface border border-line font-bold text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
+              >
+                Close Dashboard
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* INDIVIDUAL COMPLETED INDEMNITY CERTIFICATE VIEWER MODAL */}
+      {showViewIndemnityModal && selectedIndemnityPlayer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/90 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="p-6 border-b border-line bg-gradient-to-b from-surface-2/50 to-transparent flex justify-between items-center shrink-0 print:hidden">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-950/40 border border-emerald-900/40 flex items-center justify-center text-emerald-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">
+                    Consent & Indemnity Form
+                  </h2>
+                  <p className="text-xs text-emerald-400 font-mono">Status: Digitally Signed & Certified</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => { setShowViewIndemnityModal(false); setSelectedIndemnityPlayer(null); }}
+                className="text-text-dim hover:text-text p-1.5 hover:bg-surface-2 rounded-xl border border-transparent hover:border-line transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body - Printable Consent Certificate */}
+            <div className="p-8 overflow-y-auto flex-grow space-y-6 bg-white text-slate-900 font-sans printable-indemnity-canvas">
+              
+              {/* Certificate Header */}
+              <div className="text-center border-b-2 border-slate-200 pb-4 space-y-1">
+                <div className="font-extrabold text-xl uppercase tracking-wider text-slate-900">Official Liability Waiver & Indemnity Form</div>
+                <div className="text-xs font-bold text-emerald-600 tracking-widest uppercase flex items-center justify-center gap-1">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Secure Digital Consent Certification</span>
+                </div>
+              </div>
+
+              {/* Tournament & Competitor Meta */}
+              <div className="grid grid-cols-2 gap-4 text-xs border-b border-slate-100 pb-4">
+                <div className="space-y-1.5">
+                  <div className="text-slate-500 uppercase tracking-wider text-[10px] font-bold">Championship Event Details</div>
+                  <div className="font-extrabold text-slate-800 text-sm">{activeComp?.name || 'Taekwondo Tournament'}</div>
+                  <div className="text-slate-600 font-medium">{activeComp?.venue} · {activeComp?.date}</div>
+                </div>
+                <div className="space-y-1.5 border-l border-slate-200 pl-4 font-mono">
+                  <div className="text-slate-500 uppercase tracking-wider text-[10px] font-bold font-sans">Verification Fingerprint</div>
+                  <div><span className="text-slate-400">Athlete ID:</span> <span className="font-bold text-slate-800">{selectedIndemnityPlayer.id}</span></div>
+                  <div><span className="text-slate-400">Division:</span> <span className="font-bold text-slate-800">{selectedIndemnityPlayer.event}</span></div>
+                  <div><span className="text-slate-400">Class:</span> <span className="font-bold text-slate-800">{selectedIndemnityPlayer.weightClass}</span></div>
+                </div>
+              </div>
+
+              {/* Roster & Participant Info */}
+              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-xs">
+                <div className="font-bold text-slate-700 border-b border-slate-200 pb-1">COMPETITOR (CHILD) PARAMETERS</div>
+                <div className="grid grid-cols-2 gap-y-2 gap-x-4">
+                  <div><span className="text-slate-500">Full Name:</span> <strong className="text-slate-900 uppercase block">{selectedIndemnityPlayer.name}</strong></div>
+                  <div><span className="text-slate-500">NRIC / Passport No:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.ic}</strong></div>
+                  <div><span className="text-slate-500">School Affiliation:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.schoolName || 'N/A'} {selectedIndemnityPlayer.schoolCode ? `(${selectedIndemnityPlayer.schoolCode})` : ''}</strong></div>
+                  <div><span className="text-slate-500">Represented Club:</span> <strong className="text-slate-900 uppercase block">{selectedIndemnityPlayer.club}</strong></div>
+                </div>
+              </div>
+
+              {/* Guardian Info */}
+              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-xs">
+                <div className="font-bold text-slate-700 border-b border-slate-200 pb-1">PARENT / GUARDIAN CONFIRMATION</div>
+                <div className="grid grid-cols-2 gap-y-2 gap-x-4">
+                  <div><span className="text-slate-500">Guardian Full Name:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentName}</strong></div>
+                  <div><span className="text-slate-500">Guardian NRIC/Passport:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentIc}</strong></div>
+                  <div><span className="text-slate-500">Relationship to Athlete:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityRelationship}</strong></div>
+                  <div><span className="text-slate-500">Contact Number:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentPhone}</strong></div>
+                  {selectedIndemnityPlayer.indemnityParentEmail && (
+                    <div className="col-span-2"><span className="text-slate-500">Email Address:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentEmail}</strong></div>
+                  )}
+                </div>
+              </div>
+
+              {/* Waiver Clause Summary */}
+              <div className="text-[10px] text-slate-500 leading-relaxed space-y-1 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div className="font-bold text-slate-700">INDEMNITY RELEASE SUMMARY</div>
+                <p>
+                  I, the undersigned parent/guardian, hereby declare that I gave absolute permission for my child to compete in this tournament. I voluntarily assume all physical risks of Taekwondo full-contact competition, exempt the tournament management and coaches from any legal liabilities, and verify that the competitor is medically sound and fully fit to participate.
+                </p>
+              </div>
+
+              {/* Signature display block */}
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+                <div className="text-xs space-y-1 font-mono text-slate-500">
+                  <div className="font-bold text-slate-700 font-sans">SECURITY DETAILS</div>
+                  <div>Signed Date: <strong className="text-slate-800">{selectedIndemnityPlayer.indemnitySignedDate}</strong></div>
+                  <div>IP Address: <strong className="text-slate-800">{selectedIndemnityPlayer.indemnitySignedIp || 'Client-device'}</strong></div>
+                  <div className="text-[10px] text-slate-400 mt-2">Verified via Cloud Record</div>
+                </div>
+                <div className="space-y-1.5 flex flex-col items-center">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Guardian Signature</span>
+                  <div className="border border-slate-200 rounded-lg p-2 bg-slate-100 w-full h-24 flex items-center justify-center overflow-hidden">
+                    {selectedIndemnityPlayer.indemnitySignature ? (
+                      <img 
+                        src={selectedIndemnityPlayer.indemnitySignature} 
+                        alt="Parent Signature" 
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-[10px] text-slate-400 italic">No signature image found</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-line bg-surface-2 flex justify-between items-center shrink-0 print:hidden">
+              <button
+                onClick={() => {
+                  const printContents = document.querySelector('.printable-indemnity-canvas')?.innerHTML;
+                  const originalContents = document.body.innerHTML;
+                  if (printContents) {
+                    const win = window.open('', '_blank');
+                    if (win) {
+                      win.document.write(`
+                        <html>
+                          <head>
+                            <title>Indemnity Certificate - ${selectedIndemnityPlayer.name}</title>
+                            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+                          </head>
+                          <body class="bg-white p-8">
+                            <div class="max-w-2xl mx-auto border-2 border-slate-300 rounded-3xl p-6 shadow-md bg-white text-slate-900 font-sans">
+                              ${printContents}
+                            </div>
+                            <script>
+                              window.onload = function() {
+                                window.print();
+                                setTimeout(function() { window.close(); }, 500);
+                              };
+                            </script>
+                          </body>
+                        </html>
+                      `);
+                      win.document.close();
+                    }
+                  }
+                }}
+                className="bg-gold text-ink font-bold hover:bg-gold/90 px-4 py-2 rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print Consent Certificate</span>
+              </button>
+              
+              <button 
+                onClick={() => { setShowViewIndemnityModal(false); setSelectedIndemnityPlayer(null); }}
+                className="bg-ink hover:bg-surface border border-line font-bold text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
+              >
+                Close Certificate
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* ATHLETE DATABASE EXPLORER MODAL */}
       {showAthleteDbModal && (

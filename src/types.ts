@@ -22,6 +22,18 @@ export interface Player {
   createdAt: string;
   weighIn: WeighIn | null;
   importSource?: string;
+  schoolName?: string;
+  schoolCode?: string;
+  race?: string;
+  indemnityStatus?: 'Pending' | 'Completed';
+  indemnityParentName?: string;
+  indemnityParentIc?: string;
+  indemnityParentPhone?: string;
+  indemnityParentEmail?: string;
+  indemnityRelationship?: string;
+  indemnitySignedDate?: string;
+  indemnitySignedIp?: string;
+  indemnitySignature?: string; // Base64 dataURL or drawing representation
 }
 
 export interface IdCardField {

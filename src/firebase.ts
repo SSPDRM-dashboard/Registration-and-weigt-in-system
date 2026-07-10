@@ -9,7 +9,8 @@ import {
   deleteDoc, 
   query, 
   where,
-  onSnapshot
+  onSnapshot,
+  getDoc
 } from 'firebase/firestore';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
 
@@ -252,6 +253,34 @@ export async function deletePlayerFromFirestore(playerId: string): Promise<void>
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `players/${playerId}`);
+  }
+}
+
+export async function fetchPlayerById(playerId: string): Promise<Player | null> {
+  try {
+    const docRef = doc(db, 'players', playerId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as Player;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `players/${playerId}`);
+    return null;
+  }
+}
+
+export async function fetchCompetitionById(compId: string): Promise<Competition | null> {
+  try {
+    const docRef = doc(db, 'competitions', compId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as Competition;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `competitions/${compId}`);
+    return null;
   }
 }
 
