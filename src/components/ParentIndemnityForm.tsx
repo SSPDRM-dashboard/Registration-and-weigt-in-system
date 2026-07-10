@@ -26,6 +26,8 @@ export default function ParentIndemnityForm({
   const [playersList, setPlayersList] = useState<Player[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingPlayers, setLoadingPlayers] = useState(false);
+  const [selectedDropdownPlayerId, setSelectedDropdownPlayerId] = useState('');
+  const [tempSelectedPlayer, setTempSelectedPlayer] = useState<Player | null>(null);
 
   // Form Inputs
   const [parentName, setParentName] = useState('');
@@ -232,86 +234,125 @@ export default function ParentIndemnityForm({
             </div>
           </div>
 
-          {/* Search Field */}
-          <div className="space-y-2">
+          {/* Search/Select Dropdown Field */}
+          <div className="space-y-3">
             <label className="block text-xs font-bold text-gold uppercase tracking-wider">
-              1. Search & Select Your Child
+              1. PLAYER
             </label>
             <p className="text-xs text-text-dim leading-relaxed">
-              Type your child's full registered name, NRIC/Passport, or Club to find their profile from the tournament registrations.
+              Search or select your child's name from the registered competitors dropdown list below.
             </p>
-            <div className="relative mt-2">
+            
+            {/* Quick search filter to narrow down dropdown options */}
+            <div className="relative">
               <input 
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search athlete name or NRIC..."
-                className="w-full bg-ink border border-line text-sm rounded-xl py-3 pl-10 pr-4 text-text focus:outline-none focus:border-gold transition"
+                placeholder="Type name or NRIC to filter list... (optional)"
+                className="w-full bg-ink border border-line text-xs rounded-xl py-2.5 pl-10 pr-4 text-text focus:outline-none focus:border-gold transition"
               />
-              <Search className="w-4 h-4 text-text-dim absolute left-3.5 top-3.5" />
+              <Search className="w-4 h-4 text-text-dim absolute left-3.5 top-3" />
+            </div>
+
+            {/* Dropdown Select */}
+            <div className="mt-2">
+              <select
+                value={selectedDropdownPlayerId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedDropdownPlayerId(val);
+                  const p = playersList.find(player => player.id === val);
+                  setTempSelectedPlayer(p || null);
+                }}
+                className="w-full bg-ink border border-line text-sm rounded-xl py-3 px-4 text-text focus:outline-none focus:border-gold transition cursor-pointer font-semibold uppercase tracking-wide"
+              >
+                <option value="" className="text-text-dim">-- Choose Competitor --</option>
+                {filteredPlayers.map((p) => {
+                  const statusSuffix = p.indemnityStatus === 'Completed' ? ' (✓ Waiver Signed)' : '';
+                  return (
+                    <option key={p.id} value={p.id} className="bg-surface text-text">
+                      {p.name.toUpperCase()} [{p.club.toUpperCase()}] - {p.ic}{statusSuffix}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
           </div>
 
-          {/* Player Roster Matches */}
-          <div className="space-y-3">
-            <span className="text-xs font-semibold text-text-dim uppercase tracking-wider block">
-              Tournament Competitors List ({filteredPlayers.length} matches)
-            </span>
+          {/* Show loading state if players are loading */}
+          {loadingPlayers && (
+            <div className="p-8 text-center text-xs text-text-dim flex items-center justify-center gap-2">
+              <Activity className="w-4 h-4 text-gold animate-spin" />
+              <span>Loading competitors list from live servers...</span>
+            </div>
+          )}
 
-            {loadingPlayers ? (
-              <div className="p-8 text-center text-xs text-text-dim flex items-center justify-center gap-2">
-                <Activity className="w-4 h-4 text-gold animate-spin" />
-                <span>Loading competitors list from live servers...</span>
+          {/* Selected Player Summary Card and Actions */}
+          {!loadingPlayers && tempSelectedPlayer && (
+            <div className="bg-ink/30 border border-line p-5 rounded-2xl space-y-4 animate-fade-in">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-line/30">
+                <div>
+                  <h4 className="text-sm font-extrabold text-text uppercase">{tempSelectedPlayer.name}</h4>
+                  <p className="text-[11px] text-text-dim font-mono">NRIC/Passport: {tempSelectedPlayer.ic}</p>
+                </div>
+                <div>
+                  {tempSelectedPlayer.indemnityStatus === 'Completed' ? (
+                    <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 font-mono">
+                      ✓ CONSENT SECURED
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-950/40 text-amber-400 border border-amber-500/20 font-mono">
+                      PENDING CONSENT
+                    </span>
+                  )}
+                </div>
               </div>
-            ) : filteredPlayers.length === 0 ? (
-              <div className="p-8 text-center border border-dashed border-line rounded-xl text-text-dim space-y-2">
-                <AlertCircle className="w-6 h-6 text-text-dim/60 mx-auto" />
-                <p className="text-xs font-bold">No registered competitors found matching "{searchQuery}".</p>
-                <p className="text-[11px]">Please double-check the spelling, ensure they are registered for this tournament, or ask your Head Coach to register them.</p>
-              </div>
-            ) : (
-              <div className="max-h-80 overflow-y-auto space-y-2 pr-1 divide-y divide-line/20 scrollbar-thin">
-                {filteredPlayers.map((p) => (
-                  <div 
-                    key={p.id} 
-                    className="pt-3 first:pt-0 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-                  >
-                    <div className="space-y-1">
-                      <div className="font-bold text-sm text-text uppercase flex items-center gap-1.5">
-                        <span>{p.name}</span>
-                        {p.indemnityStatus === 'Completed' && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 font-mono">
-                            ✓ SECURED
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-text-dim">
-                        <div>Club: <strong className="text-text uppercase">{p.club}</strong></div>
-                        <div>Class: <strong className="text-text">{p.weightClass} ({p.ageGroup})</strong></div>
-                        <div>Category: <strong className="text-text">{p.event}</strong></div>
-                        <div className="font-mono">NRIC: {p.ic}</div>
-                      </div>
-                    </div>
 
-                    <div className="shrink-0 w-full sm:w-auto">
-                      {p.indemnityStatus === 'Completed' ? (
-                        <span className="w-full sm:w-auto inline-flex items-center justify-center px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/10 font-mono">
-                          Waiver Signed
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => setSelectedPlayer(p)}
-                          className="w-full sm:w-auto bg-gold text-ink hover:bg-gold/90 font-bold px-4 py-1.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer text-center"
-                        >
-                          Select & Fill
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
+                <div>
+                  <span className="text-text-dim block">Represented Club:</span>
+                  <strong className="text-text uppercase">{tempSelectedPlayer.club}</strong>
+                </div>
+                <div>
+                  <span className="text-text-dim block">Category / Event:</span>
+                  <strong className="text-text">{tempSelectedPlayer.event}</strong>
+                </div>
+                <div>
+                  <span className="text-text-dim block">Weight Class:</span>
+                  <strong className="text-text">{tempSelectedPlayer.weightClass}</strong>
+                </div>
+                <div>
+                  <span className="text-text-dim block">Age Division:</span>
+                  <strong className="text-text">{tempSelectedPlayer.ageGroup}</strong>
+                </div>
               </div>
-            )}
-          </div>
+
+              {tempSelectedPlayer.indemnityStatus === 'Completed' ? (
+                <div className="bg-emerald-950/20 border border-emerald-500/15 p-3 rounded-xl text-[11px] text-emerald-400 leading-relaxed">
+                  This competitor's parental consent and digital indemnity waiver have already been signed and logged securely. No further action is required.
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlayer(tempSelectedPlayer)}
+                  className="w-full bg-gold text-ink hover:bg-gold/90 font-black py-3 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer text-center flex items-center justify-center gap-1.5"
+                >
+                  <PenTool className="w-4 h-4" />
+                  <span>Select & Fill Waiver Form</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* No matches warning */}
+          {!loadingPlayers && filteredPlayers.length === 0 && searchQuery && (
+            <div className="p-8 text-center border border-dashed border-line rounded-xl text-text-dim space-y-2">
+              <AlertCircle className="w-6 h-6 text-text-dim/60 mx-auto" />
+              <p className="text-xs font-bold">No registered competitors found matching "{searchQuery}".</p>
+              <p className="text-[11px]">Please double-check the spelling or ask your Head Coach to register them.</p>
+            </div>
+          )}
         </div>
       </div>
     );
