@@ -19,6 +19,7 @@ export interface Player {
   ageGroup: string;
   weightClass: string;
   photo?: string;
+  icCopy?: string;
   createdAt: string;
   weighIn: WeighIn | null;
   importSource?: string;
@@ -113,10 +114,11 @@ export interface Referee {
   officiatingDays?: number;
   kyorugiDays?: number;
   poomsaeDays?: number;
+  virtualDays?: number;
   photo?: string;
   includeOvertime?: boolean;
   includeOthers?: boolean;
-  specialRole?: 'None' | 'TD' | 'CSB' | 'RIC';
+  specialRole?: 'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE';
   createdAt: string;
 }
 

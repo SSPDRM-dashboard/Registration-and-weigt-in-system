@@ -60,6 +60,17 @@ const formatCurrency = (amount: number, feeSample: string | undefined | null) =>
   return `${prefix}${amount.toLocaleString()}${suffix}`;
 };
 
+export const formatSpecialRole = (role: string | undefined): string => {
+  if (!role || role === 'None') return '';
+  if (role === 'TD') return 'Technical Delegate (TD)';
+  if (role === 'CSB') return 'Supervisory Board (CSB)';
+  if (role === 'RIC') return 'Referee In-Charge (RIC)';
+  if (role === 'GAME_MASTER') return 'Game Master (GM)';
+  if (role === 'TECHNICAL_OPERATOR') return 'Technical Operator (TO)';
+  if (role === 'VIRTUAL_REFEREE') return 'Virtual Referee (VR)';
+  return role;
+};
+
 export const getRefereeAllowance = (r: Referee, fees: {
   km_0_50: number;
   km_50_100: number;
@@ -79,6 +90,9 @@ export const getRefereeAllowance = (r: Referee, fees: {
   rate_td: number;
   rate_csb: number;
   rate_ric: number;
+  rate_game_master?: number;
+  rate_technical_operator?: number;
+  rate_virtual_referee?: number;
 }) => {
   const tiers = { 'IR': 4, 'NR': 3, 'SR': 2, 'TR': 1 };
   const baseDailyRates = { 
@@ -118,38 +132,81 @@ export const getRefereeAllowance = (r: Referee, fees: {
     ? fees.rate_csb 
     : r.specialRole === 'RIC' 
     ? fees.rate_ric 
+    : r.specialRole === 'GAME_MASTER'
+    ? (fees.rate_game_master ?? 220)
+    : r.specialRole === 'TECHNICAL_OPERATOR'
+    ? (fees.rate_technical_operator ?? 180)
+    : r.specialRole === 'VIRTUAL_REFEREE'
+    ? (fees.rate_virtual_referee ?? 150)
     : (baseDailyRates[higherStatus] || 80);
 
-  const hasSplitDays = (r.kyorugiDays !== undefined && r.kyorugiDays > 0) || (r.poomsaeDays !== undefined && r.poomsaeDays > 0);
+  const hasSplitDays = (r.kyorugiDays !== undefined && r.kyorugiDays > 0) || 
+                       (r.poomsaeDays !== undefined && r.poomsaeDays > 0) ||
+                       (r.virtualDays !== undefined && r.virtualDays > 0);
   
   let baseDutyPay = 0;
   let totalDays = r.officiatingDays || 1;
   let splitExplanation = "";
+  let kyorugiPay = 0;
+  let poomsaePay = 0;
+  let virtualPay = 0;
 
   if (hasSplitDays) {
     const kDays = r.kyorugiDays || 0;
     const pDays = r.poomsaeDays || 0;
-    totalDays = kDays + pDays;
+    const vDays = r.virtualDays || 0;
+    totalDays = kDays + pDays + vDays;
     
     let kRate = baseDailyRates[r.kyorugiStatus] || 80;
     let pRate = baseDailyRates[r.poomsaeStatus] || 80;
+    let vRate = fees.rate_virtual_referee ?? 150;
     
-    if (r.specialRole && r.specialRole !== 'None') {
-      kRate = stdDailyRate;
-      pRate = stdDailyRate;
+    if (r.specialRole === 'GAME_MASTER') {
+      vRate = fees.rate_game_master ?? 220;
+    } else if (r.specialRole === 'TECHNICAL_OPERATOR') {
+      vRate = fees.rate_technical_operator ?? 180;
+    } else if (r.specialRole === 'VIRTUAL_REFEREE') {
+      vRate = fees.rate_virtual_referee ?? 150;
     }
     
-    const kPay = kDays * kRate;
-    const pPay = pDays * pRate;
-    baseDutyPay = kPay + pPay;
+    if (r.specialRole && !['None', 'GAME_MASTER', 'TECHNICAL_OPERATOR', 'VIRTUAL_REFEREE'].includes(r.specialRole)) {
+      kRate = stdDailyRate;
+      pRate = stdDailyRate;
+      vRate = stdDailyRate;
+    }
+    
+    kyorugiPay = kDays * kRate;
+    poomsaePay = pDays * pRate;
+    virtualPay = vDays * vRate;
+    baseDutyPay = kyorugiPay + poomsaePay + virtualPay;
     
     const explanations: string[] = [];
-    if (kDays > 0) explanations.push(`${kDays}d Kyorugi (${r.specialRole && r.specialRole !== 'None' ? r.specialRole : r.kyorugiStatus}) @ RM ${kRate}`);
-    if (pDays > 0) explanations.push(`${pDays}d Poomsae (${r.specialRole && r.specialRole !== 'None' ? r.specialRole : r.poomsaeStatus}) @ RM ${pRate}`);
+    if (kDays > 0) {
+      const roleLabel = (r.specialRole && !['GAME_MASTER', 'TECHNICAL_OPERATOR', 'VIRTUAL_REFEREE', 'None'].includes(r.specialRole)) 
+        ? formatSpecialRole(r.specialRole) 
+        : r.kyorugiStatus;
+      explanations.push(`${kDays}d Kyorugi (${roleLabel}) @ RM ${kRate}`);
+    }
+    if (pDays > 0) {
+      const roleLabel = (r.specialRole && !['GAME_MASTER', 'TECHNICAL_OPERATOR', 'VIRTUAL_REFEREE', 'None'].includes(r.specialRole)) 
+        ? formatSpecialRole(r.specialRole) 
+        : r.poomsaeStatus;
+      explanations.push(`${pDays}d Poomsae (${roleLabel}) @ RM ${pRate}`);
+    }
+    if (vDays > 0) {
+      const roleLabel = r.specialRole === 'GAME_MASTER' 
+        ? 'Game Master' 
+        : r.specialRole === 'TECHNICAL_OPERATOR' 
+        ? 'Tech Operator' 
+        : r.specialRole === 'VIRTUAL_REFEREE' 
+        ? 'Virtual Ref' 
+        : 'Virtual';
+      explanations.push(`${vDays}d ${roleLabel} @ RM ${vRate}`);
+    }
     splitExplanation = explanations.join(" + ");
   } else if (r.specialRole && r.specialRole !== 'None') {
     baseDutyPay = stdDailyRate * totalDays;
-    splitExplanation = `${totalDays} days as ${r.specialRole} @ RM ${stdDailyRate}/day`;
+    splitExplanation = `${totalDays} days as ${formatSpecialRole(r.specialRole)} @ RM ${stdDailyRate}/day`;
   } else {
     baseDutyPay = stdDailyRate * totalDays;
     splitExplanation = `${totalDays} days (${higherStatus}) @ RM ${stdDailyRate}/day`;
@@ -169,6 +226,10 @@ export const getRefereeAllowance = (r: Referee, fees: {
     splitExplanation,
     kyorugiDays: r.kyorugiDays || 0,
     poomsaeDays: r.poomsaeDays || 0,
+    virtualDays: r.virtualDays || 0,
+    kyorugiPay,
+    poomsaePay,
+    virtualPay,
     higherStatus
   };
 };
@@ -224,7 +285,7 @@ export default function App() {
   const [refereeKyorugiStatus, setRefereeKyorugiStatus] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
   const [refereePoomsaeStatus, setRefereePoomsaeStatus] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
   const [refereeCarPlate, setRefereeCarPlate] = useState('');
-  const [refereeSpecialRole, setRefereeSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
+  const [refereeSpecialRole, setRefereeSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE'>('None');
   const [refereeConsent, setRefereeConsent] = useState(false);
 
 
@@ -265,6 +326,9 @@ export default function App() {
     rate_td: number;
     rate_csb: number;
     rate_ric: number;
+    rate_game_master: number;
+    rate_technical_operator: number;
+    rate_virtual_referee: number;
   }>(() => {
     return {
       km_0_50: 55,
@@ -285,6 +349,9 @@ export default function App() {
       rate_td: 250,
       rate_csb: 200,
       rate_ric: 175,
+      rate_game_master: 220,
+      rate_technical_operator: 180,
+      rate_virtual_referee: 150,
     };
   });
 
@@ -319,6 +386,9 @@ export default function App() {
             rate_td: parsed.rate_td ?? 250,
             rate_csb: parsed.rate_csb ?? 200,
             rate_ric: parsed.rate_ric ?? 175,
+            rate_game_master: parsed.rate_game_master ?? 220,
+            rate_technical_operator: parsed.rate_technical_operator ?? 180,
+            rate_virtual_referee: parsed.rate_virtual_referee ?? 150,
           });
         } catch (e) {
           console.error("Failed to parse stored referee fees", e);
@@ -343,6 +413,9 @@ export default function App() {
           rate_td: 250,
           rate_csb: 200,
           rate_ric: 175,
+          rate_game_master: 220,
+          rate_technical_operator: 180,
+          rate_virtual_referee: 150,
         });
       }
     }
@@ -616,7 +689,7 @@ export default function App() {
   const [adminRefKyorugi, setAdminRefKyorugi] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
   const [adminRefPoomsae, setAdminRefPoomsae] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
   const [adminRefCarPlate, setAdminRefCarPlate] = useState('');
-  const [adminRefSpecialRole, setAdminRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
+  const [adminRefSpecialRole, setAdminRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE'>('None');
 
   // Organizer Referee Accounts and Registration states
   const [orgEditingRefereeNric, setOrgEditingRefereeNric] = useState<string | null>(null);
@@ -632,7 +705,7 @@ export default function App() {
   const [orgRefKyorugi, setOrgRefKyorugi] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
   const [orgRefPoomsae, setOrgRefPoomsae] = useState<'IR' | 'NR' | 'SR' | 'TR'>('TR');
   const [orgRefCarPlate, setOrgRefCarPlate] = useState('');
-  const [orgRefSpecialRole, setOrgRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC'>('None');
+  const [orgRefSpecialRole, setOrgRefSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE'>('None');
   const [orgAssignSearch, setOrgAssignSearch] = useState('');
 
   // Coach Indemnity Dashboard States
@@ -1600,6 +1673,7 @@ export default function App() {
     delete tournamentRef.officiatingDays;
     delete tournamentRef.kyorugiDays;
     delete tournamentRef.poomsaeDays;
+    delete tournamentRef.virtualDays;
 
     try {
       await saveRefereeToFirestore(tournamentRef);
@@ -3524,6 +3598,9 @@ export default function App() {
                     <option value="TD">Technical Delegate (TD)</option>
                     <option value="CSB">Supervisory Board (CSB)</option>
                     <option value="RIC">Referee In-Charge (RIC)</option>
+                    <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                    <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                    <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
                   </select>
                 </div>
               </div>
@@ -5887,7 +5964,7 @@ export default function App() {
                         </select>
                       </div>
 
-                      <div>
+                       <div>
                         <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Special Appointed Role</label>
                         <select
                           value={adminRefSpecialRole}
@@ -5898,6 +5975,9 @@ export default function App() {
                           <option value="TD">Technical Delegate (TD)</option>
                           <option value="CSB">Supervisory Board (CSB)</option>
                           <option value="RIC">Referee In-Charge (RIC)</option>
+                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
                         </select>
                       </div>
 
@@ -8462,6 +8542,48 @@ export default function App() {
                         </div>
                       </div>
                     </div>
+
+                    <div className="border-t border-line/20 pt-3">
+                      <div className="text-[9px] text-text-dim uppercase tracking-wider font-bold mb-1.5">Virtual Taekwondo Officials</div>
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Game Master</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_game_master}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_game_master: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Technical Operator</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_technical_operator}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_technical_operator: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Virtual Referee</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
+                            <input 
+                              type="number"
+                              value={refereeFees.rate_virtual_referee}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_virtual_referee: parseFloat(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -8514,6 +8636,9 @@ export default function App() {
                             rate_td: 250,
                             rate_csb: 200,
                             rate_ric: 175,
+                            rate_game_master: 150,
+                            rate_technical_operator: 125,
+                            rate_virtual_referee: 100,
                           });
                           triggerMsg('Fees setup reset to standard Malaysian Taekwondo defaults', 'ok');
                         }}
@@ -8617,7 +8742,7 @@ export default function App() {
                                 <span>{a.nric}</span>
                                 {a.specialRole && a.specialRole !== 'None' && (
                                   <span className="text-[8px] bg-gold/10 text-gold px-1 rounded uppercase font-bold">
-                                    {a.specialRole}
+                                    {formatSpecialRole(a.specialRole)}
                                   </span>
                                 )}
                               </div>
@@ -8690,6 +8815,9 @@ export default function App() {
                           <option value="TD">Technical Delegate (TD)</option>
                           <option value="CSB">Supervisory Board (CSB)</option>
                           <option value="RIC">Referee In-Charge (RIC)</option>
+                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
                         </select>
                       </div>
 
@@ -8877,7 +9005,7 @@ export default function App() {
                                      {r.fullName}
                                      {r.specialRole && r.specialRole !== 'None' && (
                                        <span className="bg-gold text-ink text-[9px] px-1.5 py-0.5 rounded-md font-bold tracking-wider uppercase">
-                                         {r.specialRole}
+                                         {formatSpecialRole(r.specialRole)}
                                        </span>
                                      )}
                                    </div>
@@ -8909,7 +9037,7 @@ export default function App() {
                             </td>
                             <td className="py-3 px-4 text-center">
                               {isSplit ? (
-                                <div className="space-y-1 max-w-[140px] mx-auto bg-ink/30 border border-line/40 rounded-xl p-1.5">
+                                <div className="space-y-1.5 max-w-[145px] mx-auto bg-ink/30 border border-line/40 rounded-xl p-1.5">
                                   <div className="flex items-center justify-between gap-1 text-[10px]">
                                     <span className="font-semibold text-text-dim">Kyorugi:</span>
                                     <div className="flex items-center gap-1 shrink-0">
@@ -8917,7 +9045,8 @@ export default function App() {
                                         type="button"
                                         onClick={async () => {
                                           const kDays = kyorugiDays;
-                                          await saveRefereeToFirestore({ ...r, kyorugiDays: Math.max(0, kDays - 1), officiatingDays: Math.max(0, kDays - 1) + poomsaeDays });
+                                          const vDays = r.virtualDays || 0;
+                                          await saveRefereeToFirestore({ ...r, kyorugiDays: Math.max(0, kDays - 1), officiatingDays: Math.max(0, kDays - 1) + poomsaeDays + vDays });
                                         }}
                                         className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
                                       >
@@ -8928,7 +9057,8 @@ export default function App() {
                                         type="button"
                                         onClick={async () => {
                                           const kDays = kyorugiDays;
-                                          await saveRefereeToFirestore({ ...r, kyorugiDays: kDays + 1, officiatingDays: kDays + 1 + poomsaeDays });
+                                          const vDays = r.virtualDays || 0;
+                                          await saveRefereeToFirestore({ ...r, kyorugiDays: kDays + 1, officiatingDays: kDays + 1 + poomsaeDays + vDays });
                                         }}
                                         className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
                                       >
@@ -8944,7 +9074,8 @@ export default function App() {
                                         type="button"
                                         onClick={async () => {
                                           const pDays = poomsaeDays;
-                                          await saveRefereeToFirestore({ ...r, poomsaeDays: Math.max(0, pDays - 1), officiatingDays: kyorugiDays + Math.max(0, pDays - 1) });
+                                          const vDays = r.virtualDays || 0;
+                                          await saveRefereeToFirestore({ ...r, poomsaeDays: Math.max(0, pDays - 1), officiatingDays: kyorugiDays + Math.max(0, pDays - 1) + vDays });
                                         }}
                                         className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
                                       >
@@ -8955,7 +9086,8 @@ export default function App() {
                                         type="button"
                                         onClick={async () => {
                                           const pDays = poomsaeDays;
-                                          await saveRefereeToFirestore({ ...r, poomsaeDays: pDays + 1, officiatingDays: kyorugiDays + pDays + 1 });
+                                          const vDays = r.virtualDays || 0;
+                                          await saveRefereeToFirestore({ ...r, poomsaeDays: pDays + 1, officiatingDays: kyorugiDays + pDays + 1 + vDays });
                                         }}
                                         className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
                                       >
@@ -8964,6 +9096,33 @@ export default function App() {
                                     </div>
                                   </div>
 
+                                  <div className="flex items-center justify-between gap-1 text-[10px]">
+                                    <span className="font-semibold text-text-dim">Virtual:</span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button 
+                                        type="button"
+                                        onClick={async () => {
+                                          const vDays = r.virtualDays || 0;
+                                          await saveRefereeToFirestore({ ...r, virtualDays: Math.max(0, vDays - 1), officiatingDays: kyorugiDays + poomsaeDays + Math.max(0, vDays - 1) });
+                                        }}
+                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="font-bold font-mono px-1 text-text text-[10px]">{r.virtualDays || 0}d</span>
+                                      <button 
+                                        type="button"
+                                        onClick={async () => {
+                                          const vDays = r.virtualDays || 0;
+                                          await saveRefereeToFirestore({ ...r, virtualDays: vDays + 1, officiatingDays: kyorugiDays + poomsaeDays + vDays + 1 });
+                                        }}
+                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+ 
                                   <button
                                     type="button"
                                     onClick={async () => {
@@ -8971,7 +9130,8 @@ export default function App() {
                                         ...r, 
                                         kyorugiDays: 0, 
                                         poomsaeDays: 0, 
-                                        officiatingDays: Math.max(1, kyorugiDays + poomsaeDays) 
+                                        virtualDays: 0,
+                                        officiatingDays: Math.max(1, kyorugiDays + poomsaeDays + (r.virtualDays || 0)) 
                                       });
                                     }}
                                     className="w-full text-center text-[9px] text-hong hover:underline pt-0.5"
@@ -9473,7 +9633,7 @@ export default function App() {
                   
                   {(() => {
                     const allowance = getRefereeAllowance(activeReferee, refereeFees);
-                    const { baseDutyPay, travelPay, otPay, othersPay, totalPay, dailyRate, days, isSplit, splitExplanation, kyorugiDays, poomsaeDays, higherStatus } = allowance;
+                    const { baseDutyPay, travelPay, otPay, othersPay, totalPay, dailyRate, days, isSplit, splitExplanation, kyorugiDays, poomsaeDays, virtualDays, kyorugiPay, poomsaePay, virtualPay, higherStatus } = allowance;
                     
                     return (
                       <div className="space-y-3">
@@ -9486,7 +9646,7 @@ export default function App() {
                             <span className="bg-gold/10 text-gold px-2.5 py-1 rounded-lg font-bold">{higherStatus} Qualification</span>
                             {activeReferee.specialRole && activeReferee.specialRole !== 'None' && (
                               <span className="bg-gold text-ink px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
-                                Appointed: {activeReferee.specialRole}
+                                Appointed: {formatSpecialRole(activeReferee.specialRole)}
                               </span>
                             )}
                           </div>
@@ -9494,16 +9654,30 @@ export default function App() {
                         
                         <div className="space-y-2 text-xs">
                           {isSplit ? (
-                            <div className="bg-ink/20 p-3 rounded-xl border border-line/40 space-y-1 text-text-dim mb-3">
-                              <span className="font-bold text-text-dim text-[10px] uppercase block">Split Discipline Days:</span>
-                              <div className="flex justify-between">
-                                <span>Kyorugi Officiating ({kyorugiDays} {kyorugiDays === 1 ? 'Day' : 'Days'} as {activeReferee.kyorugiStatus})</span>
-                                <span className="text-text font-semibold">RM {(kyorugiDays * (refereeFees[`rate_${activeReferee.kyorugiStatus.toLowerCase()}`] || 80)).toFixed(2)}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Poomsae Officiating ({poomsaeDays} {poomsaeDays === 1 ? 'Day' : 'Days'} as {activeReferee.poomsaeStatus})</span>
-                                <span className="text-text font-semibold">RM {(poomsaeDays * (refereeFees[`rate_${activeReferee.poomsaeStatus.toLowerCase()}`] || 80)).toFixed(2)}</span>
-                              </div>
+                            <div className="bg-ink/20 p-3 rounded-xl border border-line/40 space-y-1.5 text-text-dim mb-3">
+                              <span className="font-bold text-text-dim text-[10px] uppercase block mb-1">Split Discipline Days:</span>
+                              {kyorugiDays > 0 && (
+                                <div className="flex justify-between">
+                                  <span>Kyorugi Officiating ({kyorugiDays} {kyorugiDays === 1 ? 'Day' : 'Days'} as {activeReferee.kyorugiStatus})</span>
+                                  <span className="text-text font-semibold">RM {kyorugiPay.toFixed(2)}</span>
+                                </div>
+                              )}
+                              {poomsaeDays > 0 && (
+                                <div className="flex justify-between">
+                                  <span>Poomsae Officiating ({poomsaeDays} {poomsaeDays === 1 ? 'Day' : 'Days'} as {activeReferee.poomsaeStatus})</span>
+                                  <span className="text-text font-semibold">RM {poomsaePay.toFixed(2)}</span>
+                                </div>
+                              )}
+                              {virtualDays > 0 && (
+                                <div className="flex justify-between">
+                                  <span>Virtual Officiating ({virtualDays} {virtualDays === 1 ? 'Day' : 'Days'} as {
+                                    activeReferee.specialRole === 'GAME_MASTER' ? 'Game Master' :
+                                    activeReferee.specialRole === 'TECHNICAL_OPERATOR' ? 'Tech Operator' :
+                                    activeReferee.specialRole === 'VIRTUAL_REFEREE' ? 'Virtual Ref' : 'Virtual'
+                                  })</span>
+                                  <span className="text-text font-semibold">RM {virtualPay.toFixed(2)}</span>
+                                </div>
+                              )}
                               <div className="text-[10px] text-gold italic pt-1">{splitExplanation}</div>
                             </div>
                           ) : (
@@ -10668,6 +10842,9 @@ export default function App() {
                     <option value="TD">Technical Delegate (TD)</option>
                     <option value="CSB">Supervisory Board (CSB)</option>
                     <option value="RIC">Referee In-Charge (RIC)</option>
+                    <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                    <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                    <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
                   </select>
                 </div>
               </div>
@@ -10928,6 +11105,9 @@ export default function App() {
                           <option value="TD">Technical Delegate (TD)</option>
                           <option value="CSB">Supervisory Board (CSB)</option>
                           <option value="RIC">Referee In-Charge (RIC)</option>
+                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
                         </select>
                       </div>
                     </div>
@@ -11005,6 +11185,9 @@ export default function App() {
                       <option value="TD">Technical Delegate (TD)</option>
                       <option value="CSB">Supervisory Board (CSB)</option>
                       <option value="RIC">Referee In-Charge (RIC)</option>
+                      <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                      <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                      <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
                     </select>
                   </div>
                 </div>

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Trophy, ShieldAlert, CheckCircle, Calendar, MapPin, User, 
-  PenTool, Check, Activity, FileText, AlertCircle, Search, ArrowLeft, ShieldCheck 
+  PenTool, Check, Activity, FileText, AlertCircle, Search, ArrowLeft, ShieldCheck,
+  Upload, ImageIcon
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import { Player, Competition } from '../types';
@@ -44,7 +45,57 @@ export default function ParentIndemnityForm({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const [pendingIcCopy, setPendingIcCopy] = useState<string | null>(null);
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+
   const sigCanvasRef = useRef<SignatureCanvas>(null);
+
+  // Reset uploaded files when player selection changes
+  useEffect(() => {
+    setPendingIcCopy(null);
+    setPendingPhoto(null);
+  }, [selectedPlayer]);
+
+  const processImageFile = (file: File, maxWidth: number, maxHeight: number, callback: (base64: string) => void) => {
+    if (file.size > 5 * 1024 * 1024) {
+      triggerMsg('File is too large. Max size allowed is 5MB.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+          callback(compressedBase64);
+        } else {
+          callback(e.target?.result as string);
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Sync selected player if prop changes
   useEffect(() => {
@@ -141,6 +192,11 @@ export default function ParentIndemnityForm({
       return;
     }
 
+    if (!selectedPlayer.icCopy && !pendingIcCopy) {
+      triggerMsg("Please upload the player's IC Copy / Passport (Only Front Copy) to proceed.", 'error');
+      return;
+    }
+
     if (sigCanvasRef.current?.isEmpty()) {
       triggerMsg('Please sign the digital consent board to authenticate your authorization.', 'error');
       return;
@@ -162,6 +218,13 @@ export default function ParentIndemnityForm({
         indemnitySignedIp: 'Client-device',
         indemnitySignature: signatureDataUrl
       };
+
+      if (pendingIcCopy) {
+        updatedPlayer.icCopy = pendingIcCopy;
+      }
+      if (pendingPhoto) {
+        updatedPlayer.photo = pendingPhoto;
+      }
 
       await savePlayerToFirestore(updatedPlayer);
       setSubmitted(true);
@@ -404,10 +467,10 @@ export default function ParentIndemnityForm({
         </div>
 
         {/* SECTION 2: ATHLETE DEMOGRAPHICS */}
-        <div className="bg-ink/40 p-4 rounded-xl border border-line/50 space-y-3">
+        <div className="bg-ink/40 p-4 rounded-xl border border-line/50 space-y-4">
           <h3 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-1.5">
             <User className="w-4 h-4" />
-            <span>2. Competitor (Child) Information</span>
+            <span>2. Competitor Information</span>
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
             <div>
@@ -429,6 +492,133 @@ export default function ParentIndemnityForm({
             <div className="sm:col-span-2 pt-1.5 border-t border-line/20">
               <span className="text-text-dim font-sans">Representing Club:</span>
               <p className="font-bold text-text uppercase mt-0.5">{selectedPlayer.club}</p>
+            </div>
+          </div>
+
+          {/* File Uploads for IC Copy and ID Photo */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3.5 border-t border-line/20">
+            {/* IC / Passport Copy */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-bold text-text-dim uppercase tracking-wider">
+                IC Copy / Passport (Only Front Copy) <span className="text-red-500">*</span>
+              </label>
+              <div className="space-y-2.5">
+                {(pendingIcCopy || selectedPlayer.icCopy) ? (
+                  <div className="relative group bg-ink/60 border border-line p-2.5 rounded-xl flex items-center gap-3">
+                    <img 
+                      src={pendingIcCopy || selectedPlayer.icCopy} 
+                      alt="IC Copy / Passport" 
+                      className="w-16 h-12 rounded object-cover border border-line" 
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-bold text-text truncate">
+                        {pendingIcCopy ? 'New Upload' : 'Current Saved Copy'}
+                      </p>
+                      <p className="text-[10px] text-text-dim">
+                        {pendingIcCopy ? 'Will overwrite old copy' : 'Upload below to replace'}
+                      </p>
+                    </div>
+                    {pendingIcCopy && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingIcCopy(null)}
+                        className="text-[10px] text-red-400 hover:text-red-300 font-bold px-2 py-1 rounded bg-red-950/20 hover:bg-red-950/40 border border-red-500/15 transition cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 border border-dashed border-line rounded-xl bg-ink/10 text-center space-y-1">
+                    <Upload className="w-5 h-5 text-gold mx-auto opacity-70" />
+                    <span className="text-[11px] text-text block">No IC / Passport copy uploaded</span>
+                    <span className="text-[10px] text-text-dim block">Required to secure indemnity clearance</span>
+                  </div>
+                )}
+                
+                <label className="relative flex items-center justify-center bg-surface-2 hover:bg-line border border-line rounded-xl py-2 px-3 text-xs font-bold uppercase text-text cursor-pointer transition text-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 text-gold" />
+                  <span>Choose Front Copy Image</span>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        processImageFile(file, 800, 600, (base64) => {
+                          setPendingIcCopy(base64);
+                          triggerMsg('IC Copy loaded. It will overwrite the old copy on save.', 'ok');
+                        });
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Photo (ID Card) */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-bold text-text-dim uppercase tracking-wider">
+                Photo (Id Card)
+              </label>
+              <div className="space-y-2.5">
+                {(pendingPhoto || selectedPlayer.photo) ? (
+                  <div className="relative group bg-ink/60 border border-line p-2.5 rounded-xl flex items-center gap-3">
+                    <img 
+                      src={pendingPhoto || selectedPlayer.photo} 
+                      alt="Athlete Portrait" 
+                      className="w-12 h-15 rounded object-cover border border-line" 
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-bold text-text truncate">
+                        {pendingPhoto ? 'New Portrait' : 'Current Profile Photo'}
+                      </p>
+                      <p className="text-[10px] text-text-dim">
+                        {pendingPhoto ? 'Will overwrite old photo' : 'Upload below to replace'}
+                      </p>
+                    </div>
+                    {pendingPhoto && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingPhoto(null)}
+                        className="text-[10px] text-red-400 hover:text-red-300 font-bold px-2 py-1 rounded bg-red-950/20 hover:bg-red-950/40 border border-red-500/15 transition cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 border border-dashed border-line rounded-xl bg-ink/10 text-center space-y-1">
+                    <ImageIcon className="w-5 h-5 text-gold mx-auto opacity-70" />
+                    <span className="text-[11px] text-text block">No custom badge portrait</span>
+                    <span className="text-[10px] text-text-dim block">Optional profile display photo</span>
+                  </div>
+                )}
+
+                <label className="relative flex items-center justify-center bg-surface-2 hover:bg-line border border-line rounded-xl py-2 px-3 text-xs font-bold uppercase text-text cursor-pointer transition text-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5 text-gold" />
+                  <span>Choose Passport Photo</span>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        processImageFile(file, 300, 375, (base64) => {
+                          setPendingPhoto(base64);
+                          triggerMsg('Athlete portrait photo loaded. It will overwrite the old photo on save.', 'ok');
+                        });
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
             </div>
           </div>
         </div>
