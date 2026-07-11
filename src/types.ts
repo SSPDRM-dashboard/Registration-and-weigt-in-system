@@ -119,6 +119,8 @@ export interface Referee {
   includeOvertime?: boolean;
   includeOthers?: boolean;
   specialRole?: 'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE';
+  accommodationDetails?: string;
+  accommodationMapsLink?: string;
   createdAt: string;
 }
 

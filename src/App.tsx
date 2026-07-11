@@ -439,6 +439,9 @@ export default function App() {
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showRefereeEditProfile, setShowRefereeEditProfile] = useState<boolean>(false);
   const [showOrganizerAddReferee, setShowOrganizerAddReferee] = useState<boolean>(false);
+  const [editingAccReferee, setEditingAccReferee] = useState<Referee | null>(null);
+  const [editAccDetails, setEditAccDetails] = useState<string>('');
+  const [editAccMapsLink, setEditAccMapsLink] = useState<string>('');
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
   const [selectedExistingRefereeNric, setSelectedExistingRefereeNric] = useState<string>('');
   const [searchRegisteredQuery, setSearchRegisteredQuery] = useState('');
@@ -562,11 +565,18 @@ export default function App() {
   const [indemnityPlayer, setIndemnityPlayer] = useState<Player | null>(null);
   const [indemnityComp, setIndemnityComp] = useState<Competition | null>(null);
   const [indemnityLoading, setIndemnityLoading] = useState<boolean>(false);
+  const [indemnityCoach, setIndemnityCoach] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const athleteId = params.get('indemnity');
     const compIdParam = params.get('indemnityComp');
+    const coachParam = params.get('coach');
+    
+    if (coachParam) {
+      setIndemnityCoach(coachParam);
+    }
+
     if (athleteId) {
       setIndemnityLoading(true);
       setScreen('parentIndemnity');
@@ -978,6 +988,7 @@ export default function App() {
           }
         }
         setPlayers(loadedPlayers);
+        localStorage.setItem(`app:players:${compId}`, JSON.stringify(loadedPlayers));
         
         const storedStaff = localStorage.getItem(`app:staffPasses:${compId}`);
         if (storedStaff) {
@@ -2705,7 +2716,7 @@ export default function App() {
         return {
           'Competitor ID': p.id,
           'Full Name': p.name,
-          'Identity Card / Passport': p.ic,
+          'Identity Card': p.ic,
           'DOB': p.dob,
           'Gender': p.gender,
           'Club Represented': p.club,
@@ -2744,7 +2755,7 @@ export default function App() {
         passAndFailRows.push({
           'Competitor ID': 'No weigh-in records registered yet',
           'Full Name': '',
-          'Identity Card / Passport': '',
+          'Identity Card': '',
           'DOB': '',
           'Gender': '',
           'Club Represented': '',
@@ -2770,7 +2781,7 @@ export default function App() {
         passRows.push({
           'Competitor ID': 'No passed records found',
           'Full Name': '',
-          'Identity Card / Passport': '',
+          'Identity Card': '',
           'DOB': '',
           'Gender': '',
           'Club Represented': '',
@@ -2796,7 +2807,7 @@ export default function App() {
         failRows.push({
           'Competitor ID': 'No failed records found',
           'Full Name': '',
-          'Identity Card / Passport': '',
+          'Identity Card': '',
           'DOB': '',
           'Gender': '',
           'Club Represented': '',
@@ -2932,14 +2943,19 @@ export default function App() {
 
       {/* CORE ALERTS */}
       {msg && (
-        <div className="max-w-4xl mx-auto mt-4 px-4 w-full">
-          <div className={`flex items-center space-x-2 p-3.5 rounded-xl border text-sm transition-all ${
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] px-4 w-full max-w-md animate-fade-in">
+          <div className={`flex items-start space-x-3 p-4 rounded-xl border text-sm shadow-2xl backdrop-blur-md ${
             msg.type === 'error' 
-              ? 'bg-red-500/10 border-red-500/20 text-red-200' 
-              : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200'
+              ? 'bg-red-950/95 border-red-500/55 text-red-200' 
+              : 'bg-emerald-950/95 border-emerald-500/55 text-emerald-200'
           }`}>
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{msg.text}</span>
+            <AlertCircle className={`w-5 h-5 shrink-0 ${msg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`} />
+            <div className="flex-grow">
+              <p className="font-bold uppercase tracking-wider text-[10px] opacity-70 mb-0.5">
+                {msg.type === 'error' ? 'System Warning' : 'Success Notification'}
+              </p>
+              <span className="font-medium text-xs leading-relaxed">{msg.text}</span>
+            </div>
           </div>
         </div>
       )}
@@ -4262,7 +4278,7 @@ export default function App() {
                       <div className="relative">
                         <input 
                           type="text" 
-                          placeholder="Type to search saved athletes by Name, IC/Passport, or Club..." 
+                          placeholder="Type to search saved athletes by Name, IC, or Club..." 
                           value={masterSearchQuery}
                           onChange={(e) => {
                             setMasterSearchQuery(e.target.value);
@@ -4395,7 +4411,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">IC / Passport Number</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">IC Number</label>
                   <input 
                     type="text" 
                     value={pIc}
@@ -4532,22 +4548,28 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Athlete Portrait Photograph (4:5 ratio)</label>
-                <input 
-                  type="file" 
-                  accept="image/*"
-                  onChange={handlePhotoSelect}
-                  className="w-full text-xs text-text-dim bg-ink border border-line file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-surface-2 file:text-gold hover:file:opacity-90 transition"
-                />
-                
-                {pendingPhoto && (
-                  <div className="mt-4 flex items-center space-x-3">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Athlete Portrait Photograph</label>
+                {pendingPhoto ? (
+                  <div className="flex items-center space-x-4 bg-ink/30 p-3.5 rounded-xl border border-line">
                     <img 
                       src={pendingPhoto} 
-                      alt="Crop preview" 
-                      className="w-20 h-24 object-cover rounded-lg border border-line" 
+                      alt="Athlete portrait" 
+                      className="w-16 h-20 object-cover rounded-lg border border-line shrink-0" 
                     />
-                    <span className="text-xs text-text-dim">Portrait automatically optimized and cropped (192 x 240 pixels) for printing.</span>
+                    <div>
+                      <span className="text-xs font-bold text-text block">Portrait Photo Loaded</span>
+                      <span className="text-[11px] text-text-dim block mt-0.5">
+                        This photograph will be printed on the ID Card / Badge.
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-ink/30 border border-dashed border-line p-4 rounded-xl text-center space-y-1">
+                    <User className="w-5 h-5 text-gold/60 mx-auto" />
+                    <span className="text-xs font-bold text-text block">No Photograph Uploaded Yet</span>
+                    <span className="text-[11px] text-text-dim block max-w-sm mx-auto">
+                      Coaches no longer upload photos. The athlete's parent or guardian will upload the portrait photograph directly when submitting the Parental Indemnity Form.
+                    </span>
                   </div>
                 )}
               </div>
@@ -7096,6 +7118,7 @@ export default function App() {
                         <th className="p-4">Division Category</th>
                         <th className="p-4">Weight Division</th>
                         <th className="p-4">Weigh-In Scale status</th>
+                        <th className="p-4">Indemnity</th>
                         {showSignatures && <th className="p-4 text-center">Signature</th>}
                         <th className="p-4 text-right">Actions</th>
                       </tr>
@@ -7128,6 +7151,26 @@ export default function App() {
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
                               {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold font-mono ${
+                                p.indemnityStatus === 'Completed'
+                                  ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-amber-950/50 text-amber-400 border border-amber-500/20'
+                              }`}>
+                                {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
+                              </span>
+                              {p.indemnityStatus === 'Completed' && (
+                                <button
+                                  onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
+                                  className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                  title="View completed parental indemnity form"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-gold" />
+                                </button>
+                              )}
                             </div>
                           </td>
                           {showSignatures && (
@@ -7639,6 +7682,7 @@ export default function App() {
                         <th className="p-4">Division Category</th>
                         <th className="p-4">Weight Division</th>
                         <th className="p-4">Weigh-In Scale status</th>
+                        <th className="p-4">Indemnity</th>
                         {showSignatures && <th className="p-4 text-center">Signature</th>}
                         <th className="p-4 text-right">Actions</th>
                       </tr>
@@ -7671,6 +7715,26 @@ export default function App() {
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
                               {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold font-mono ${
+                                p.indemnityStatus === 'Completed'
+                                  ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-amber-950/50 text-amber-400 border border-amber-500/20'
+                              }`}>
+                                {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
+                              </span>
+                              {p.indemnityStatus === 'Completed' && (
+                                <button
+                                  onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
+                                  className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                  title="View completed parental indemnity form"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-gold" />
+                                </button>
+                              )}
                             </div>
                           </td>
                           {showSignatures && (
@@ -9023,13 +9087,46 @@ export default function App() {
                               </span>
                             </td>
                             <td className="py-3 px-4 text-center">
-                              <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold ${
-                                r.accommodation === 'Yes' 
-                                  ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
-                                  : 'bg-text-dim/10 text-text-dim'
-                              }`}>
-                                {r.accommodation === 'Yes' ? 'LODGING REQ' : 'No Lodge'}
-                              </span>
+                              <div className="flex flex-col items-center gap-1.5">
+                                <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold ${
+                                  r.accommodation === 'Yes' 
+                                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
+                                    : 'bg-text-dim/10 text-text-dim'
+                                }`}>
+                                  {r.accommodation === 'Yes' ? 'LODGING REQ' : 'No Lodge'}
+                                </span>
+                                
+                                {r.accommodationDetails && (
+                                  <span className="text-[10px] text-text-dim font-medium max-w-[120px] truncate block" title={r.accommodationDetails}>
+                                    🏨 {r.accommodationDetails}
+                                  </span>
+                                )}
+                                
+                                {r.accommodationMapsLink && (
+                                  <a 
+                                    href={r.accommodationMapsLink} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="text-[9px] text-gold hover:underline flex items-center gap-0.5 font-semibold"
+                                  >
+                                    <MapPin className="w-2.5 h-2.5" />
+                                    View Map
+                                  </a>
+                                )}
+                                
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAccReferee(r);
+                                    setEditAccDetails(r.accommodationDetails || '');
+                                    setEditAccMapsLink(r.accommodationMapsLink || '');
+                                  }}
+                                  className="text-[9px] text-gold hover:text-yellow-400 font-bold border border-gold/20 hover:border-gold/50 bg-gold/5 hover:bg-gold/10 px-1.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1"
+                                >
+                                  <Edit className="w-2.5 h-2.5" />
+                                  <span>Details</span>
+                                </button>
+                              </div>
                             </td>
                             <td className="py-3 px-4 text-right font-mono font-bold text-text">
                               {r.distance} KM
@@ -9609,9 +9706,46 @@ export default function App() {
                       <span className="text-text-dim block mb-0.5">Go & Return Distance</span>
                       <span className="font-semibold text-text text-sm">{activeReferee.distance} KM</span>
                     </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">Accommodation Option</span>
-                      <span className="font-semibold text-gold text-sm">{activeReferee.accommodation === 'Yes' ? 'Arranged by Organizer' : 'Self Arranged'}</span>
+                    <div className="sm:col-span-2 border-t border-line/20 pt-3 mt-1">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-text-dim block mb-0.5 text-xs">Accommodation Option</span>
+                          <span className="font-semibold text-gold text-sm">
+                            {activeReferee.accommodation === 'Yes' ? 'Arranged by Organizer' : 'Self Arranged'}
+                          </span>
+                        </div>
+                        {activeReferee.accommodation === 'Yes' && (
+                          <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider self-start sm:self-auto">
+                            LODGING REQUIRED
+                          </span>
+                        )}
+                      </div>
+                      
+                      {(activeReferee.accommodationDetails || activeReferee.accommodationMapsLink) && (
+                        <div className="bg-ink/30 border border-line/50 rounded-xl p-3.5 mt-2.5 space-y-2.5">
+                          {activeReferee.accommodationDetails && (
+                            <div>
+                              <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block mb-1">Assigned Lodging Details</span>
+                              <p className="text-text font-medium text-xs leading-relaxed whitespace-pre-wrap">{activeReferee.accommodationDetails}</p>
+                            </div>
+                          )}
+                          
+                          {activeReferee.accommodationMapsLink && (
+                            <div>
+                              <a 
+                                href={activeReferee.accommodationMapsLink} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="inline-flex items-center gap-1.5 bg-gold hover:bg-yellow-400 text-ink font-bold px-3 py-1.5 rounded-lg text-xs transition shadow cursor-pointer mt-1"
+                              >
+                                <MapPin className="w-3.5 h-3.5" />
+                                <span>Navigate via Google Maps</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <span className="text-text-dim block mb-0.5">Bank Information</span>
@@ -9736,6 +9870,8 @@ export default function App() {
             indemnityPlayer={indemnityPlayer}
             indemnityComp={indemnityComp}
             indemnityLoading={indemnityLoading}
+            indemnityCoach={indemnityCoach}
+            coaches={coaches}
             triggerMsg={triggerMsg}
             setScreen={setScreen}
           />
@@ -9919,15 +10055,15 @@ export default function App() {
                           <ExternalLink className="w-5 h-5" />
                         </div>
                         <div className="space-y-1">
-                          <h4 className="text-sm font-bold text-text uppercase tracking-wider">Tournament-Wide Shared Parental Consent Link</h4>
+                          <h4 className="text-sm font-bold text-text uppercase tracking-wider">Club-Wide Shared Parental Consent Link</h4>
                           <p className="text-xs text-text-dim leading-relaxed">
-                            Instead of copying individual links for each athlete, you can share this **single link** to your club's WhatsApp or Telegram group. Parents will click it, search and select their child, and fill up the indemnity waiver instantly.
+                            Instead of copying individual links for each athlete, you can share this **single link** to your club's WhatsApp or Telegram group. Parents will click it, search and select their child from your registered club roster, and fill up the indemnity waiver instantly. Parents will not see players from other clubs.
                           </p>
                         </div>
                       </div>
 
                       {(() => {
-                        const sharedUrl = window.location.origin + window.location.pathname + '?indemnityComp=' + (compId || '');
+                        const sharedUrl = window.location.origin + window.location.pathname + '?indemnityComp=' + (compId || '') + '&coach=' + (user || '');
                         const waShareText = encodeURIComponent(`Dear Parents/Guardians, please click this official link to select your child and fill up the required Parental Consent & Indemnity Form for the ${activeComp?.name || 'upcoming tournament'}: ${sharedUrl}`);
                         return (
                           <div className="flex flex-col sm:flex-row items-center gap-3 bg-ink/50 p-2.5 rounded-xl border border-line">
@@ -10154,7 +10290,7 @@ export default function App() {
                 <div className="font-bold text-slate-700 border-b border-slate-200 pb-1">COMPETITOR (CHILD) PARAMETERS</div>
                 <div className="grid grid-cols-2 gap-y-2 gap-x-4">
                   <div><span className="text-slate-500">Full Name:</span> <strong className="text-slate-900 uppercase block">{selectedIndemnityPlayer.name}</strong></div>
-                  <div><span className="text-slate-500">NRIC / Passport No:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.ic}</strong></div>
+                  <div><span className="text-slate-500">NRIC No:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.ic}</strong></div>
                   <div><span className="text-slate-500">School Affiliation:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.schoolName || 'N/A'} {selectedIndemnityPlayer.schoolCode ? `(${selectedIndemnityPlayer.schoolCode})` : ''}</strong></div>
                   <div><span className="text-slate-500">Represented Club:</span> <strong className="text-slate-900 uppercase block">{selectedIndemnityPlayer.club}</strong></div>
                 </div>
@@ -10165,7 +10301,7 @@ export default function App() {
                 <div className="font-bold text-slate-700 border-b border-slate-200 pb-1">PARENT / GUARDIAN CONFIRMATION</div>
                 <div className="grid grid-cols-2 gap-y-2 gap-x-4">
                   <div><span className="text-slate-500">Guardian Full Name:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentName}</strong></div>
-                  <div><span className="text-slate-500">Guardian NRIC/Passport:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentIc}</strong></div>
+                  <div><span className="text-slate-500">Guardian NRIC:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentIc}</strong></div>
                   <div><span className="text-slate-500">Relationship to Athlete:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityRelationship}</strong></div>
                   <div><span className="text-slate-500">Contact Number:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentPhone}</strong></div>
                   {selectedIndemnityPlayer.indemnityParentEmail && (
@@ -10298,7 +10434,7 @@ export default function App() {
                   type="text" 
                   value={dbSearchQuery}
                   onChange={(e) => setDbSearchQuery(e.target.value)}
-                  placeholder="Search saved database by name, IC/passport number, club/affiliated team..." 
+                  placeholder="Search saved database by name, IC number, club/affiliated team..." 
                   className="w-full bg-ink border border-line rounded-xl pl-10 pr-4 py-3 text-sm text-text outline-none focus:border-gold transition shadow-inner"
                 />
                 {dbSearchQuery && (
@@ -12085,6 +12221,105 @@ export default function App() {
                 className="bg-ink text-text-dim border border-line hover:text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REFEREE ACCOMMODATION DETAILS MODAL */}
+      {editingAccReferee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
+              <h2 className="text-base font-bold text-text uppercase tracking-wider flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-gold" />
+                Accommodation Settings
+              </h2>
+              <button 
+                onClick={() => setEditingAccReferee(null)}
+                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-text-dim">REFEREE NAME</p>
+                <p className="text-sm font-semibold text-text">{editingAccReferee.fullName}</p>
+                <p className="text-[10px] text-text-dim font-mono">{editingAccReferee.nric}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Accommodation Details</label>
+                <textarea
+                  rows={3}
+                  value={editAccDetails}
+                  onChange={(e) => setEditAccDetails(e.target.value)}
+                  placeholder="e.g. Hotel Grand Chancellor, Room 402. Check-in on 12th Oct 2 PM."
+                  className="w-full bg-ink border border-line text-xs rounded-xl p-3 text-text focus:outline-none focus:border-gold resize-none"
+                />
+                <p className="text-[10px] text-text-dim">Provide hotel name, room allocation, check-in instructions or dates.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Google Maps Link</label>
+                <input
+                  type="url"
+                  value={editAccMapsLink}
+                  onChange={(e) => setEditAccMapsLink(e.target.value)}
+                  placeholder="https://maps.app.goo.gl/... or https://google.com/maps/..."
+                  className="w-full bg-ink border border-line text-xs rounded-xl py-2.5 px-3 text-text focus:outline-none focus:border-gold"
+                />
+                <p className="text-[10px] text-text-dim">Paste the Google Maps link so the referee can easily locate the hotel.</p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-end gap-3">
+              <button 
+                type="button"
+                onClick={() => setEditingAccReferee(null)}
+                className="px-4 py-2 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                onClick={async () => {
+                  try {
+                    const updatedReferee: Referee = {
+                      ...editingAccReferee,
+                      accommodationDetails: editAccDetails.trim(),
+                      accommodationMapsLink: editAccMapsLink.trim(),
+                    };
+                    await saveRefereeToFirestore(updatedReferee);
+                    
+                    // Also update in global refereeAccounts if they exist
+                    const cleanIc = editingAccReferee.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                    const existingAcc = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+                    if (existingAcc) {
+                      await saveRefereeAccount({
+                        ...existingAcc,
+                        accommodationDetails: editAccDetails.trim(),
+                        accommodationMapsLink: editAccMapsLink.trim(),
+                      });
+                    }
+                    
+                    triggerMsg('Accommodation details updated successfully!', 'ok');
+                    setEditingAccReferee(null);
+                  } catch (err) {
+                    console.error("Failed to update accommodation details:", err);
+                    triggerMsg('Failed to save changes.', 'error');
+                  }
+                }}
+                className="bg-gold hover:bg-yellow-400 text-ink px-4 py-2 rounded-xl font-bold text-xs transition shadow flex items-center gap-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Save Accommodation
               </button>
             </div>
           </div>

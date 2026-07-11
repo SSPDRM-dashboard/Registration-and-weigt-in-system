@@ -65,6 +65,8 @@
       "poomsaeStatus": "string",
       "carPlate": "string",
       "specialRole": "string",
+      "accommodationDetails": "string",
+      "accommodationMapsLink": "string",
       "createdAt": "string"
     },
     "refereeAccounts": {
@@ -83,6 +85,8 @@
       "carPlate": "string",
       "photo": "string",
       "specialRole": "string",
+      "accommodationDetails": "string",
+      "accommodationMapsLink": "string",
       "createdAt": "string"
     }
   }

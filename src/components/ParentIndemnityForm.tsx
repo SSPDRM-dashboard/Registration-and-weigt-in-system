@@ -5,13 +5,15 @@ import {
   Upload, ImageIcon
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
-import { Player, Competition } from '../types';
+import { Player, Competition, Coach } from '../types';
 import { savePlayerToFirestore, subscribeToPlayersForComp } from '../firebase';
 
 interface ParentIndemnityFormProps {
   indemnityPlayer: Player | null;
   indemnityComp: Competition | null;
   indemnityLoading: boolean;
+  indemnityCoach?: string | null;
+  coaches?: Record<string, Coach>;
   triggerMsg: (text: string, type: 'error' | 'ok') => void;
   setScreen: (screen: string) => void;
 }
@@ -20,6 +22,8 @@ export default function ParentIndemnityForm({
   indemnityPlayer,
   indemnityComp,
   indemnityLoading,
+  indemnityCoach,
+  coaches,
   triggerMsg,
   setScreen
 }: ParentIndemnityFormProps) {
@@ -47,6 +51,7 @@ export default function ParentIndemnityForm({
 
   const [pendingIcCopy, setPendingIcCopy] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   const sigCanvasRef = useRef<SignatureCanvas>(null);
 
@@ -54,6 +59,7 @@ export default function ParentIndemnityForm({
   useEffect(() => {
     setPendingIcCopy(null);
     setPendingPhoto(null);
+    setValidationErrors([]);
   }, [selectedPlayer]);
 
   const processImageFile = (file: File, maxWidth: number, maxHeight: number, callback: (base64: string) => void) => {
@@ -113,8 +119,13 @@ export default function ParentIndemnityForm({
       const unsubscribe = subscribeToPlayersForComp(
         indemnityComp.id,
         (players) => {
+          // Filter by coach username if indemnityCoach parameter is provided
+          let filtered = [...players];
+          if (indemnityCoach) {
+            filtered = filtered.filter(p => p.coachUsername === indemnityCoach);
+          }
           // Sort players by name alphabetically
-          const sorted = [...players].sort((a, b) => a.name.localeCompare(b.name));
+          const sorted = filtered.sort((a, b) => a.name.localeCompare(b.name));
           setPlayersList(sorted);
           setLoadingPlayers(false);
         },
@@ -125,7 +136,7 @@ export default function ParentIndemnityForm({
       );
       return () => unsubscribe();
     }
-  }, [indemnityComp, indemnityPlayer]);
+  }, [indemnityComp, indemnityPlayer, indemnityCoach]);
 
   if (indemnityLoading) {
     return (
@@ -171,43 +182,53 @@ export default function ParentIndemnityForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const errors: string[] = [];
     if (!selectedPlayer) {
-      triggerMsg('Please select a competitor to proceed.', 'error');
-      return;
+      errors.push('Please select a competitor to proceed.');
     }
     if (!parentName.trim()) {
-      triggerMsg('Please enter parent/guardian full name.', 'error');
-      return;
+      errors.push('Please enter parent/guardian full name.');
     }
     if (!parentIc.trim()) {
-      triggerMsg('Please enter parent/guardian NRIC/Passport number.', 'error');
-      return;
+      errors.push('Please enter parent/guardian NRIC number.');
     }
     if (!parentPhone.trim()) {
-      triggerMsg('Please enter parent/guardian mobile number.', 'error');
-      return;
+      errors.push('Please enter parent/guardian mobile number.');
     }
     if (!consentDeclaration || !consentMedical || !consentLiability) {
-      triggerMsg('You must agree to all release and consent conditions to proceed.', 'error');
-      return;
+      errors.push('You must agree to all release and consent conditions.');
     }
-
-    if (!selectedPlayer.icCopy && !pendingIcCopy) {
-      triggerMsg("Please upload the player's IC Copy / Passport (Only Front Copy) to proceed.", 'error');
-      return;
+    if (!selectedPlayer?.icCopy && !pendingIcCopy) {
+      errors.push("Please upload the player's IC Copy (Only Front Copy).");
     }
-
+    if (!selectedPlayer?.photo && !pendingPhoto) {
+      errors.push("Please upload the athlete's portrait photograph for ID Card/Badge.");
+    }
     if (sigCanvasRef.current?.isEmpty()) {
-      triggerMsg('Please sign the digital consent board to authenticate your authorization.', 'error');
+      errors.push('Please sign the digital consent board.');
+    }
+
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      triggerMsg(errors[0], 'error');
+      // Scroll smoothly to the validation error block or the bottom of form
+      setTimeout(() => {
+        const errorBlock = document.getElementById('validation-error-block');
+        if (errorBlock) {
+          errorBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
       return;
     }
+
+    setValidationErrors([]);
 
     try {
       setSubmitting(true);
       const signatureDataUrl = sigCanvasRef.current?.getTrimmedCanvas().toDataURL('image/png') || '';
 
       const updatedPlayer: Player = {
-        ...selectedPlayer,
+        ...selectedPlayer!,
         indemnityStatus: 'Completed',
         indemnityParentName: parentName.trim(),
         indemnityParentIc: parentIc.trim(),
@@ -297,6 +318,19 @@ export default function ParentIndemnityForm({
             </div>
           </div>
 
+          {/* Coach / Club Details */}
+          {indemnityCoach && coaches && coaches[indemnityCoach] && (
+            <div className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/20 space-y-1 text-xs">
+              <span className="text-emerald-400 font-bold uppercase tracking-wider block">Registered Club / Roster</span>
+              <div className="text-text font-semibold uppercase tracking-wide">
+                {coaches[indemnityCoach].club}
+              </div>
+              <div className="text-text-dim">
+                Coach: <span className="text-text">{coaches[indemnityCoach].name}</span>
+              </div>
+            </div>
+          )}
+
           {/* Search/Select Dropdown Field */}
           <div className="space-y-3">
             <label className="block text-xs font-bold text-gold uppercase tracking-wider">
@@ -357,7 +391,7 @@ export default function ParentIndemnityForm({
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-line/30">
                 <div>
                   <h4 className="text-sm font-extrabold text-text uppercase">{tempSelectedPlayer.name}</h4>
-                  <p className="text-[11px] text-text-dim font-mono">NRIC/Passport: {tempSelectedPlayer.ic}</p>
+                  <p className="text-[11px] text-text-dim font-mono">NRIC: {tempSelectedPlayer.ic}</p>
                 </div>
                 <div>
                   {tempSelectedPlayer.indemnityStatus === 'Completed' ? (
@@ -478,7 +512,7 @@ export default function ParentIndemnityForm({
               <p className="font-bold text-text uppercase text-sm mt-0.5">{selectedPlayer.name}</p>
             </div>
             <div>
-              <span className="text-text-dim font-sans">NRIC / Passport No:</span>
+              <span className="text-text-dim font-sans">NRIC No:</span>
               <p className="font-bold text-text mt-0.5">{selectedPlayer.ic}</p>
             </div>
             <div>
@@ -500,14 +534,14 @@ export default function ParentIndemnityForm({
             {/* IC / Passport Copy */}
             <div className="space-y-2">
               <label className="block text-[11px] font-bold text-text-dim uppercase tracking-wider">
-                IC Copy / Passport (Only Front Copy) <span className="text-red-500">*</span>
+                IC Copy (Only Front Copy) <span className="text-red-500">*</span>
               </label>
               <div className="space-y-2.5">
                 {(pendingIcCopy || selectedPlayer.icCopy) ? (
                   <div className="relative group bg-ink/60 border border-line p-2.5 rounded-xl flex items-center gap-3">
                     <img 
                       src={pendingIcCopy || selectedPlayer.icCopy} 
-                      alt="IC Copy / Passport" 
+                      alt="IC Copy" 
                       className="w-16 h-12 rounded object-cover border border-line" 
                       referrerPolicy="no-referrer"
                     />
@@ -532,7 +566,7 @@ export default function ParentIndemnityForm({
                 ) : (
                   <div className="p-4 border border-dashed border-line rounded-xl bg-ink/10 text-center space-y-1">
                     <Upload className="w-5 h-5 text-gold mx-auto opacity-70" />
-                    <span className="text-[11px] text-text block">No IC / Passport copy uploaded</span>
+                    <span className="text-[11px] text-text block">No IC copy uploaded</span>
                     <span className="text-[10px] text-text-dim block">Required to secure indemnity clearance</span>
                   </div>
                 )}
@@ -562,7 +596,7 @@ export default function ParentIndemnityForm({
             {/* Photo (ID Card) */}
             <div className="space-y-2">
               <label className="block text-[11px] font-bold text-text-dim uppercase tracking-wider">
-                Photo (Id Card)
+                Photo (ID Card) *
               </label>
               <div className="space-y-2.5">
                 {(pendingPhoto || selectedPlayer.photo) ? (
@@ -595,13 +629,13 @@ export default function ParentIndemnityForm({
                   <div className="p-4 border border-dashed border-line rounded-xl bg-ink/10 text-center space-y-1">
                     <ImageIcon className="w-5 h-5 text-gold mx-auto opacity-70" />
                     <span className="text-[11px] text-text block">No custom badge portrait</span>
-                    <span className="text-[10px] text-text-dim block">Optional profile display photo</span>
+                    <span className="text-[10px] text-amber-400 font-medium block">Mandatory portrait photo for ID Card/Badge</span>
                   </div>
                 )}
 
                 <label className="relative flex items-center justify-center bg-surface-2 hover:bg-line border border-line rounded-xl py-2 px-3 text-xs font-bold uppercase text-text cursor-pointer transition text-center gap-1.5">
                   <ImageIcon className="w-3.5 h-3.5 text-gold" />
-                  <span>Choose Passport Photo</span>
+                  <span>Choose Photo</span>
                   <input 
                     type="file" 
                     accept="image/*" 
@@ -643,7 +677,7 @@ export default function ParentIndemnityForm({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider mb-1.5">Parent/Guardian NRIC / Passport *</label>
+              <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider mb-1.5">Parent/Guardian NRIC *</label>
               <input 
                 type="text"
                 required
@@ -769,6 +803,24 @@ export default function ParentIndemnityForm({
             <span>Draw your signature with touch/mouse. Digital signatures are saved as legal certification.</span>
           </p>
         </div>
+
+        {/* VALIDATION ERRORS LIST */}
+        {validationErrors.length > 0 && (
+          <div 
+            id="validation-error-block" 
+            className="bg-red-950/40 border border-red-500/30 p-4 rounded-xl space-y-2 animate-fade-in text-xs text-red-200"
+          >
+            <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-red-400">
+              <AlertCircle className="w-4 h-4" />
+              <span>Incomplete Required Fields</span>
+            </div>
+            <ul className="list-disc pl-5 space-y-1 text-[11px] leading-relaxed">
+              {validationErrors.map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* SUBMIT BUTTON */}
         <button
