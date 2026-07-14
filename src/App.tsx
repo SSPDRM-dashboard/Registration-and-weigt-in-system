@@ -9,6 +9,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
+import ExcelJS from 'exceljs';
 import { Competition, Player, Coach, WeighIn, Organizer, Referee } from './types';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
@@ -39,7 +40,9 @@ import {
   saveRefereeAccount,
   deleteRefereeAccount,
   subscribeToRefereeAccounts,
-  subscribeToMyReferees
+  subscribeToMyReferees,
+  fetchGlobalClubs,
+  saveGlobalClubs
 } from './firebase';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -306,6 +309,12 @@ export default function App() {
   const [confirmDeleteRefereeId, setConfirmDeleteRefereeId] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
 
+  // Coach Excel Upload states
+  const [showCoachExcelModal, setShowCoachExcelModal] = useState<boolean>(false);
+  const [excelParsedPlayers, setExcelParsedPlayers] = useState<Partial<Player>[]>([]);
+  const [excelValidationErrors, setExcelValidationErrors] = useState<{ rowNum: number; name: string; error: string }[]>([]);
+  const [excelImporting, setExcelImporting] = useState<boolean>(false);
+
   // Referee Fees Setup states (loaded from localStorage or initialized with defaults)
   const [refereeFees, setRefereeFees] = useState<{
     km_0_50: number;
@@ -529,6 +538,7 @@ export default function App() {
   // Category additions
   const [newAgeGroup, setNewAgeGroup] = useState('');
   const [newWc, setNewWc] = useState('');
+  const [newClubOption, setNewClubOption] = useState('');
 
   // Player Form inputs
   const [pName, setPName] = useState('');
@@ -670,7 +680,9 @@ export default function App() {
   const [editCoachEmail, setEditCoachEmail] = useState('');
   
   // Admin Navigation
-  const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security' | 'referees'>('tournaments');
+  const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security' | 'referees' | 'clubs'>('tournaments');
+  const [globalClubs, setGlobalClubs] = useState<string[]>([]);
+  const [newGlobalClubOption, setNewGlobalClubOption] = useState('');
 
   const [adminPassword, setAdminPassword] = useState<string>(() => {
     return localStorage.getItem('app:adminPassword') || 'admin123';
@@ -802,6 +814,14 @@ export default function App() {
             'WELTER 30.01KG-34KG', 'WELTER 32.01KG-36KG', 'WELTER 44.01KG-47KG', 'WELTER 49.01KG-53KG',
             'WELTER 52.01KG-55KG', 'WELTER 59.01KG-63KG'
           ],
+          affiliatedClubs: [
+            'SMART MA TAEKWONDO CLUB',
+            'SAUJANA TKD CLUB',
+            'TYC TAEKWONDO CLUB',
+            'MATSA TAEKWONDO CLUB',
+            'PUSAT SENI MEMPERTAHANKAN DIRI TAEKWONDO ACTION WTF',
+            'KORYO TAEKWONDO CLUB'
+          ],
           isActive: true
         }];
         loadedComps = defaultComps;
@@ -880,6 +900,23 @@ export default function App() {
         }
       }
       setMasterAthletes(loadedMaster);
+
+      // 5. Fetch globalClubs
+      const cloudGlobalClubs = await fetchGlobalClubs();
+      let loadedGlobalClubs = cloudGlobalClubs;
+      if (!loadedGlobalClubs) {
+        const defaultClubs = [
+          'SMART MA TAEKWONDO CLUB',
+          'SAUJANA TKD CLUB',
+          'TYC TAEKWONDO CLUB',
+          'MATSA TAEKWONDO CLUB',
+          'PUSAT SENI MEMPERTAHANKAN DIRI TAEKWONDO ACTION WTF',
+          'KORYO TAEKWONDO CLUB'
+        ];
+        loadedGlobalClubs = defaultClubs;
+        await saveGlobalClubs(defaultClubs);
+      }
+      setGlobalClubs(loadedGlobalClubs);
     };
 
     initData();
@@ -2283,7 +2320,7 @@ export default function App() {
     triggerMsg('Badge field layout rearranged.', 'ok');
   };
 
-  const handleUploadCategories = (e: React.ChangeEvent<HTMLInputElement>, field: 'ageGroups' | 'weightClasses') => {
+  const handleUploadCategories = (e: React.ChangeEvent<HTMLInputElement>, field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs') => {
     const file = e.target.files?.[0];
     if (!file || !compId) return;
 
@@ -2313,7 +2350,8 @@ export default function App() {
           const updated = competitions.map(c => {
             if (c.id === compId) {
               // combine and unique
-              const combined = Array.from(new Set([...c[field], ...newItems]));
+              const existingList = c[field] || [];
+              const combined = Array.from(new Set([...existingList, ...newItems]));
               return { ...c, [field]: combined };
             }
             return c;
@@ -2332,11 +2370,12 @@ export default function App() {
     e.target.value = ''; // reset input
   };
 
-  const handleAddCat = (field: 'ageGroups' | 'weightClasses', val: string, setVal: React.Dispatch<React.SetStateAction<string>>) => {
+  const handleAddCat = (field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs', val: string, setVal: React.Dispatch<React.SetStateAction<string>>) => {
     if (!compId || !val.trim()) return;
     const updated = competitions.map(c => {
       if (c.id === compId) {
-        return { ...c, [field]: [...c[field], val.trim()] };
+        const existingList = c[field] || [];
+        return { ...c, [field]: [...existingList, val.trim()] };
       }
       return c;
     });
@@ -2344,17 +2383,83 @@ export default function App() {
     setVal('');
   };
 
-  const handleRemoveCat = (field: 'ageGroups' | 'weightClasses', index: number) => {
+  const handleRemoveCat = (field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs', index: number) => {
     if (!compId) return;
     const updated = competitions.map(c => {
       if (c.id === compId) {
-        const arr = [...c[field]];
+        const arr = [...(c[field] || [])];
         arr.splice(index, 1);
         return { ...c, [field]: arr };
       }
       return c;
     });
     saveCompsToStorage(updated);
+  };
+
+  const handleUploadGlobalClubs = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        
+        // Convert to JSON, array of arrays
+        const data = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
+        
+        // Extract the first column items, filter out empty, flatten
+        const newItems: string[] = [];
+        data.forEach(row => {
+          if (row && row.length > 0 && row[0]) {
+            const val = String(row[0]).trim();
+            if (val) {
+              newItems.push(val);
+            }
+          }
+        });
+
+        if (newItems.length > 0) {
+          const combined = Array.from(new Set([...globalClubs, ...newItems]));
+          setGlobalClubs(combined);
+          await saveGlobalClubs(combined);
+          triggerMsg(`Successfully imported ${newItems.length} global clubs/states.`, 'ok');
+        } else {
+          triggerMsg('No valid items found in the first column.', 'error');
+        }
+      } catch (err) {
+        console.error(err);
+        triggerMsg('Error parsing the file.', 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = ''; // reset input
+  };
+
+  const handleAddGlobalClub = async (val: string, setVal: React.Dispatch<React.SetStateAction<string>>) => {
+    if (!val.trim()) return;
+    const trimmed = val.trim();
+    if (globalClubs.includes(trimmed)) {
+      triggerMsg('Club/State already exists.', 'error');
+      return;
+    }
+    const updated = [...globalClubs, trimmed];
+    setGlobalClubs(updated);
+    await saveGlobalClubs(updated);
+    setVal('');
+    triggerMsg(`Added "${trimmed}" to global list.`, 'ok');
+  };
+
+  const handleRemoveGlobalClub = async (index: number) => {
+    const item = globalClubs[index];
+    const updated = [...globalClubs];
+    updated.splice(index, 1);
+    setGlobalClubs(updated);
+    await saveGlobalClubs(updated);
+    triggerMsg(`Removed "${item}" from global list.`, 'ok');
   };
 
   // --- COACH ACTIONS ---
@@ -2395,7 +2500,14 @@ export default function App() {
       setPIc('');
       setPDob('');
       setPGender(comp.genders[0] || 'Male');
-      setPClub(coaches[user || '']?.club || '');
+      
+      const compClubs = globalClubs.length > 0
+        ? globalClubs
+        : Object.keys(DEMO_IMPORT.clubs);
+      const coachClubProfile = coaches[user || '']?.club || '';
+      const initialClub = compClubs.includes(coachClubProfile) ? coachClubProfile : (compClubs[0] || '');
+      setPClub(initialClub);
+
       setPEvent(comp.events[0] || 'Kyorugi');
       setPAgeGroup(comp.ageGroups[0] || '');
       setPWeightClass(comp.weightClasses[0] || '');
@@ -2435,6 +2547,46 @@ export default function App() {
   const handleSavePlayer = () => {
     if (!pName.trim()) {
       triggerMsg('Athlete full name is required.', 'error');
+      return;
+    }
+    if (!pIc.trim()) {
+      triggerMsg('Athlete IC number/passport is required.', 'error');
+      return;
+    }
+    if (!pDob) {
+      triggerMsg('Athlete date of birth is required.', 'error');
+      return;
+    }
+    if (!pGender) {
+      triggerMsg('Athlete gender division is required.', 'error');
+      return;
+    }
+    if (!pClub.trim()) {
+      triggerMsg('Affiliated Club / State is required.', 'error');
+      return;
+    }
+    if (!pSchoolName.trim()) {
+      triggerMsg('School name is required.', 'error');
+      return;
+    }
+    if (!pSchoolCode.trim()) {
+      triggerMsg('School code is required.', 'error');
+      return;
+    }
+    if (!pRace) {
+      triggerMsg('Athlete race is required.', 'error');
+      return;
+    }
+    if (!pEvent) {
+      triggerMsg('Athlete event is required.', 'error');
+      return;
+    }
+    if (!pAgeGroup) {
+      triggerMsg('Athlete age group division is required.', 'error');
+      return;
+    }
+    if (!pWeightClass) {
+      triggerMsg('Athlete weight class division is required.', 'error');
       return;
     }
     if (!compId) return;
@@ -2556,6 +2708,576 @@ export default function App() {
     savePlayersToStorage(compId, updated);
     setConfirmDeleteId(null);
     triggerMsg('Athlete registration retracted.', 'ok');
+  };
+
+  // --- COACH EXCEL UPLOAD AND TEMPLATE ACTIONS ---
+  const handleDownloadExcelTemplate = async () => {
+    const activeComp = competitions.find(c => c.id === compId);
+    if (!activeComp) {
+      triggerMsg('No active tournament selected to generate a template.', 'error');
+      return;
+    }
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      
+      // Main template sheet
+      const ws = workbook.addWorksheet('Competitor Template');
+      
+      // Data sheet for dropdown validations
+      const listWs = workbook.addWorksheet('Dropdown_Data');
+      listWs.state = 'hidden';
+
+      // 1. Populate validation source lists in the hidden sheet
+      listWs.getCell('A1').value = 'Events';
+      listWs.getCell('B1').value = 'Age Groups';
+      listWs.getCell('C1').value = 'Weight Classes';
+      listWs.getCell('D1').value = 'Genders';
+      listWs.getCell('E1').value = 'Races';
+      listWs.getCell('F1').value = 'Affiliated Clubs / States';
+
+      const events = activeComp.events && activeComp.events.length > 0 ? activeComp.events : ['Kyorugi', 'Poomsae'];
+      const ageGroups = activeComp.ageGroups && activeComp.ageGroups.length > 0 ? activeComp.ageGroups : ['Junior (15 to 17 Years Old)'];
+      const weightClasses = activeComp.weightClasses && activeComp.weightClasses.length > 0 ? activeComp.weightClasses : ['FIN BELOW 45KG'];
+      const genders = ['Male', 'Female'];
+      const races = ['Malay', 'Chinese', 'Indian', 'Lain-lain'];
+      const clubsList = globalClubs.length > 0
+        ? globalClubs
+        : Object.keys(DEMO_IMPORT.clubs);
+
+      events.forEach((val, idx) => { listWs.getCell(`A${idx + 2}`).value = val; });
+      ageGroups.forEach((val, idx) => { listWs.getCell(`B${idx + 2}`).value = val; });
+      weightClasses.forEach((val, idx) => { listWs.getCell(`C${idx + 2}`).value = val; });
+      genders.forEach((val, idx) => { listWs.getCell(`D${idx + 2}`).value = val; });
+      races.forEach((val, idx) => { listWs.getCell(`E${idx + 2}`).value = val; });
+      clubsList.forEach((val, idx) => { listWs.getCell(`F${idx + 2}`).value = val; });
+
+      // 2. Setup Columns and Headers on the main template
+      ws.columns = [
+        { header: 'Full Name *', key: 'name', width: 26 },
+        { header: 'Gender *', key: 'gender', width: 14 },
+        { header: 'NRIC or Passport *', key: 'ic', width: 20 },
+        { header: 'Date of Birth *', key: 'dob', width: 16 },
+        { header: 'Event *', key: 'event', width: 16 },
+        { header: 'Age Group *', key: 'ageGroup', width: 34 },
+        { header: 'Weight Class *', key: 'weightClass', width: 26 },
+        { header: 'School Name *', key: 'schoolName', width: 26 },
+        { header: 'School Code *', key: 'schoolCode', width: 16 },
+        { header: 'Affiliated Club / State *', key: 'club', width: 26 },
+        { header: 'Race *', key: 'race', width: 14 }
+      ];
+
+      // Style Header Row
+      const headerRow = ws.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFF' }, size: 10 };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: '1E293B' } // Slate color to match the application's aesthetic
+      };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      headerRow.height = 28;
+
+      // Add 2 realistic sample rows for coaches' reference
+      const sampleRows = [
+        [
+          "Muhammad Ali",
+          "Male",
+          "090512145555",
+          "2009-05-12",
+          events[0],
+          ageGroups[0],
+          weightClasses[0],
+          "SMK Saujana",
+          "BBA0012",
+          "Saujana Martial Arts",
+          "Malay"
+        ],
+        [
+          "Siti Aminah",
+          "Female",
+          "110423106666",
+          "2011-04-23",
+          events[0],
+          ageGroups[0],
+          weightClasses[1] || weightClasses[0],
+          "SK Saujana Utama",
+          "BBA0013",
+          "Saujana Martial Arts",
+          "Malay"
+        ]
+      ];
+      sampleRows.forEach(row => ws.addRow(row));
+
+      // Style the sample rows
+      for (let r = 2; r <= 3; r++) {
+        const row = ws.getRow(r);
+        row.font = { size: 10, italic: true, color: { argb: '475569' } };
+        row.alignment = { vertical: 'middle', horizontal: 'left' };
+      }
+
+      // 3. Apply cell validation dropdown limits on rows 2 to 200
+      const eventsLen = events.length;
+      const ageGroupsLen = ageGroups.length;
+      const weightClassesLen = weightClasses.length;
+
+      for (let r = 2; r <= 200; r++) {
+        const row = ws.getRow(r);
+        row.alignment = { vertical: 'middle' };
+
+        // Full Name (Column A) - Text Length validation to make it strictly required
+        ws.getCell(r, 1).dataValidation = {
+          type: 'textLength',
+          operator: 'greaterThanOrEqual',
+          allowBlank: false,
+          formulae: [1],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Full Name is strictly required and cannot be left blank.'
+        };
+
+        // Gender (Column B)
+        ws.getCell(r, 2).dataValidation = {
+          type: 'list',
+          allowBlank: false,
+          formulae: ['Dropdown_Data!$D$2:$D$3'],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Please select a Gender option from the dropdown (required).'
+        };
+
+        // NRIC or Passport (Column C) - Text Length validation to make it strictly required
+        ws.getCell(r, 3).dataValidation = {
+          type: 'textLength',
+          operator: 'greaterThanOrEqual',
+          allowBlank: false,
+          formulae: [1],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'NRIC or Passport number is strictly required and cannot be left blank.'
+        };
+
+        // Date of Birth (Column D) - Text Length validation to make it strictly required
+        ws.getCell(r, 4).dataValidation = {
+          type: 'textLength',
+          operator: 'greaterThanOrEqual',
+          allowBlank: false,
+          formulae: [1],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Date of Birth is strictly required (Format: YYYY-MM-DD).'
+        };
+
+        // Event (Column E)
+        ws.getCell(r, 5).dataValidation = {
+          type: 'list',
+          allowBlank: false,
+          formulae: [`Dropdown_Data!$A$2:$A$${eventsLen + 1}`],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Please select an Event option from the dropdown (required).'
+        };
+
+        // Age Group (Column F)
+        ws.getCell(r, 6).dataValidation = {
+          type: 'list',
+          allowBlank: false,
+          formulae: [`Dropdown_Data!$B$2:$B$${ageGroupsLen + 1}`],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Please select an Age Group division from the dropdown (required).'
+        };
+
+        // Weight Class (Column G)
+        ws.getCell(r, 7).dataValidation = {
+          type: 'list',
+          allowBlank: false,
+          formulae: [`Dropdown_Data!$C$2:$C$${weightClassesLen + 1}`],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Please select a Weight Class category from the dropdown (required).'
+        };
+
+        // School Name (Column H) - Text Length validation to make it strictly required
+        ws.getCell(r, 8).dataValidation = {
+          type: 'textLength',
+          operator: 'greaterThanOrEqual',
+          allowBlank: false,
+          formulae: [1],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'School / Club Name is strictly required and cannot be left blank.'
+        };
+
+        // School Code (Column I) - Text Length validation to make it strictly required
+        ws.getCell(r, 9).dataValidation = {
+          type: 'textLength',
+          operator: 'greaterThanOrEqual',
+          allowBlank: false,
+          formulae: [1],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'School / Club Code is strictly required and cannot be left blank.'
+        };
+
+        // Affiliated Club / State (Column J)
+        ws.getCell(r, 10).dataValidation = {
+          type: 'list',
+          allowBlank: false,
+          formulae: [`Dropdown_Data!$F$2:$F$${clubsList.length + 1}`],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Please select an Affiliated Club / State option from the dropdown (required).'
+        };
+
+        // Race (Column K)
+        ws.getCell(r, 11).dataValidation = {
+          type: 'list',
+          allowBlank: false,
+          formulae: ['Dropdown_Data!$E$2:$E$5'],
+          showErrorMessage: true,
+          errorTitle: 'Required Field',
+          error: 'Please select a Race option from the dropdown (required).'
+        };
+      }
+
+      // Make gridlines visible explicitly
+      ws.views = [{ showGridLines: true }];
+
+      // Write to Buffer and trigger file download
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeName = activeComp.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.download = `${safeName}_Coach_Roster_Template.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      triggerMsg('Excel template with dropdowns downloaded successfully!', 'ok');
+    } catch (err) {
+      console.error('Failed to generate Excel template:', err);
+      triggerMsg('Could not download template.', 'error');
+    }
+  };
+
+  const handleCoachExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const activeComp = competitions.find(c => c.id === compId);
+    if (!activeComp) {
+      triggerMsg('No active competition selected.', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const wsName = workbook.SheetNames[0];
+        const ws = workbook.Sheets[wsName];
+        const rawRows = XLSX.utils.sheet_to_json<any>(ws);
+
+        if (rawRows.length === 0) {
+          triggerMsg('Excel file appears to be empty.', 'error');
+          return;
+        }
+
+        const parsed: Partial<Player>[] = [];
+        const errors: { rowNum: number; name: string; error: string }[] = [];
+
+        rawRows.forEach((row, index) => {
+          const rowNum = index + 2; // Excel visual row number
+          
+          // Normalize keys
+          const normalizedRow: any = {};
+          Object.entries(row).forEach(([k, v]) => {
+            const normKey = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+            normalizedRow[normKey] = v;
+          });
+
+          // Extract fields
+          const rawName = String(normalizedRow['fullname'] || normalizedRow['name'] || normalizedRow['athlete'] || normalizedRow['competitor'] || '').trim();
+          if (!rawName) {
+            errors.push({ rowNum, name: 'Row ' + rowNum, error: 'Missing Athlete Name. This is a required field.' });
+            return;
+          }
+
+          let rowHasError = false;
+
+          const rawGender = String(normalizedRow['gender'] || normalizedRow['sex'] || '').trim();
+          let gender = '';
+          if (!rawGender) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Gender (Required).' });
+            rowHasError = true;
+          } else {
+            const firstChar = rawGender.toLowerCase().charAt(0);
+            if (firstChar === 'f' || firstChar === 'p' || firstChar === 'w') {
+              gender = 'Female';
+            } else if (firstChar === 'm' || firstChar === 'l') {
+              gender = 'Male';
+            } else {
+              errors.push({ rowNum, name: rawName, error: `Invalid Gender "${rawGender}". Must be Male or Female.` });
+              rowHasError = true;
+            }
+          }
+
+          const ic = String(normalizedRow['nricorpassport'] || normalizedRow['ic'] || normalizedRow['passport'] || normalizedRow['nric'] || normalizedRow['id'] || '').trim();
+          if (!ic) {
+            errors.push({ rowNum, name: rawName, error: 'Missing NRIC or Passport number (Required).' });
+            rowHasError = true;
+          }
+
+          const dobVal = normalizedRow['dateofbirth'] || normalizedRow['dob'] || normalizedRow['birthdate'] || '';
+          let dob = '';
+          if (!dobVal) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Date of Birth (Required).' });
+            rowHasError = true;
+          } else {
+            if (typeof dobVal === 'number') {
+              // Handle Excel serial date
+              const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+              const tempDate = new Date(excelEpoch.getTime() + dobVal * 24 * 60 * 60 * 1000);
+              dob = tempDate.toISOString().split('T')[0];
+            } else {
+              dob = String(dobVal).trim();
+            }
+          }
+
+          const rawEvent = String(normalizedRow['event'] || normalizedRow['division'] || normalizedRow['type'] || '').trim();
+          let matchedEvent = '';
+          if (!rawEvent) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Event (Required).' });
+            rowHasError = true;
+          } else {
+            const found = activeComp.events.find(ev => ev.toLowerCase() === rawEvent.toLowerCase());
+            if (found) {
+              matchedEvent = found;
+            } else {
+              errors.push({ rowNum, name: rawName, error: `Event "${rawEvent}" not found in tournament events list.` });
+              rowHasError = true;
+            }
+          }
+
+          const rawAgeGroup = String(normalizedRow['agegroup'] || normalizedRow['agecategory'] || normalizedRow['category'] || '').trim();
+          let matchedAgeGroup = '';
+          if (!rawAgeGroup) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Age Group (Required).' });
+            rowHasError = true;
+          } else {
+            const found = activeComp.ageGroups.find(ag => ag.toLowerCase() === rawAgeGroup.toLowerCase());
+            if (found) {
+              matchedAgeGroup = found;
+            } else {
+              const partialFound = activeComp.ageGroups.find(ag => ag.toLowerCase().includes(rawAgeGroup.toLowerCase()));
+              if (partialFound) {
+                matchedAgeGroup = partialFound;
+              } else {
+                errors.push({ rowNum, name: rawName, error: `Age Group "${rawAgeGroup}" doesn't match competition divisions.` });
+                rowHasError = true;
+              }
+            }
+          }
+
+          const rawWeightClass = String(normalizedRow['weightclass'] || normalizedRow['weightcategory'] || normalizedRow['weight'] || '').trim();
+          let matchedWeightClass = '';
+          if (!rawWeightClass) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Weight Class (Required).' });
+            rowHasError = true;
+          } else {
+            const found = activeComp.weightClasses.find(wc => wc.toLowerCase() === rawWeightClass.toLowerCase());
+            if (found) {
+              matchedWeightClass = found;
+            } else {
+              const partialFound = activeComp.weightClasses.find(wc => wc.toLowerCase().includes(rawWeightClass.toLowerCase()));
+              if (partialFound) {
+                matchedWeightClass = partialFound;
+              } else {
+                errors.push({ rowNum, name: rawName, error: `Weight Class "${rawWeightClass}" doesn't match competition weight categories.` });
+                rowHasError = true;
+              }
+            }
+          }
+
+          const schoolName = String(normalizedRow['schoolname'] || normalizedRow['school'] || '').trim();
+          if (!schoolName) {
+            errors.push({ rowNum, name: rawName, error: 'Missing School Name (Required).' });
+            rowHasError = true;
+          }
+
+          const schoolCode = String(normalizedRow['schoolcode'] || normalizedRow['code'] || '').trim();
+          if (!schoolCode) {
+            errors.push({ rowNum, name: rawName, error: 'Missing School Code (Required).' });
+            rowHasError = true;
+          }
+
+          const clubRaw = String(normalizedRow['affiliatedclubstate'] || normalizedRow['clubstate'] || normalizedRow['affiliatedclubteam'] || normalizedRow['affiliatedclub'] || normalizedRow['clubteam'] || normalizedRow['club'] || '').trim();
+          let club = '';
+          if (!clubRaw) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Affiliated Club / State (Required).' });
+            rowHasError = true;
+          } else {
+            const compClubs = globalClubs.length > 0
+              ? globalClubs
+              : Object.keys(DEMO_IMPORT.clubs);
+            const found = compClubs.find(c => c.toLowerCase() === clubRaw.toLowerCase());
+            if (found) {
+              club = found;
+            } else {
+              errors.push({ rowNum, name: rawName, error: `Affiliated Club / State "${clubRaw}" does not match configured tournament options.` });
+              rowHasError = true;
+            }
+          }
+
+          const rawRace = String(normalizedRow['race'] || '').trim();
+          let race = '';
+          if (!rawRace) {
+            errors.push({ rowNum, name: rawName, error: 'Missing Race (Required).' });
+            rowHasError = true;
+          } else {
+            const formatted = rawRace.charAt(0).toUpperCase() + rawRace.slice(1).toLowerCase();
+            if (['Malay', 'Chinese', 'Indian', 'Lain-lain'].includes(formatted)) {
+              race = formatted;
+            } else {
+              errors.push({ rowNum, name: rawName, error: `Invalid Race "${rawRace}". Must be Malay, Chinese, Indian, or Lain-lain.` });
+              rowHasError = true;
+            }
+          }
+
+          if (!rowHasError) {
+            parsed.push({
+              name: rawName,
+              gender,
+              ic,
+              dob,
+              event: matchedEvent,
+              ageGroup: matchedAgeGroup,
+              weightClass: matchedWeightClass,
+              schoolName,
+              schoolCode,
+              club,
+              race
+            });
+          }
+        });
+
+        setExcelParsedPlayers(parsed);
+        setExcelValidationErrors(errors);
+        if (parsed.length > 0) {
+          triggerMsg(`Parsed ${parsed.length} valid competitor records. Please review and confirm below.`, 'ok');
+        } else {
+          triggerMsg('No valid rows could be parsed. Please check the error list.', 'error');
+        }
+      } catch (err) {
+        console.error(err);
+        triggerMsg('Failed to parse Excel file. Please ensure it is a valid Excel format.', 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = ''; // reset input
+  };
+
+  const handleConfirmCoachExcelImport = async () => {
+    if (!compId || excelParsedPlayers.length === 0) return;
+
+    try {
+      setExcelImporting(true);
+      const activeComp = competitions.find(c => c.id === compId);
+      if (!activeComp) return;
+
+      const coachClub = coaches[user || '']?.club || '';
+      const coachUsername = user || 'demo';
+      
+      const newPlayersList = [...players];
+      const masterUpdates = { ...masterAthletes };
+      const now = new Date().toISOString();
+
+      let addedCount = 0;
+      let duplicateCount = 0;
+
+      excelParsedPlayers.forEach((parsedP) => {
+        // Check duplicate
+        const isDuplicate = newPlayersList.some(p => {
+          const sameIdentity = 
+            (p.ic && parsedP.ic && p.ic.trim().toLowerCase() === parsedP.ic.trim().toLowerCase()) ||
+            (p.name.trim().toLowerCase() === parsedP.name!.trim().toLowerCase() && p.dob === parsedP.dob);
+          
+          const sameCategory = p.ageGroup === parsedP.ageGroup && p.weightClass === parsedP.weightClass;
+          const sameEvent = p.event === parsedP.event;
+          
+          return sameIdentity && sameCategory && sameEvent;
+        });
+
+        if (isDuplicate) {
+          duplicateCount++;
+          return;
+        }
+
+        const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
+        const customId = `PLY-${randomPart}`;
+
+        const newPlayer: Player = {
+          id: customId,
+          compId,
+          name: parsedP.name!.trim(),
+          ic: parsedP.ic || '',
+          dob: parsedP.dob || '',
+          gender: parsedP.gender || 'Male',
+          club: parsedP.club || coachClub,
+          coachUsername,
+          event: parsedP.event || 'Kyorugi',
+          ageGroup: parsedP.ageGroup || '',
+          weightClass: parsedP.weightClass || '',
+          createdAt: now,
+          weighIn: null,
+          schoolName: parsedP.schoolName || '',
+          schoolCode: parsedP.schoolCode || '',
+          race: parsedP.race || 'Malay'
+        };
+
+        newPlayersList.push(newPlayer);
+        
+        masterUpdates[customId] = {
+          id: customId,
+          name: newPlayer.name,
+          ic: newPlayer.ic,
+          dob: newPlayer.dob,
+          gender: newPlayer.gender,
+          club: newPlayer.club,
+          coachUsername: user || undefined,
+          schoolName: newPlayer.schoolName,
+          schoolCode: newPlayer.schoolCode,
+          race: newPlayer.race
+        };
+
+        addedCount++;
+      });
+
+      if (addedCount > 0) {
+        await savePlayersToStorage(compId, newPlayersList);
+        await saveMasterAthletesToStorage(masterUpdates);
+      }
+
+      if (duplicateCount > 0) {
+        triggerMsg(`Import complete: ${addedCount} athlete(s) imported. ${duplicateCount} duplicate(s) skipped.`, 'ok');
+      } else {
+        triggerMsg(`Import complete: ${addedCount} athlete(s) successfully registered!`, 'ok');
+      }
+
+      setShowCoachExcelModal(false);
+      setExcelParsedPlayers([]);
+      setExcelValidationErrors([]);
+    } catch (err) {
+      console.error(err);
+      triggerMsg('An error occurred during import. Please try again.', 'error');
+    } finally {
+      setExcelImporting(false);
+    }
   };
 
   // --- WEIGH IN ACTIONS ---
@@ -3730,13 +4452,26 @@ export default function App() {
                   <span>Registration Closed</span>
                 </div>
               ) : (
-                <button
-                  onClick={() => handleOpenCoachPlayerForm()}
-                  className="w-full sm:w-auto bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Register New Athlete</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => {
+                      setExcelParsedPlayers([]);
+                      setExcelValidationErrors([]);
+                      setShowCoachExcelModal(true);
+                    }}
+                    className="w-full sm:w-auto bg-surface border border-gold/40 hover:bg-gold/10 text-gold font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>Import via Excel</span>
+                  </button>
+                  <button
+                    onClick={() => handleOpenCoachPlayerForm()}
+                    className="w-full sm:w-auto bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Register New Athlete</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -4398,7 +5133,7 @@ export default function App() {
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Full Legal Name</label>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Full Legal Name *</label>
                 <input 
                   type="text" 
                   value={pName}
@@ -4411,7 +5146,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">IC Number</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">IC Number *</label>
                   <input 
                     type="text" 
                     value={pIc}
@@ -4422,7 +5157,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Date of Birth</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Date of Birth *</label>
                   <input 
                     type="date" 
                     value={pDob}
@@ -4435,7 +5170,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Gender Division</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Gender Division *</label>
                   <select 
                     value={pGender}
                     onChange={(e) => setPGender(e.target.value)}
@@ -4447,21 +5182,25 @@ export default function App() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Affiliated Club / Team</label>
-                  <input 
-                    type="text" 
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Affiliated Club / State *</label>
+                  <select 
                     value={pClub}
                     onChange={(e) => setPClub(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
-                    placeholder="e.g. Smart Ma Taekwondo" 
                     className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
+                  >
+                    {(globalClubs.length > 0
+                      ? globalClubs
+                      : Object.keys(DEMO_IMPORT.clubs)
+                    ).map(club => (
+                      <option key={club} value={club}>{club}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Name</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Name *</label>
                   <input 
                     type="text" 
                     value={pSchoolName}
@@ -4472,7 +5211,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Code</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Code *</label>
                   <input 
                     type="text" 
                     value={pSchoolCode}
@@ -4501,7 +5240,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Event</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Event *</label>
                   <select 
                     value={pEvent}
                     onChange={(e) => setPEvent(e.target.value)}
@@ -4513,7 +5252,7 @@ export default function App() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Age Group Category</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Age Group Category *</label>
                   <select 
                     value={pAgeGroup}
                     onChange={(e) => setPAgeGroup(e.target.value)}
@@ -4531,7 +5270,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Target Weight Class</label>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Target Weight Class *</label>
                 <select 
                   value={pWeightClass}
                   onChange={(e) => setPWeightClass(e.target.value)}
@@ -5424,6 +6163,17 @@ export default function App() {
                 Referee Accounts
               </button>
               <button
+                onClick={() => setAdminTab('clubs')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
+                  adminTab === 'clubs' 
+                    ? 'bg-gold text-ink shadow-sm' 
+                    : 'text-text-dim hover:bg-surface-2 hover:text-text'
+                }`}
+              >
+                <Shield className="w-5 h-5" />
+                Affiliated Clubs / States
+              </button>
+              <button
                 onClick={() => setAdminTab('security')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
                   adminTab === 'security' 
@@ -6202,6 +6952,65 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {adminTab === 'clubs' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-start flex-col sm:flex-row gap-3">
+                    <div>
+                      <h3 className="text-xs font-bold text-text-dim uppercase tracking-widest">Global Affiliated Clubs / States</h3>
+                      <p className="text-xs text-text-dim mt-1">Configure dojangs, clubs, or state teams that coaches can select across all tournament events.</p>
+                    </div>
+                    <label className="cursor-pointer text-xs bg-ink border border-line hover:border-gold text-gold px-4 py-2 rounded-xl transition flex items-center gap-1.5 font-bold shadow-sm self-stretch sm:self-auto justify-center">
+                      <Upload className="w-4 h-4" />
+                      <span>Upload CSV/Excel List</span>
+                      <input 
+                        type="file" 
+                        accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                        className="hidden"
+                        onChange={handleUploadGlobalClubs}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="bg-surface rounded-2xl border border-line shadow-sm p-6 space-y-4">
+                    <div className="flex space-x-2">
+                      <input 
+                        type="text" 
+                        value={newGlobalClubOption}
+                        onChange={(e) => setNewGlobalClubOption(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleAddGlobalClub(newGlobalClubOption, setNewGlobalClubOption); }}
+                        placeholder="e.g. SMART MA TAEKWONDO CLUB" 
+                        className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                      />
+                      <button 
+                        onClick={() => handleAddGlobalClub(newGlobalClubOption, setNewGlobalClubOption)}
+                        className="bg-gold hover:opacity-90 text-ink px-4 py-2 rounded-xl text-xs font-bold shadow transition-all duration-200"
+                      >
+                        Add Club Option
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 p-4 bg-ink rounded-xl border border-line">
+                      {globalClubs.length === 0 ? (
+                        <div className="text-xs text-text-dim italic p-2">No custom options defined. Default fallback list is currently in use.</div>
+                      ) : (
+                        globalClubs.map((club, i) => (
+                          <span key={i} className="inline-flex items-center text-xs bg-surface border border-line px-3 py-1.5 rounded-xl text-text font-medium shadow-sm">
+                            <span>{club}</span>
+                            <button 
+                              onClick={() => handleRemoveGlobalClub(i)}
+                              className="ml-2 text-red-500 hover:text-red-400 text-sm font-bold leading-none cursor-pointer"
+                              title="Delete club"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -6970,7 +7779,7 @@ export default function App() {
               <h3 className="text-sm font-bold uppercase tracking-wider text-text">Division category definitions</h3>
               <p className="text-xs text-text-dim">Configure age brackets and official weight division limits. Registered coaches will select from these custom dropdown variables.</p>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
                 
                 {/* AGE GROUPS */}
                 <div className="space-y-3">
@@ -7073,6 +7882,8 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+
 
               </div>
             </div>
@@ -12321,6 +13132,233 @@ export default function App() {
                 <Save className="w-3.5 h-3.5" />
                 Save Accommodation
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COACH EXCEL REGISTRATION MODAL */}
+      {showCoachExcelModal && activeComp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden overflow-y-auto">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-scale-up">
+            {/* Header */}
+            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="bg-gold/10 p-2 rounded-xl border border-gold/20">
+                  <Upload className="w-5 h-5 text-gold" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-text uppercase tracking-wider">
+                    Excel Competitor Roster Import
+                  </h2>
+                  <p className="text-[11px] text-text-dim">Batch-register competitors for <span className="text-gold font-bold">{activeComp.name}</span></p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowCoachExcelModal(false);
+                  setExcelParsedPlayers([]);
+                  setExcelValidationErrors([]);
+                }}
+                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              
+              {/* Step 1: Template Download */}
+              <div className="bg-surface-2 border border-line p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                    <Download className="w-4 h-4 text-gold" />
+                    1. Use the Dynamic Excel Template
+                  </h4>
+                  <p className="text-[11px] text-text-dim leading-relaxed">
+                    Download our dynamically generated Excel file pre-filled with this tournament's actual Events, Age Divisions, and Weight Classes. Giving this to coaches guarantees error-free registration!
+                  </p>
+                </div>
+                <button
+                  onClick={handleDownloadExcelTemplate}
+                  className="w-full sm:w-auto bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Template (.xlsx)</span>
+                </button>
+              </div>
+
+              {/* Step 2: File Upload Box */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider font-sans">2. Upload Completed Excel File</label>
+                <div className="border-2 border-dashed border-line/60 hover:border-gold/50 rounded-2xl p-6 transition text-center relative group">
+                  <input
+                    type="file"
+                    accept=".xlsx, .xls"
+                    onChange={handleCoachExcelUpload}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="space-y-2 pointer-events-none">
+                    <div className="w-10 h-10 bg-ink/60 rounded-full flex items-center justify-center mx-auto group-hover:scale-110 transition border border-line">
+                      <FileText className="w-5 h-5 text-gold" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-text uppercase tracking-wider">Click or drag Excel file here to upload</p>
+                      <p className="text-[10px] text-text-dim mt-1">Supports standard .xlsx or .xls spreadsheets containing roster lists</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 3: Excel Format Reference / Instructions */}
+              {excelParsedPlayers.length === 0 && (
+                <div className="bg-ink/20 border border-line/40 p-4 rounded-2xl space-y-3 animate-fade-in">
+                  <h4 className="text-xs font-bold text-text uppercase tracking-widest text-gold font-sans flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                    Excel Column Headers (All Fields are Strictly Required)
+                  </h4>
+                  <p className="text-[11px] text-text-dim leading-relaxed font-sans">
+                    To build or customize your own spreadsheet, ensure the first sheet contains the following headers and that every single column is fully filled. Missing or invalid values will cause the row to be flagged and skipped.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
+                    <div className="space-y-1.5">
+                      <p className="font-semibold text-text border-b border-line/40 pb-1 uppercase tracking-wider text-gold/90 font-sans">Identity & Core Info</p>
+                      <ul className="list-disc pl-4 space-y-1 text-text-dim">
+                        <li><strong className="text-text font-sans">Full Name *</strong>: Full name of the competitor.</li>
+                        <li><strong className="text-text font-sans">Gender *</strong>: "Male" or "Female" (or 'L'/'P' in Malay).</li>
+                        <li><strong className="text-text font-sans">NRIC or Passport *</strong>: NRIC number or Passport for automatic verification.</li>
+                        <li><strong className="text-text font-sans">Date of Birth *</strong>: Athlete's birth date (YYYY-MM-DD).</li>
+                        <li><strong className="text-text font-sans">Race *</strong>: Malay, Chinese, Indian, or Lain-lain.</li>
+                      </ul>
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="font-semibold text-text border-b border-line/40 pb-1 uppercase tracking-wider text-gold/90 font-sans">Category & Club Info</p>
+                      <ul className="list-disc pl-4 space-y-1 text-text-dim">
+                        <li><strong className="text-text font-sans">Event *</strong>: Tournament option, must match: <span className="text-text font-mono font-bold text-[10px]">{activeComp.events.join(', ')}</span>.</li>
+                        <li><strong className="text-text font-sans">Age Group *</strong>: Tournament Age division.</li>
+                        <li><strong className="text-text font-sans">Weight Class *</strong>: Athlete's weight category.</li>
+                        <li><strong className="text-text font-sans">School Name *</strong>: School affiliated with the athlete.</li>
+                        <li><strong className="text-text font-sans">School Code *</strong>: Official school code (e.g., BBA0012).</li>
+                        <li><strong className="text-text font-sans">Affiliated Club / State *</strong>: The dojang, club, or state team the athlete is registered with.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Parsing Warnings / Errors Box */}
+              {excelValidationErrors.length > 0 && (
+                <div className="bg-red-950/20 border border-red-500/30 p-4 rounded-2xl space-y-1.5 text-xs animate-fade-in">
+                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-red-400 font-sans">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Row Validation Errors ({excelValidationErrors.length})</span>
+                  </div>
+                  <p className="text-[10px] text-red-200/70 mb-2 font-sans">The following rows contain missing or invalid required fields. These rows have been skipped. Please correct them in your spreadsheet and upload again.</p>
+                  <div className="max-h-40 overflow-y-auto divide-y divide-red-500/10 space-y-1 text-[11px]">
+                    {excelValidationErrors.map((err, i) => (
+                      <div key={i} className="py-1 text-red-200">
+                        <span className="font-mono font-bold bg-red-500/20 px-1.5 py-0.5 rounded mr-1">Row {err.rowNum}</span> 
+                        <strong className="text-text font-sans">{err.name}</strong>: {err.error}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Roster Preview */}
+              {excelParsedPlayers.length > 0 && (
+                <div className="space-y-3 animate-fade-in">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-bold text-text uppercase tracking-widest font-sans">
+                      Roster Upload Preview ({excelParsedPlayers.length} athletes parsed)
+                    </h4>
+                    <span className="text-[10px] uppercase font-bold tracking-widest bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded">
+                      Ready to Save
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto border border-line rounded-2xl">
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      <thead>
+                        <tr className="border-b border-line bg-ink/40 text-text-dim font-semibold uppercase tracking-wider">
+                          <th className="p-3">#</th>
+                          <th className="p-3">Full Name</th>
+                          <th className="p-3">Gender</th>
+                          <th className="p-3">NRIC / DOB</th>
+                          <th className="p-3">Event</th>
+                          <th className="p-3">Age Group</th>
+                          <th className="p-3">Weight Class</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line/40">
+                        {excelParsedPlayers.map((p, idx) => (
+                          <tr key={idx} className="hover:bg-surface-2/30">
+                            <td className="p-3 font-mono text-gold font-bold">{idx + 1}</td>
+                            <td className="p-3 font-bold text-text font-sans">{p.name}</td>
+                            <td className="p-3">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.gender === 'Female' ? 'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
+                                {p.gender}
+                              </span>
+                            </td>
+                            <td className="p-3 text-text-dim font-sans">
+                              <div>{p.ic || <span className="italic text-text-dim/40 font-mono">No IC</span>}</div>
+                              <div className="text-[10px] font-mono">{p.dob || <span className="italic text-text-dim/40">No DOB</span>}</div>
+                            </td>
+                            <td className="p-3 text-gold font-medium font-sans">{p.event}</td>
+                            <td className="p-3 text-text font-sans">{p.ageGroup}</td>
+                            <td className="p-3 text-text font-semibold font-sans">{p.weightClass}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-between gap-3 shrink-0">
+              <button
+                onClick={handleDownloadExcelTemplate}
+                className="px-4 py-2.5 rounded-xl text-gold border border-gold/20 hover:bg-gold/5 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer font-sans"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Get Template</span>
+              </button>
+              
+              <div className="flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowCoachExcelModal(false);
+                    setExcelParsedPlayers([]);
+                    setExcelValidationErrors([]);
+                  }}
+                  className="px-4 py-2.5 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition cursor-pointer font-sans"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button"
+                  disabled={excelParsedPlayers.length === 0 || excelImporting}
+                  onClick={handleConfirmCoachExcelImport}
+                  className={`bg-gold hover:bg-yellow-400 text-ink px-5 py-2.5 rounded-xl font-bold text-xs transition shadow flex items-center gap-1.5 font-sans ${excelParsedPlayers.length === 0 || excelImporting ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  {excelImporting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Importing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Confirm Import ({excelParsedPlayers.length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

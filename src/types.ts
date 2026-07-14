@@ -77,6 +77,7 @@ export interface Competition {
   receipts?: Record<string, ClubReceipt>;
   publicViewPassword?: string;
   hideScaleReadout?: boolean;
+  affiliatedClubs?: string[];
 }
 
 export interface Coach {

@@ -426,3 +426,28 @@ export function subscribeToMyReferees(nricCleaned: string, callback: (referees: 
   });
   return unsubscribe;
 }
+
+export async function fetchGlobalClubs(): Promise<string[] | null> {
+  try {
+    const docRef = doc(db, 'globalSettings', 'clubs');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return data.clubs || null;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'globalSettings/clubs');
+    return null;
+  }
+}
+
+export async function saveGlobalClubs(clubs: string[]): Promise<void> {
+  try {
+    const docRef = doc(db, 'globalSettings', 'clubs');
+    await setDoc(docRef, { clubs });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'globalSettings/clubs');
+  }
+}
+

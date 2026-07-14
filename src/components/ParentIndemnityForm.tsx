@@ -225,7 +225,24 @@ export default function ParentIndemnityForm({
 
     try {
       setSubmitting(true);
-      const signatureDataUrl = sigCanvasRef.current?.getTrimmedCanvas().toDataURL('image/png') || '';
+      
+      const trimmedCanvas = sigCanvasRef.current?.getTrimmedCanvas();
+      let signatureDataUrl = '';
+      if (trimmedCanvas) {
+        // Paint a white background and compress the signature as a highly lightweight JPEG
+        const compressCanvas = document.createElement('canvas');
+        compressCanvas.width = trimmedCanvas.width;
+        compressCanvas.height = trimmedCanvas.height;
+        const ctx = compressCanvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, compressCanvas.width, compressCanvas.height);
+          ctx.drawImage(trimmedCanvas, 0, 0);
+          signatureDataUrl = compressCanvas.toDataURL('image/jpeg', 0.8);
+        } else {
+          signatureDataUrl = trimmedCanvas.toDataURL('image/png');
+        }
+      }
 
       const updatedPlayer: Player = {
         ...selectedPlayer!,
@@ -251,8 +268,21 @@ export default function ParentIndemnityForm({
       setSubmitted(true);
       triggerMsg('Parental Indemnity Form submitted successfully!', 'ok');
     } catch (err) {
-      console.error(err);
-      triggerMsg('An error occurred while saving parental consent. Please try again.', 'error');
+      console.error('Error submitting indemnity waiver:', err);
+      let errMsg = 'An error occurred while saving parental consent.';
+      if (err instanceof Error) {
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed && parsed.error) {
+            errMsg = `Error: ${parsed.error}`;
+          } else {
+            errMsg = err.message;
+          }
+        } catch {
+          errMsg = err.message;
+        }
+      }
+      triggerMsg(`${errMsg}. Please try again.`, 'error');
     } finally {
       setSubmitting(false);
     }
