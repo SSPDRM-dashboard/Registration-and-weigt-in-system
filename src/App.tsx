@@ -767,16 +767,24 @@ export default function App() {
   useEffect(() => {
     const initData = async () => {
       // 1. Fetch competitions
-      const cloudComps = await fetchCompetitions();
-      let loadedComps = cloudComps;
+      let loadedComps: Competition[] = [];
+      try {
+        const cloudComps = await fetchCompetitions();
+        if (cloudComps && cloudComps.length > 0) {
+          loadedComps = cloudComps;
+        }
+      } catch (e) {
+        console.warn("Failed to fetch competitions from cloud, using local fallback:", e);
+      }
+
       if (loadedComps.length === 0) {
         const storedComps = localStorage.getItem('app:competitions');
         if (storedComps) {
           try {
             loadedComps = JSON.parse(storedComps);
-            // Sync to cloud
+            // Sync to cloud asynchronously
             for (const c of loadedComps) {
-              await saveCompetition(c);
+              saveCompetition(c).catch(err => console.warn("Failed to sync competition to cloud on boot:", err));
             }
           } catch (e) {
             console.error("Failed to parse competitions", e);
@@ -826,7 +834,7 @@ export default function App() {
         }];
         loadedComps = defaultComps;
         for (const c of defaultComps) {
-          await saveCompetition(c);
+          saveCompetition(c).catch(err => console.warn("Failed to seed default competition to cloud:", err));
         }
         localStorage.setItem('app:competitions', JSON.stringify(defaultComps));
       }
@@ -839,15 +847,23 @@ export default function App() {
       }
 
       // 2. Fetch coaches
-      const cloudCoaches = await fetchCoaches();
-      let loadedCoaches = cloudCoaches;
+      let loadedCoaches: Record<string, Coach> = {};
+      try {
+        const cloudCoaches = await fetchCoaches();
+        if (cloudCoaches) {
+          loadedCoaches = cloudCoaches;
+        }
+      } catch (e) {
+        console.warn("Failed to fetch coaches from cloud, using local fallback:", e);
+      }
+
       if (Object.keys(loadedCoaches).length === 0) {
         const storedCoaches = localStorage.getItem('app:coaches');
         if (storedCoaches) {
           try {
             loadedCoaches = JSON.parse(storedCoaches);
             for (const username of Object.keys(loadedCoaches)) {
-              await saveCoach({ ...loadedCoaches[username], username });
+              saveCoach({ ...loadedCoaches[username], username }).catch(err => console.warn("Failed to sync coach to cloud on boot:", err));
             }
           } catch (e) {
             console.error("Failed to parse coaches", e);
@@ -860,21 +876,29 @@ export default function App() {
           demo: { password: 'demo123', name: 'Coach Demo', club: 'SMART MA TAEKWONDO CLUB', username: 'demo' } 
         };
         loadedCoaches = defaultCoaches;
-        await saveCoach(defaultCoaches.demo);
+        saveCoach(defaultCoaches.demo).catch(err => console.warn("Failed to seed default coach to cloud:", err));
         localStorage.setItem('app:coaches', JSON.stringify(defaultCoaches));
       }
       setCoaches(loadedCoaches);
 
       // 3. Fetch organizers
-      const cloudOrganizers = await fetchOrganizers();
-      let loadedOrganizers = cloudOrganizers;
+      let loadedOrganizers: Record<string, Organizer> = {};
+      try {
+        const cloudOrganizers = await fetchOrganizers();
+        if (cloudOrganizers) {
+          loadedOrganizers = cloudOrganizers;
+        }
+      } catch (e) {
+        console.warn("Failed to fetch organizers from cloud, using local fallback:", e);
+      }
+
       if (Object.keys(loadedOrganizers).length === 0) {
         const storedOrganizers = localStorage.getItem('app:organizers');
         if (storedOrganizers) {
           try {
             loadedOrganizers = JSON.parse(storedOrganizers);
             for (const username of Object.keys(loadedOrganizers)) {
-              await saveOrganizer({ ...loadedOrganizers[username], username });
+              saveOrganizer({ ...loadedOrganizers[username], username }).catch(err => console.warn("Failed to sync organizer to cloud on boot:", err));
             }
           } catch (e) {
             console.error("Failed to parse organizers", e);
@@ -884,15 +908,23 @@ export default function App() {
       setOrganizers(loadedOrganizers);
 
       // 4. Fetch masterAthletes
-      const cloudMaster = await fetchMasterAthletes();
-      let loadedMaster = cloudMaster;
+      let loadedMaster: Record<string, Partial<Player>> = {};
+      try {
+        const cloudMaster = await fetchMasterAthletes();
+        if (cloudMaster) {
+          loadedMaster = cloudMaster;
+        }
+      } catch (e) {
+        console.warn("Failed to fetch masterAthletes from cloud, using local fallback:", e);
+      }
+
       if (Object.keys(loadedMaster).length === 0) {
         const storedMaster = localStorage.getItem('app:masterAthletes');
         if (storedMaster) {
           try {
             loadedMaster = JSON.parse(storedMaster);
             for (const id of Object.keys(loadedMaster)) {
-              await saveMasterAthlete({ ...loadedMaster[id], id });
+              saveMasterAthlete({ ...loadedMaster[id], id }).catch(err => console.warn("Failed to sync master athlete to cloud on boot:", err));
             }
           } catch (e) {
             console.error("Failed to parse masterAthletes", e);
@@ -902,8 +934,13 @@ export default function App() {
       setMasterAthletes(loadedMaster);
 
       // 5. Fetch globalClubs
-      const cloudGlobalClubs = await fetchGlobalClubs();
-      let loadedGlobalClubs = cloudGlobalClubs;
+      let loadedGlobalClubs: string[] | null = null;
+      try {
+        loadedGlobalClubs = await fetchGlobalClubs();
+      } catch (e) {
+        console.warn("Failed to fetch global clubs from cloud, using local fallback:", e);
+      }
+
       if (!loadedGlobalClubs) {
         const defaultClubs = [
           'SMART MA TAEKWONDO CLUB',
@@ -914,7 +951,7 @@ export default function App() {
           'KORYO TAEKWONDO CLUB'
         ];
         loadedGlobalClubs = defaultClubs;
-        await saveGlobalClubs(defaultClubs);
+        saveGlobalClubs(defaultClubs).catch(err => console.warn("Failed to seed default global clubs to cloud:", err));
       }
       setGlobalClubs(loadedGlobalClubs);
     };
@@ -1017,7 +1054,7 @@ export default function App() {
               loadedPlayers = JSON.parse(storedPlayers);
               // Sync to cloud
               for (const p of loadedPlayers) {
-                savePlayerToFirestore(p);
+                savePlayerToFirestore(p).catch(err => console.warn("Failed to sync player to cloud:", err));
               }
             } catch (e) {
               console.error("Failed to parse players for comp", compId, e);

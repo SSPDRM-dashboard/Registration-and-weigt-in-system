@@ -10,7 +10,8 @@ import {
   query, 
   where,
   onSnapshot,
-  getDoc
+  getDoc,
+  getDocFromServer
 } from 'firebase/firestore';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
 
@@ -450,4 +451,15 @@ export async function saveGlobalClubs(clubs: string[]): Promise<void> {
     handleFirestoreError(error, OperationType.WRITE, 'globalSettings/clubs');
   }
 }
+
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration.");
+    }
+  }
+}
+testConnection();
 
