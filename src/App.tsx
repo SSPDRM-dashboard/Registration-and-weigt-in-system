@@ -449,6 +449,8 @@ export default function App() {
   const [showRefereeEditProfile, setShowRefereeEditProfile] = useState<boolean>(false);
   const [showOrganizerAddReferee, setShowOrganizerAddReferee] = useState<boolean>(false);
   const [editingAccReferee, setEditingAccReferee] = useState<Referee | null>(null);
+  const [editingDistanceRefereeId, setEditingDistanceRefereeId] = useState<string | null>(null);
+  const [editingDistanceValue, setEditingDistanceValue] = useState<string>('');
   const [editAccDetails, setEditAccDetails] = useState<string>('');
   const [editAccMapsLink, setEditAccMapsLink] = useState<string>('');
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
@@ -9976,9 +9978,78 @@ export default function App() {
                                 </button>
                               </div>
                             </td>
-                            <td className="py-3 px-4 text-right font-mono font-bold text-text">
-                              {r.distance} KM
-                              <div className="text-[10px] text-text-dim font-normal">RM {travelPay.toFixed(2)}</div>
+                            <td className="py-3 px-4 text-right font-mono text-text">
+                              {editingDistanceRefereeId === r.id ? (
+                                <div className="flex flex-col items-end gap-1 animate-fade-in">
+                                  <div className="flex items-center gap-1.5 justify-end">
+                                    <input
+                                      type="number"
+                                      autoFocus
+                                      value={editingDistanceValue}
+                                      onChange={(e) => setEditingDistanceValue(e.target.value)}
+                                      onKeyDown={async (e) => {
+                                        if (e.key === 'Enter') {
+                                          const parsed = parseFloat(editingDistanceValue);
+                                          if (isNaN(parsed) || parsed < 0) {
+                                            triggerMsg('Please enter a valid distance', 'error');
+                                            return;
+                                          }
+                                          await saveRefereeToFirestore({ ...r, distance: parsed });
+                                          setEditingDistanceRefereeId(null);
+                                          triggerMsg('Distance updated successfully', 'ok');
+                                        } else if (e.key === 'Escape') {
+                                          setEditingDistanceRefereeId(null);
+                                        }
+                                      }}
+                                      className="w-16 bg-slate-900 text-right border border-line text-[11px] rounded px-1.5 py-0.5 text-text focus:outline-none focus:border-gold font-bold font-mono"
+                                    />
+                                    <span className="text-[10px] text-text-dim">KM</span>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingDistanceRefereeId(null)}
+                                      className="text-[9px] font-bold text-hong hover:underline cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const parsed = parseFloat(editingDistanceValue);
+                                        if (isNaN(parsed) || parsed < 0) {
+                                          triggerMsg('Please enter a valid distance', 'error');
+                                          return;
+                                        }
+                                        await saveRefereeToFirestore({ ...r, distance: parsed });
+                                        setEditingDistanceRefereeId(null);
+                                        triggerMsg('Distance updated successfully', 'ok');
+                                      }}
+                                      className="text-[9px] font-bold text-gold hover:underline cursor-pointer"
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="group relative">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <span className="font-bold">{r.distance} KM</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingDistanceRefereeId(r.id);
+                                        setEditingDistanceValue(r.distance?.toString() || '0');
+                                      }}
+                                      className="text-text-dim hover:text-gold opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-0.5 cursor-pointer rounded hover:bg-surface-2"
+                                      title="Edit Distance"
+                                    >
+                                      <Edit className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                  <div className="text-[10px] text-text-dim font-normal">RM {travelPay.toFixed(2)}</div>
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-4 text-center">
                               {isSplit ? (
