@@ -40,6 +40,7 @@ export default function ParentIndemnityForm({
   const [parentPhone, setParentPhone] = useState('');
   const [parentEmail, setParentEmail] = useState('');
   const [relationship, setRelationship] = useState('Father');
+  const [relationshipOther, setRelationshipOther] = useState('');
   
   // Consent Checkboxes
   const [consentDeclaration, setConsentDeclaration] = useState(false);
@@ -195,6 +196,9 @@ export default function ParentIndemnityForm({
     if (!parentPhone.trim()) {
       errors.push('Please enter parent/guardian mobile number.');
     }
+    if (relationship === 'Others' && !relationshipOther.trim()) {
+      errors.push('Please specify your relationship to the athlete.');
+    }
     if (!consentDeclaration || !consentMedical || !consentLiability) {
       errors.push('You must agree to all release and consent conditions.');
     }
@@ -251,7 +255,7 @@ export default function ParentIndemnityForm({
         indemnityParentIc: parentIc.trim(),
         indemnityParentPhone: parentPhone.trim(),
         indemnityParentEmail: parentEmail.trim(),
-        indemnityRelationship: relationship,
+        indemnityRelationship: relationship === 'Others' ? relationshipOther.trim() : relationship,
         indemnitySignedDate: new Date().toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' }),
         indemnitySignedIp: 'Client-device',
         indemnitySignature: signatureDataUrl
@@ -603,7 +607,7 @@ export default function ParentIndemnityForm({
                 
                 <label className="relative flex items-center justify-center bg-surface-2 hover:bg-line border border-line rounded-xl py-2 px-3 text-xs font-bold uppercase text-text cursor-pointer transition text-center gap-1.5">
                   <Upload className="w-3.5 h-3.5 text-gold" />
-                  <span>Choose Front Copy Image</span>
+                  <span>Upload IC/Passport</span>
                   <input 
                     type="file" 
                     accept="image/*" 
@@ -721,7 +725,12 @@ export default function ParentIndemnityForm({
               <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider mb-1.5">Relationship to Athlete *</label>
               <select
                 value={relationship}
-                onChange={(e) => setRelationship(e.target.value)}
+                onChange={(e) => {
+                  setRelationship(e.target.value);
+                  if (e.target.value !== 'Others') {
+                    setRelationshipOther('');
+                  }
+                }}
                 className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
               >
                 <option value="Father">Father</option>
@@ -730,6 +739,19 @@ export default function ParentIndemnityForm({
                 <option value="Others">Others</option>
               </select>
             </div>
+            {relationship === 'Others' && (
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider mb-1.5">Specify Relationship *</label>
+                <input 
+                  type="text"
+                  required
+                  value={relationshipOther}
+                  onChange={(e) => setRelationshipOther(e.target.value)}
+                  placeholder="e.g. Uncle, Aunt, Grandparent, etc."
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider mb-1.5">Mobile Contact Number *</label>
               <input 

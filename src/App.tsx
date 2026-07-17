@@ -1621,17 +1621,17 @@ export default function App() {
     const club = refereeClubName.trim();
     const resLocation = refereeResidential.trim();
     
-    // Parse distance as optional (defaults to 0 if left blank)
-    const distVal = refereeDistance.trim() === '' ? 0 : parseFloat(refereeDistance);
+    // Parse distance as compulsory
+    const distVal = parseFloat(refereeDistance);
     const bank = refereeBankName.trim();
     const account = refereeBankAccount.trim();
     const plate = refereeCarPlate.trim();
 
-    if (!name || !ic || !phone || !club || !resLocation || !refereeKyorugiStatus || !refereePoomsaeStatus) {
+    if (!name || !ic || !phone || !club || !resLocation || refereeDistance.trim() === '' || !bank || !account || !refereeKyorugiStatus || !refereePoomsaeStatus) {
       triggerMsg('Please fill in all required (*) fields with valid values.', 'error');
       return;
     }
-    if (isNaN(distVal)) {
+    if (isNaN(distVal) || distVal < 0) {
       triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
       return;
     }
@@ -1778,16 +1778,16 @@ export default function App() {
     const club = refereeClubName.trim();
     const resLocation = refereeResidential.trim();
     
-    const distVal = refereeDistance.toString().trim() === '' ? 0 : parseFloat(refereeDistance as string);
+    const distVal = parseFloat(refereeDistance as string);
     const bank = refereeBankName.trim();
     const account = refereeBankAccount.trim();
     const plate = refereeCarPlate.trim();
 
-    if (!name || !ic || !phone || !club || !resLocation || !refereeKyorugiStatus || !refereePoomsaeStatus) {
+    if (!name || !ic || !phone || !club || !resLocation || refereeDistance.toString().trim() === '' || !bank || !account || !refereeKyorugiStatus || !refereePoomsaeStatus) {
       triggerMsg('Please fill in all required (*) fields with valid values.', 'error');
       return;
     }
-    if (isNaN(distVal)) {
+    if (isNaN(distVal) || distVal < 0) {
       triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
       return;
     }
@@ -4275,7 +4275,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) (Optional)</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) *</label>
                   <input 
                     type="number" 
                     value={refereeDistance} 
@@ -4288,7 +4288,7 @@ export default function App() {
 
                 {/* Bank details */}
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name *</label>
                   <input 
                     type="text" 
                     value={refereeBankName} 
@@ -4299,7 +4299,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number *</label>
                   <input 
                     type="text" 
                     value={refereeBankAccount} 
@@ -11779,15 +11779,15 @@ export default function App() {
                   <input type="text" value={refereeResidential} onChange={(e) => setRefereeResidential(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM)</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) *</label>
                   <input type="number" value={refereeDistance} onChange={(e) => setRefereeDistance(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name *</label>
                   <input type="text" value={refereeBankName} onChange={(e) => setRefereeBankName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number *</label>
                   <input type="text" value={refereeBankAccount} onChange={(e) => setRefereeBankAccount(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                 </div>
                 <div>
@@ -11844,8 +11844,14 @@ export default function App() {
               </button>
               <button 
                 onClick={async () => {
-                  if (!refereeFullName || !refereePhone || !refereeClubName || !refereeResidential) {
+                  if (!refereeFullName || !refereePhone || !refereeClubName || !refereeResidential || refereeDistance.toString().trim() === '' || !refereeBankName.trim() || !refereeBankAccount.trim()) {
                     triggerMsg('Please fill in all required fields.', 'error');
+                    return;
+                  }
+                  
+                  const distVal = parseFloat(refereeDistance as string);
+                  if (isNaN(distVal) || distVal < 0) {
+                    triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
                     return;
                   }
                   
@@ -11854,7 +11860,7 @@ export default function App() {
                     phone: refereePhone,
                     clubName: refereeClubName,
                     residentialLocation: refereeResidential,
-                    distance: Number(refereeDistance) || 0,
+                    distance: distVal,
                     bankName: refereeBankName,
                     bankAccount: refereeBankAccount,
                     accommodation: refereeAccommodation,
@@ -12122,15 +12128,15 @@ export default function App() {
                     <input type="text" value={refereeResidential} onChange={(e) => setRefereeResidential(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM)</label>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) *</label>
                     <input type="number" value={refereeDistance} onChange={(e) => setRefereeDistance(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name</label>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name *</label>
                     <input type="text" value={refereeBankName} onChange={(e) => setRefereeBankName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number</label>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number *</label>
                     <input type="text" value={refereeBankAccount} onChange={(e) => setRefereeBankAccount(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                   </div>
                   <div>
