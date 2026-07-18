@@ -105,11 +105,27 @@ export const getRefereeAllowance = (r: Referee, fees: {
     'TR': fees.rate_tr 
   };
   
+  const hasSplitDays = (r.kyorugiDays !== undefined && r.kyorugiDays > 0) || 
+                       (r.poomsaeDays !== undefined && r.poomsaeDays > 0) ||
+                       (r.virtualDays !== undefined && r.virtualDays > 0);
+  
+  let totalDays = r.officiatingDays || 1;
+  if (hasSplitDays) {
+    const kDays = r.kyorugiDays || 0;
+    const pDays = r.poomsaeDays || 0;
+    const vDays = r.virtualDays || 0;
+    totalDays = kDays + pDays + vDays;
+  }
+
   const calculateTravelPay = (distance: number) => {
     if (distance <= 0) return 0;
     if (r.specialRole === 'TD' || r.specialRole === 'CSB') {
       const specialRate = fees.km_rate_special !== undefined ? fees.km_rate_special : 0.85;
       return distance * specialRate;
+    }
+    if (r.accommodation === 'No') {
+      // If the referee chooses not to stay in hotel, pay daily using the 0-50km rate
+      return fees.km_0_50 * totalDays;
     }
     if (distance <= 50) return fees.km_0_50;
     if (distance <= 100) return fees.km_50_100;
@@ -142,13 +158,8 @@ export const getRefereeAllowance = (r: Referee, fees: {
     : r.specialRole === 'VIRTUAL_REFEREE'
     ? (fees.rate_virtual_referee ?? 150)
     : (baseDailyRates[higherStatus] || 80);
-
-  const hasSplitDays = (r.kyorugiDays !== undefined && r.kyorugiDays > 0) || 
-                       (r.poomsaeDays !== undefined && r.poomsaeDays > 0) ||
-                       (r.virtualDays !== undefined && r.virtualDays > 0);
   
   let baseDutyPay = 0;
-  let totalDays = r.officiatingDays || 1;
   let splitExplanation = "";
   let kyorugiPay = 0;
   let poomsaePay = 0;
@@ -453,6 +464,7 @@ export default function App() {
   const [editingDistanceValue, setEditingDistanceValue] = useState<string>('');
   const [joiningComp, setJoiningComp] = useState<Competition | null>(null);
   const [joiningDistance, setJoiningDistance] = useState<string>('');
+  const [joiningAccommodation, setJoiningAccommodation] = useState<'Yes' | 'No'>('No');
   const [editAccDetails, setEditAccDetails] = useState<string>('');
   const [editAccMapsLink, setEditAccMapsLink] = useState<string>('');
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
@@ -10049,7 +10061,12 @@ export default function App() {
                                       <Edit className="w-3 h-3" />
                                     </button>
                                   </div>
-                                  <div className="text-[10px] text-text-dim font-normal">RM {travelPay.toFixed(2)}</div>
+                                  <div className="text-[10px] text-text-dim font-normal">
+                                    RM {travelPay.toFixed(2)}
+                                    {r.accommodation === 'No' && r.distance > 0 && (
+                                      <span className="text-[9px] text-gold block font-semibold">(Daily 0-50km)</span>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                             </td>
@@ -10242,7 +10259,7 @@ export default function App() {
                                   <span>RM {dailyRate} * {days}d</span>
                                 )}
                                 <span className="block text-[9px] text-text-dim mt-0.5">
-                                  + RM {travelPay.toFixed(2)} travel
+                                  + RM {travelPay.toFixed(2)} travel {r.accommodation === 'No' && r.distance > 0 ? '(daily)' : ''}
                                 </span>
                                 {r.includeOvertime && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.overtime} OT</span>}
                                 {r.includeOthers && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.others} Others</span>}
@@ -10431,6 +10448,7 @@ export default function App() {
                               }
                               setJoiningComp(comp);
                               setJoiningDistance(account.distance?.toString() || '');
+                              setJoiningAccommodation(account.accommodation || 'No');
                             }}
                             className="bg-gold hover:opacity-90 text-ink px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition flex items-center gap-1"
                           >
@@ -10735,7 +10753,12 @@ export default function App() {
                           )}
                           {travelPay > 0 && (
                             <div className="flex justify-between text-text-dim">
-                              <span>Travel Mileage Allowance ({activeReferee.distance} KM Bracket)</span>
+                              <span>
+                                {activeReferee.accommodation === 'No'
+                                  ? `Daily Travel Allowance (0-50 KM rate x ${days} ${days === 1 ? 'day' : 'days'})`
+                                  : `Travel Mileage Allowance (${activeReferee.distance} KM Bracket)`
+                                }
+                              </span>
                               <span className="text-text font-semibold">RM {travelPay.toFixed(2)}</span>
                             </div>
                           )}
@@ -13538,6 +13561,42 @@ export default function App() {
                   Please calculate and provide your actual <strong>round-trip (Go & Return)</strong> mileage distance based on Google Maps / Waze between your residence and this specific tournament venue.
                 </p>
               </div>
+
+              <div className="space-y-2 pt-2 border-t border-line/50">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">
+                  Accommodation Option *
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setJoiningAccommodation('Yes')}
+                    className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      joiningAccommodation === 'Yes'
+                        ? 'border-gold bg-gold/10 text-gold'
+                        : 'border-line bg-ink/30 text-text hover:bg-ink/50'
+                    }`}
+                  >
+                    🏨 Lodging Required
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJoiningAccommodation('No')}
+                    className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      joiningAccommodation === 'No'
+                        ? 'border-gold bg-gold/10 text-gold'
+                        : 'border-line bg-ink/30 text-text hover:bg-ink/50'
+                    }`}
+                  >
+                    🚗 No Lodge (Daily Travel Pay)
+                  </button>
+                </div>
+                <p className="text-[10px] text-text-dim leading-relaxed">
+                  {joiningAccommodation === 'No' 
+                    ? "If you choose NOT to stay in organizer lodging, you will be paid a daily travel allowance using the 0-50km rate."
+                    : "Requests organizer-provided hotel/lodging. Travel mileage allowance will be computed based on your actual travel distance bracket."
+                  }
+                </p>
+              </div>
             </div>
 
             {/* Footer */}
@@ -13568,6 +13627,7 @@ export default function App() {
                     const newRef: Referee = {
                       ...account,
                       distance: parsed,
+                      accommodation: joiningAccommodation,
                       id: `${joiningComp.id}_${account.nric.replace(/[^a-zA-Z0-9]/g, '')}`,
                       compId: joiningComp.id,
                       createdAt: new Date().toISOString()
