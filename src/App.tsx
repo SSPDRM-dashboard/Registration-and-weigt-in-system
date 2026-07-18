@@ -1624,16 +1624,6 @@ export default function App() {
   };
 
   const handleRefereeRegister = async () => {
-    const compToRegister = refereeLoginComp || cComp;
-    if (!compToRegister) {
-      triggerMsg('No active tournament selected.', 'error');
-      return;
-    }
-    const targetComp = competitions.find(c => c.id === compToRegister);
-    if (!targetComp || targetComp.isActive === false) {
-      triggerMsg('The selected tournament is not active.', 'error');
-      return;
-    }
     const name = refereeFullName.trim();
     const ic = refereeNric.trim();
     const phone = refereePhone.trim();
@@ -1650,6 +1640,10 @@ export default function App() {
       triggerMsg('Please fill in all required (*) fields with valid values.', 'error');
       return;
     }
+    if (!pendingPhoto) {
+      triggerMsg('Please upload your Portrait Photograph. It is compulsory.', 'error');
+      return;
+    }
     if (isNaN(distVal) || distVal < 0) {
       triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
       return;
@@ -1660,15 +1654,16 @@ export default function App() {
     }
 
     const cleanIc = ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const alreadyExists = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === compToRegister);
+    const accounts = await fetchRefereeAccounts();
+    const alreadyExists = accounts.some(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
     if (alreadyExists) {
-      triggerMsg('A referee with this NRIC is already registered for this tournament.', 'error');
+      triggerMsg('A referee account with this NRIC is already registered.', 'error');
       return;
     }
 
     const newRef: Referee = {
-      id: `${compToRegister}_${ic.replace(/[^a-zA-Z0-9]/g, '')}`,
-      compId: compToRegister,
+      id: `GLOBAL_${ic.replace(/[^a-zA-Z0-9]/g, '')}`,
+      compId: 'GLOBAL',
       fullName: name,
       nric: ic,
       phone: phone,
@@ -1681,18 +1676,21 @@ export default function App() {
       kyorugiStatus: refereeKyorugiStatus,
       poomsaeStatus: refereePoomsaeStatus,
       carPlate: plate,
-      photo: pendingPhoto || undefined,
+      photo: pendingPhoto,
       specialRole: refereeSpecialRole,
       createdAt: new Date().toISOString()
     };
 
     try {
-      await saveRefereeToFirestore(newRef);
       await saveRefereeAccount(newRef);
       setRole('referee');
       setUser(newRef.nric);
-      setCompId(compToRegister);
-      setActiveReferee(newRef);
+      setCompId(null);
+      setActiveReferee({
+        ...newRef,
+        id: `TEMP_GLOBAL_${cleanIc}`,
+        compId: 'GLOBAL',
+      });
       setScreen('refereeDashboard');
       triggerMsg(`Registration successful! Welcome, Referee ${name}!`, 'ok');
 
@@ -4192,32 +4190,14 @@ export default function App() {
             <div className="p-6 bg-gradient-to-b from-surface-2/50 to-transparent border-b border-line text-center">
               <Scale className="w-10 h-10 text-gold mx-auto mb-2 animate-pulse" />
               <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">Referee Registration</h2>
-              <p className="text-xs text-text-dim mt-1">Register your officiating credentials for the tournament</p>
+              <p className="text-xs text-text-dim mt-1">Register your global referee officiating profile</p>
             </div>
 
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Tournament Selection */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Officiating Tournament *</label>
-                  <select 
-                    value={refereeLoginComp}
-                    onChange={(e) => setRefereeLoginComp(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    {competitions.filter(c => c.isActive !== false).length === 0 ? (
-                      <option value="">No active tournaments available...</option>
-                    ) : (
-                      competitions.filter(c => c.isActive !== false).map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
                 {/* Referee Photograph */}
                 <div className="md:col-span-2 bg-ink/30 p-4 rounded-xl border border-line">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Referee Portrait Photograph (4:5 ratio) (Optional)</label>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Referee Portrait Photograph (4:5 ratio) *</label>
                   <input 
                     type="file" 
                     accept="image/*"
