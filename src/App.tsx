@@ -118,14 +118,14 @@ export const getRefereeAllowance = (r: Referee, fees: {
   }
 
   const calculateTravelPay = (distance: number) => {
+    if (r.accommodation === 'No') {
+      // If the referee chooses not to stay in lodging, they receive RM 55 daily, ignoring the KM they fill
+      return 55 * totalDays;
+    }
     if (distance <= 0) return 0;
     if (r.specialRole === 'TD' || r.specialRole === 'CSB') {
       const specialRate = fees.km_rate_special !== undefined ? fees.km_rate_special : 0.85;
       return distance * specialRate;
-    }
-    if (r.accommodation === 'No') {
-      // If the referee chooses not to stay in hotel, pay daily using the 0-50km rate
-      return fees.km_0_50 * totalDays;
     }
     if (distance <= 50) return fees.km_0_50;
     if (distance <= 100) return fees.km_50_100;
@@ -465,6 +465,9 @@ export default function App() {
   const [joiningComp, setJoiningComp] = useState<Competition | null>(null);
   const [joiningDistance, setJoiningDistance] = useState<string>('');
   const [joiningAccommodation, setJoiningAccommodation] = useState<'Yes' | 'No'>('No');
+  const [joiningKyorugiDays, setJoiningKyorugiDays] = useState<string>('0');
+  const [joiningPoomsaeDays, setJoiningPoomsaeDays] = useState<string>('0');
+  const [joiningVirtualDays, setJoiningVirtualDays] = useState<string>('0');
   const [editAccDetails, setEditAccDetails] = useState<string>('');
   const [editAccMapsLink, setEditAccMapsLink] = useState<string>('');
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
@@ -10063,8 +10066,8 @@ export default function App() {
                                   </div>
                                   <div className="text-[10px] text-text-dim font-normal">
                                     RM {travelPay.toFixed(2)}
-                                    {r.accommodation === 'No' && r.distance > 0 && (
-                                      <span className="text-[9px] text-gold block font-semibold">(Daily 0-50km)</span>
+                                    {r.accommodation === 'No' && (
+                                      <span className="text-[9px] text-gold block font-semibold">(Daily Travel RM55)</span>
                                     )}
                                   </div>
                                 </div>
@@ -10259,7 +10262,7 @@ export default function App() {
                                   <span>RM {dailyRate} * {days}d</span>
                                 )}
                                 <span className="block text-[9px] text-text-dim mt-0.5">
-                                  + RM {travelPay.toFixed(2)} travel {r.accommodation === 'No' && r.distance > 0 ? '(daily)' : ''}
+                                  + RM {travelPay.toFixed(2)} travel {r.accommodation === 'No' ? '(RM 55 daily)' : ''}
                                 </span>
                                 {r.includeOvertime && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.overtime} OT</span>}
                                 {r.includeOthers && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.others} Others</span>}
@@ -10449,6 +10452,13 @@ export default function App() {
                               setJoiningComp(comp);
                               setJoiningDistance(account.distance?.toString() || '');
                               setJoiningAccommodation(account.accommodation || 'No');
+                              const kDays = account.kyorugiDays || 0;
+                              const pDays = account.poomsaeDays || 0;
+                              const vDays = account.virtualDays || 0;
+                              const total = kDays + pDays + vDays;
+                              setJoiningKyorugiDays(total > 0 ? kDays.toString() : '1');
+                              setJoiningPoomsaeDays(total > 0 ? pDays.toString() : '0');
+                              setJoiningVirtualDays(total > 0 ? vDays.toString() : '0');
                             }}
                             className="bg-gold hover:opacity-90 text-ink px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition flex items-center gap-1"
                           >
@@ -13562,6 +13572,121 @@ export default function App() {
                 </p>
               </div>
 
+              <div className="space-y-3 pt-3 border-t border-line/50">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">
+                  Events & Officiating Days *
+                </label>
+                <div className="space-y-2">
+                  {/* Kyorugi */}
+                  <div className="flex items-center justify-between bg-ink/20 p-3 rounded-2xl border border-line/30">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        id="join-kyorugi"
+                        checked={parseInt(joiningKyorugiDays) > 0}
+                        onChange={(e) => setJoiningKyorugiDays(e.target.checked ? '1' : '0')}
+                        className="w-4 h-4 rounded text-gold focus:ring-gold border-line bg-ink accent-gold"
+                      />
+                      <label htmlFor="join-kyorugi" className="text-xs font-bold text-text cursor-pointer select-none">
+                        🥋 Kyorugi (Sparring)
+                      </label>
+                    </div>
+                    {parseInt(joiningKyorugiDays) > 0 && (
+                      <div className="flex items-center gap-1.5 bg-ink border border-line/80 rounded-xl px-2 py-1">
+                        <button 
+                          type="button"
+                          onClick={() => setJoiningKyorugiDays(Math.max(1, parseInt(joiningKyorugiDays) - 1).toString())}
+                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
+                        >
+                          -
+                        </button>
+                        <span className="text-xs font-bold font-mono px-1 w-6 text-center">{joiningKyorugiDays}d</span>
+                        <button 
+                          type="button"
+                          onClick={() => setJoiningKyorugiDays((parseInt(joiningKyorugiDays) + 1).toString())}
+                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Poomsae */}
+                  <div className="flex items-center justify-between bg-ink/20 p-3 rounded-2xl border border-line/30">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        id="join-poomsae"
+                        checked={parseInt(joiningPoomsaeDays) > 0}
+                        onChange={(e) => setJoiningPoomsaeDays(e.target.checked ? '1' : '0')}
+                        className="w-4 h-4 rounded text-gold focus:ring-gold border-line bg-ink accent-gold"
+                      />
+                      <label htmlFor="join-poomsae" className="text-xs font-bold text-text cursor-pointer select-none">
+                        ☯️ Poomsae (Forms)
+                      </label>
+                    </div>
+                    {parseInt(joiningPoomsaeDays) > 0 && (
+                      <div className="flex items-center gap-1.5 bg-ink border border-line/80 rounded-xl px-2 py-1">
+                        <button 
+                          type="button"
+                          onClick={() => setJoiningPoomsaeDays(Math.max(1, parseInt(joiningPoomsaeDays) - 1).toString())}
+                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
+                        >
+                          -
+                        </button>
+                        <span className="text-xs font-bold font-mono px-1 w-6 text-center">{joiningPoomsaeDays}d</span>
+                        <button 
+                          type="button"
+                          onClick={() => setJoiningPoomsaeDays((parseInt(joiningPoomsaeDays) + 1).toString())}
+                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Virtual Taekwondo */}
+                  <div className="flex items-center justify-between bg-ink/20 p-3 rounded-2xl border border-line/30">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        id="join-virtual"
+                        checked={parseInt(joiningVirtualDays) > 0}
+                        onChange={(e) => setJoiningVirtualDays(e.target.checked ? '1' : '0')}
+                        className="w-4 h-4 rounded text-gold focus:ring-gold border-line bg-ink accent-gold"
+                      />
+                      <label htmlFor="join-virtual" className="text-xs font-bold text-text cursor-pointer select-none">
+                        🎮 Virtual Taekwondo (VR)
+                      </label>
+                    </div>
+                    {parseInt(joiningVirtualDays) > 0 && (
+                      <div className="flex items-center gap-1.5 bg-ink border border-line/80 rounded-xl px-2 py-1">
+                        <button 
+                          type="button"
+                          onClick={() => setJoiningVirtualDays(Math.max(1, parseInt(joiningVirtualDays) - 1).toString())}
+                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
+                        >
+                          -
+                        </button>
+                        <span className="text-xs font-bold font-mono px-1 w-6 text-center">{joiningVirtualDays}d</span>
+                        <button 
+                          type="button"
+                          onClick={() => setJoiningVirtualDays((parseInt(joiningVirtualDays) + 1).toString())}
+                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[10px] text-text-dim leading-relaxed">
+                  Please select at least one officiating event and specify the number of days you are officiating.
+                </p>
+              </div>
+
               <div className="space-y-2 pt-2 border-t border-line/50">
                 <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">
                   Accommodation Option *
@@ -13592,7 +13717,7 @@ export default function App() {
                 </div>
                 <p className="text-[10px] text-text-dim leading-relaxed">
                   {joiningAccommodation === 'No' 
-                    ? "If you choose NOT to stay in organizer lodging, you will be paid a daily travel allowance using the 0-50km rate."
+                    ? "If you choose NOT to stay in organizer lodging, you will be paid a daily travel allowance of RM 55."
                     : "Requests organizer-provided hotel/lodging. Travel mileage allowance will be computed based on your actual travel distance bracket."
                   }
                 </p>
@@ -13617,6 +13742,16 @@ export default function App() {
                     return;
                   }
 
+                  const kDaysNum = parseInt(joiningKyorugiDays) || 0;
+                  const pDaysNum = parseInt(joiningPoomsaeDays) || 0;
+                  const vDaysNum = parseInt(joiningVirtualDays) || 0;
+                  const totalOfficiatingDays = kDaysNum + pDaysNum + vDaysNum;
+
+                  if (totalOfficiatingDays <= 0) {
+                    triggerMsg("Please select at least one event and enter officiating days.", "error");
+                    return;
+                  }
+
                   const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
                   if (!account) {
                     triggerMsg("Could not find your referee account profile.", "error");
@@ -13628,6 +13763,10 @@ export default function App() {
                       ...account,
                       distance: parsed,
                       accommodation: joiningAccommodation,
+                      kyorugiDays: kDaysNum,
+                      poomsaeDays: pDaysNum,
+                      virtualDays: vDaysNum,
+                      officiatingDays: totalOfficiatingDays,
                       id: `${joiningComp.id}_${account.nric.replace(/[^a-zA-Z0-9]/g, '')}`,
                       compId: joiningComp.id,
                       createdAt: new Date().toISOString()
