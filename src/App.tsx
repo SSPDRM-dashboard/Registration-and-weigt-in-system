@@ -13669,9 +13669,9 @@ export default function App() {
       {/* REFEREE TOURNAMENT JOIN CONFIRM MODAL */}
       {joiningComp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col animate-scale-up">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-scale-up">
             {/* Header */}
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
+            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="bg-gold/10 p-2 rounded-xl border border-gold/20">
                   <MapPin className="w-5 h-5 text-gold" />
@@ -13692,7 +13692,7 @@ export default function App() {
             </div>
 
             {/* Content */}
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
               <div className="bg-ink/30 border border-line p-4 rounded-2xl space-y-3">
                 <div>
                   <span className="text-[10px] text-text-dim uppercase font-semibold tracking-wider block">Tournament Venue</span>
