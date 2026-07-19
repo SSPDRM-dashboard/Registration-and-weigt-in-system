@@ -119,8 +119,8 @@ export const getRefereeAllowance = (r: Referee, fees: {
 
   const calculateTravelPay = (distance: number) => {
     if (r.accommodation === 'No') {
-      // If the referee chooses not to stay in lodging, they receive RM 55 daily, ignoring the KM they fill
-      return 55 * totalDays;
+      // If the referee chooses not to stay in lodging, they receive the minimum km rate daily, ignoring the KM they fill
+      return fees.km_0_50 * totalDays;
     }
     if (distance <= 0) return 0;
     if (r.specialRole === 'TD' || r.specialRole === 'CSB') {
@@ -351,15 +351,15 @@ export default function App() {
     rate_virtual_referee: number;
   }>(() => {
     return {
-      km_0_50: 55,
+      km_0_50: 45,
       km_50_100: 75,
-      km_100_150: 95,
-      km_150_200: 115,
-      km_200_250: 135,
-      km_250_300: 155,
-      km_300_350: 175,
-      km_350_above: 220,
-      km_rate_special: 0.85,
+      km_100_150: 105,
+      km_150_200: 135,
+      km_200_250: 165,
+      km_250_300: 195,
+      km_300_350: 225,
+      km_350_above: 280,
+      km_rate_special: 1.00,
       overtime: 20,
       others: 0,
       rate_ir: 150,
@@ -388,15 +388,15 @@ export default function App() {
             delete parsed.km_200_300;
           }
           setRefereeFees({
-            km_0_50: parsed.km_0_50 ?? 55,
+            km_0_50: parsed.km_0_50 ?? 45,
             km_50_100: parsed.km_50_100 ?? 75,
-            km_100_150: parsed.km_100_150 ?? 95,
-            km_150_200: parsed.km_150_200 ?? 115,
-            km_200_250: parsed.km_200_250 ?? 135,
-            km_250_300: parsed.km_250_300 ?? 155,
-            km_300_350: parsed.km_300_350 ?? 175,
-            km_350_above: parsed.km_350_above ?? 220,
-            km_rate_special: parsed.km_rate_special ?? 0.85,
+            km_100_150: parsed.km_100_150 ?? 105,
+            km_150_200: parsed.km_150_200 ?? 135,
+            km_200_250: parsed.km_200_250 ?? 165,
+            km_250_300: parsed.km_250_300 ?? 195,
+            km_300_350: parsed.km_300_350 ?? 225,
+            km_350_above: parsed.km_350_above ?? 280,
+            km_rate_special: parsed.km_rate_special ?? 1.00,
             overtime: parsed.overtime ?? 20,
             others: parsed.others ?? 0,
             rate_ir: parsed.rate_ir ?? 150,
@@ -415,15 +415,15 @@ export default function App() {
         }
       } else {
         setRefereeFees({
-          km_0_50: 55,
+          km_0_50: 45,
           km_50_100: 75,
-          km_100_150: 95,
-          km_150_200: 115,
-          km_200_250: 135,
-          km_250_300: 155,
-          km_300_350: 175,
-          km_350_above: 220,
-          km_rate_special: 0.85,
+          km_100_150: 105,
+          km_150_200: 135,
+          km_200_250: 165,
+          km_250_300: 195,
+          km_300_350: 225,
+          km_350_above: 280,
+          km_rate_special: 1.00,
           overtime: 20,
           others: 0,
           rate_ir: 150,
@@ -9529,15 +9529,15 @@ export default function App() {
                       <button
                         onClick={() => {
                           updateRefereeFees({
-                            km_0_50: 55,
+                            km_0_50: 45,
                             km_50_100: 75,
-                            km_100_150: 95,
-                            km_150_200: 115,
-                            km_200_250: 135,
-                            km_250_300: 155,
-                            km_300_350: 175,
-                            km_350_above: 220,
-                            km_rate_special: 0.85,
+                            km_100_150: 105,
+                            km_150_200: 135,
+                            km_200_250: 165,
+                            km_250_300: 195,
+                            km_300_350: 225,
+                            km_350_above: 280,
+                            km_rate_special: 1.00,
                             overtime: 20,
                             others: 0,
                             rate_ir: 150,
@@ -10047,7 +10047,7 @@ export default function App() {
                                   <div className="text-[10px] text-text-dim font-normal">
                                     RM {travelPay.toFixed(2)}
                                     {r.accommodation === 'No' && (
-                                      <span className="text-[9px] text-gold block font-semibold">(Daily Travel RM55)</span>
+                                      <span className="text-[9px] text-gold block font-semibold">(Daily Travel RM {refereeFees.km_0_50})</span>
                                     )}
                                   </div>
                                 </div>
@@ -10242,7 +10242,7 @@ export default function App() {
                                   <span>RM {dailyRate} * {days}d</span>
                                 )}
                                 <span className="block text-[9px] text-text-dim mt-0.5">
-                                  + RM {travelPay.toFixed(2)} travel {r.accommodation === 'No' ? '(RM 55 daily)' : ''}
+                                  + RM {travelPay.toFixed(2)} travel {r.accommodation === 'No' ? `(RM ${refereeFees.km_0_50} daily)` : ''}
                                 </span>
                                 {r.includeOvertime && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.overtime} OT</span>}
                                 {r.includeOthers && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.others} Others</span>}
@@ -13697,7 +13697,7 @@ export default function App() {
                 </div>
                 <p className="text-[10px] text-text-dim leading-relaxed">
                   {joiningAccommodation === 'No' 
-                    ? "If you choose NOT to stay in organizer lodging, you will be paid a daily travel allowance of RM 55."
+                    ? `If you choose NOT to stay in organizer lodging, you will be paid a daily travel allowance of RM ${refereeFees.km_0_50}.`
                     : "Requests organizer-provided hotel/lodging. Travel mileage allowance will be computed based on your actual travel distance bracket."
                   }
                 </p>
