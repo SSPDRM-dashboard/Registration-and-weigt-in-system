@@ -42,7 +42,9 @@ import {
   subscribeToRefereeAccounts,
   subscribeToMyReferees,
   fetchGlobalClubs,
-  saveGlobalClubs
+  saveGlobalClubs,
+  fetchAdminPassword,
+  saveAdminPasswordToFirestore
 } from './firebase';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -283,12 +285,14 @@ export default function App() {
 
   // Referee login / registration state
   const [refereeLoginNric, setRefereeLoginNric] = useState('');
+  const [refereeLoginPassword, setRefereeLoginPassword] = useState('');
   const [refereeLoginComp, setRefereeLoginComp] = useState('');
   const [activeReferee, setActiveReferee] = useState<Referee | null>(null);
 
   // Referee Registration fields
   const [refereeFullName, setRefereeFullName] = useState('');
   const [refereeNric, setRefereeNric] = useState('');
+  const [refereePassword, setRefereePassword] = useState('');
   const [refereePhone, setRefereePhone] = useState('');
   const [refereeClubName, setRefereeClubName] = useState('');
   const [refereeResidential, setRefereeResidential] = useState('');
@@ -301,6 +305,14 @@ export default function App() {
   const [refereeCarPlate, setRefereeCarPlate] = useState('');
   const [refereeSpecialRole, setRefereeSpecialRole] = useState<'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE'>('None');
   const [refereeConsent, setRefereeConsent] = useState(false);
+
+  // Forgot password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [fpUsername, setFpUsername] = useState('');
+  const [fpNric, setFpNric] = useState('');
+  const [fpName, setFpName] = useState('');
+  const [fpPhone, setFpPhone] = useState('');
+  const [recoveredPassword, setRecoveredPassword] = useState<string | null>(null);
 
 
   
@@ -466,6 +478,15 @@ export default function App() {
   });
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showRefereeEditProfile, setShowRefereeEditProfile] = useState<boolean>(false);
+  
+  // Coach Edit Profile State
+  const [showCoachEditProfile, setShowCoachEditProfile] = useState<boolean>(false);
+  const [coachEditName, setCoachEditName] = useState<string>('');
+  const [coachEditClub, setCoachEditClub] = useState<string>('');
+  const [coachEditPhone, setCoachEditPhone] = useState<string>('');
+  const [coachEditEmail, setCoachEditEmail] = useState<string>('');
+  const [coachEditPassword, setCoachEditPassword] = useState<string>('');
+
   const [showOrganizerAddReferee, setShowOrganizerAddReferee] = useState<boolean>(false);
   
   // Edit Competition State
@@ -738,6 +759,7 @@ export default function App() {
   const [confirmDeleteRefereeAccountNric, setConfirmDeleteRefereeAccountNric] = useState<string | null>(null);
   const [adminRefName, setAdminRefName] = useState('');
   const [adminRefNric, setAdminRefNric] = useState('');
+  const [adminRefPassword, setAdminRefPassword] = useState('');
   const [adminRefPhone, setAdminRefPhone] = useState('');
   const [adminRefClub, setAdminRefClub] = useState('');
   const [adminRefResidential, setAdminRefResidential] = useState('');
@@ -754,6 +776,7 @@ export default function App() {
   const [orgEditingRefereeNric, setOrgEditingRefereeNric] = useState<string | null>(null);
   const [orgRefName, setOrgRefName] = useState('');
   const [orgRefNric, setOrgRefNric] = useState('');
+  const [orgRefPassword, setOrgRefPassword] = useState('');
   const [orgRefPhone, setOrgRefPhone] = useState('');
   const [orgRefClub, setOrgRefClub] = useState('');
   const [orgRefResidential, setOrgRefResidential] = useState('');
@@ -991,6 +1014,22 @@ export default function App() {
         saveGlobalClubs(defaultClubs).catch(err => console.warn("Failed to seed default global clubs to cloud:", err));
       }
       setGlobalClubs(loadedGlobalClubs);
+
+      // 6. Fetch Admin Password
+      try {
+        const cloudAdminPass = await fetchAdminPassword();
+        if (cloudAdminPass) {
+          setAdminPassword(cloudAdminPass);
+          localStorage.setItem('app:adminPassword', cloudAdminPass);
+        } else {
+          // If not in cloud but exists locally, sync it up
+          const localAdminPass = localStorage.getItem('app:adminPassword') || 'admin123';
+          setAdminPassword(localAdminPass);
+          saveAdminPasswordToFirestore(localAdminPass).catch(err => console.warn("Failed to sync admin password to cloud:", err));
+        }
+      } catch (e) {
+        console.warn("Failed to fetch admin password from cloud:", e);
+      }
     };
 
     initData();
@@ -1528,6 +1567,52 @@ export default function App() {
     triggerMsg(`Welcome, Organizer ${acc.name}!`, 'ok');
   };
 
+  const handleRecoverPassword = () => {
+    setRecoveredPassword(null);
+    const cname = fpName.trim().toLowerCase();
+    const cphone = fpPhone.trim().replace(/[^0-9]/g, '');
+
+    if (!fpName.trim() || !fpPhone.trim()) {
+      triggerMsg('Registered Name and Phone Number are required.', 'error');
+      return;
+    }
+
+    let foundPass = null;
+
+    // Check coaches
+    if (fpUsername.trim()) {
+      const uname = fpUsername.trim().toLowerCase();
+      const matchedCoach = Object.values(coaches).find(c => 
+        c.username?.toLowerCase() === uname &&
+        c.name.toLowerCase() === cname &&
+        (c.phone || '').replace(/[^0-9]/g, '') === cphone
+      );
+      if (matchedCoach) {
+        foundPass = matchedCoach.password;
+      }
+    }
+
+    // Check referees
+    if (!foundPass && fpNric.trim()) {
+      const cnric = fpNric.trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const matchedRef = refereeAccounts.find(r =>
+        r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cnric &&
+        r.fullName.toLowerCase() === cname &&
+        r.phone.replace(/[^0-9]/g, '') === cphone
+      );
+      if (matchedRef) {
+        foundPass = matchedRef.password;
+      }
+    }
+
+    if (foundPass) {
+      setRecoveredPassword(foundPass);
+      triggerMsg('Account verified. Password recovered.', 'ok');
+    } else {
+      triggerMsg('No matching account found with these details.', 'error');
+    }
+  };
+
   const handleCoachLogin = () => {
     const u = cUser.trim();
     const p = cPass;
@@ -1593,6 +1678,11 @@ export default function App() {
     // Check global referee accounts first
     const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
     if (account) {
+      if (account.password && account.password !== refereeLoginPassword) {
+        triggerMsg('Invalid NRIC or Password.', 'error');
+        return;
+      }
+      
       setRole('referee');
       setUser(account.nric);
       
@@ -1644,6 +1734,7 @@ export default function App() {
   const handleRefereeRegister = async () => {
     const name = refereeFullName.trim();
     const ic = refereeNric.trim();
+    const password = refereePassword.trim();
     const phone = refereePhone.trim();
     const club = refereeClubName.trim();
     const resLocation = refereeResidential.trim();
@@ -1654,8 +1745,12 @@ export default function App() {
     const account = refereeBankAccount.trim();
     const plate = refereeCarPlate.trim();
 
-    if (!name || !ic || !phone || !club || !resLocation || refereeDistance.trim() === '' || !bank || !account || !refereeKyorugiStatus || !refereePoomsaeStatus) {
-      triggerMsg('Please fill in all required (*) fields with valid values.', 'error');
+    if (!name || !ic || !password || !phone || !club || !resLocation || refereeDistance.trim() === '' || !bank || !account || !refereeKyorugiStatus || !refereePoomsaeStatus) {
+      triggerMsg('Please fill in all required (*) fields including your password.', 'error');
+      return;
+    }
+    if (password.length < 6) {
+      triggerMsg('Password must be at least 6 characters long.', 'error');
       return;
     }
     if (!pendingPhoto) {
@@ -1684,6 +1779,7 @@ export default function App() {
       compId: 'GLOBAL',
       fullName: name,
       nric: ic,
+      password: password,
       phone: phone,
       clubName: club,
       residentialLocation: resLocation,
@@ -2002,6 +2098,10 @@ export default function App() {
       triggerMsg('Name, NRIC, and Phone are required.', 'error');
       return;
     }
+    if (!editingRefereeNric && !adminRefPassword.trim()) {
+      triggerMsg('Password is required for new accounts.', 'error');
+      return;
+    }
     
     const distVal = parseFloat(adminRefDistance) || 0;
     
@@ -2010,6 +2110,7 @@ export default function App() {
       compId: 'GLOBAL',
       fullName: adminRefName.trim(),
       nric: adminRefNric.trim(),
+      password: adminRefPassword || undefined,
       phone: adminRefPhone.trim(),
       clubName: adminRefClub.trim(),
       residentialLocation: adminRefResidential.trim(),
@@ -2033,6 +2134,7 @@ export default function App() {
         await saveRefereeToFirestore({
           ...tRef,
           fullName: refAcc.fullName,
+          password: refAcc.password || tRef.password,
           phone: refAcc.phone,
           clubName: refAcc.clubName,
           residentialLocation: refAcc.residentialLocation,
@@ -2046,12 +2148,12 @@ export default function App() {
           specialRole: refAcc.specialRole
         });
       }
-
       triggerMsg(editingRefereeNric ? 'Referee account updated!' : 'Referee account created!', 'ok');
       
       setEditingRefereeNric(null);
       setAdminRefName('');
       setAdminRefNric('');
+      setAdminRefPassword('');
       setAdminRefPhone('');
       setAdminRefClub('');
       setAdminRefResidential('');
@@ -2086,6 +2188,10 @@ export default function App() {
       triggerMsg('Name, NRIC, and Phone are required.', 'error');
       return;
     }
+    if (!orgEditingRefereeNric && !orgRefPassword.trim()) {
+      triggerMsg('Password is required for new accounts.', 'error');
+      return;
+    }
     
     const distVal = parseFloat(orgRefDistance) || 0;
     const cleanIc = orgRefNric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
@@ -2095,6 +2201,7 @@ export default function App() {
       compId: 'GLOBAL',
       fullName: orgRefName.trim(),
       nric: orgRefNric.trim(),
+      password: orgRefPassword || undefined,
       phone: orgRefPhone.trim(),
       clubName: orgRefClub.trim(),
       residentialLocation: orgRefResidential.trim(),
@@ -2122,6 +2229,7 @@ export default function App() {
           compId: compId,
           fullName: orgRefName.trim(),
           nric: orgRefNric.trim(),
+          password: refAcc.password || existingReg?.password,
           phone: orgRefPhone.trim(),
           clubName: orgRefClub.trim(),
           residentialLocation: orgRefResidential.trim(),
@@ -2168,6 +2276,7 @@ export default function App() {
     setOrgEditingRefereeNric(refAcc.nric);
     setOrgRefName(refAcc.fullName);
     setOrgRefNric(refAcc.nric);
+    setOrgRefPassword(refAcc.password || '');
     setOrgRefPhone(refAcc.phone);
     setOrgRefClub(refAcc.clubName || '');
     setOrgRefResidential(refAcc.residentialLocation || '');
@@ -2192,6 +2301,7 @@ export default function App() {
     }
     setAdminPassword(newAdminPass);
     localStorage.setItem('app:adminPassword', newAdminPass);
+    saveAdminPasswordToFirestore(newAdminPass).catch(err => console.warn("Failed to sync new admin password:", err));
     setNewAdminPass('');
     setConfirmAdminPass('');
     triggerMsg('Administrative password updated successfully.', 'ok');
@@ -3878,6 +3988,13 @@ export default function App() {
                     >
                       Register New Coach Token
                     </button>
+                    <br />
+                    <button 
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-text-dim underline mt-2 hover:text-text transition"
+                    >
+                      Forgot Password?
+                    </button>
                   </p>
                 </div>
               )}
@@ -3898,6 +4015,20 @@ export default function App() {
                       <User className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
                     </div>
                   </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Password</label>
+                    <div className="relative">
+                      <input 
+                        type="password" 
+                        placeholder="Enter password"
+                        value={refereeLoginPassword} 
+                        onChange={(e) => setRefereeLoginPassword(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleRefereeLogin(); }}
+                        className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
+                      />
+                      <Lock className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
+                    </div>
+                  </div>
                   <button 
                     onClick={handleRefereeLogin}
                     className="w-full bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition mt-2 cursor-pointer shadow-md hover:shadow"
@@ -3911,6 +4042,13 @@ export default function App() {
                       className="text-gold underline font-semibold hover:text-opacity-80"
                     >
                       Register New Referee
+                    </button>
+                    <br />
+                    <button 
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-text-dim underline mt-2 hover:text-text transition"
+                    >
+                      Forgot Password?
                     </button>
                   </p>
                 </div>
@@ -4107,6 +4245,117 @@ export default function App() {
           </div>
         )}
 
+        {/* FORGOT PASSWORD MODAL */}
+        {showForgotPassword && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
+            <div className="bg-surface border border-line rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
+              <div className="p-5 border-b border-line flex justify-between items-center bg-surface-2/30">
+                <h2 className="font-bold text-text uppercase tracking-widest text-sm flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-gold" />
+                  Recover Password
+                </h2>
+                <button 
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setRecoveredPassword(null);
+                    setFpUsername('');
+                    setFpNric('');
+                    setFpName('');
+                    setFpPhone('');
+                  }}
+                  className="text-text-dim hover:text-text transition p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                {recoveredPassword ? (
+                  <div className="text-center py-6 space-y-4">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gold/10 mb-2">
+                      <Lock className="w-6 h-6 text-gold" />
+                    </div>
+                    <p className="text-sm text-text-dim">Your recovered password is:</p>
+                    <div className="bg-ink border border-line rounded-xl py-3 px-4 text-center">
+                      <span className="font-mono font-bold text-lg text-text select-all">{recoveredPassword}</span>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setShowForgotPassword(false);
+                        setRecoveredPassword(null);
+                      }}
+                      className="w-full bg-surface-2 hover:bg-surface border border-line text-text text-xs font-bold py-2.5 rounded-xl transition"
+                    >
+                      Close & Return to Login
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-text-dim leading-relaxed mb-4">
+                      To recover your password, please provide your registration details. Enter your Username if you are a Coach, or NRIC if you are a Referee.
+                    </p>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1.5">1. Username (For Coaches Only)</label>
+                        <input 
+                          type="text" 
+                          value={fpUsername} 
+                          onChange={(e) => setFpUsername(e.target.value)}
+                          placeholder="e.g. jdoe_coach"
+                          className="w-full bg-ink border border-line focus:border-gold rounded-xl px-3 py-2 text-sm text-text outline-none transition"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1.5">2. NRIC Number (For Referees Only)</label>
+                        <input 
+                          type="text" 
+                          value={fpNric} 
+                          onChange={(e) => setFpNric(e.target.value)}
+                          placeholder="e.g. 850101145555"
+                          className="w-full bg-ink border border-line focus:border-gold rounded-xl px-3 py-2 text-sm text-text outline-none transition"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1.5">3. Registered Name (Required)</label>
+                        <input 
+                          type="text" 
+                          value={fpName} 
+                          onChange={(e) => setFpName(e.target.value)}
+                          placeholder="Your full registered name"
+                          className="w-full bg-ink border border-line focus:border-gold rounded-xl px-3 py-2 text-sm text-text outline-none transition"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1.5">4. Registered Phone Number (Required)</label>
+                        <input 
+                          type="tel" 
+                          value={fpPhone} 
+                          onChange={(e) => setFpPhone(e.target.value)}
+                          placeholder="e.g. 0123456789"
+                          className="w-full bg-ink border border-line focus:border-gold rounded-xl px-3 py-2 text-sm text-text outline-none transition"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="pt-2">
+                      <button 
+                        onClick={handleRecoverPassword}
+                        className="w-full bg-gold hover:bg-gold/90 text-ink text-sm font-bold py-2.5 rounded-xl transition shadow-md"
+                      >
+                        Recover Password
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* COACH SIGNUP */}
         {screen === 'coachSignup' && (
           <div className="max-w-md mx-auto my-12 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
@@ -4253,6 +4502,17 @@ export default function App() {
                     value={refereeNric} 
                     onChange={(e) => setRefereeNric(e.target.value)}
                     placeholder="e.g. 850101-14-5555"
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Password *</label>
+                  <input 
+                    type="password" 
+                    value={refereePassword} 
+                    onChange={(e) => setRefereePassword(e.target.value)}
+                    placeholder="At least 6 characters"
                     className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
                   />
                 </div>
@@ -4443,8 +4703,27 @@ export default function App() {
                 </h2>
                 <p className="text-xs text-text-dim mt-1">Representing: <strong className="text-text">{coaches[user || '']?.club}</strong></p>
               </div>
-              <div className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
-                Verified Club Registrar Account
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
+                  Verified Club Registrar Account
+                </div>
+                <button 
+                  onClick={() => {
+                    const c = coaches[user || ''];
+                    if (c) {
+                      setCoachEditName(c.name || '');
+                      setCoachEditClub(c.club || '');
+                      setCoachEditPhone(c.phone || '');
+                      setCoachEditEmail(c.email || '');
+                      setCoachEditPassword(c.password || '');
+                      setShowCoachEditProfile(true);
+                    }
+                  }}
+                  className="text-xs border border-line hover:border-gold text-text-dim hover:text-gold px-3 py-1.5 rounded-lg transition font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
+                >
+                  <Edit className="w-3 h-3" />
+                  Edit Profile
+                </button>
               </div>
             </div>
 
@@ -4497,7 +4776,26 @@ export default function App() {
                 </button>
                 <div>
                   <h2 className="text-lg font-bold uppercase tracking-wider text-text font-sans">{activeComp.name}</h2>
-                  <p className="text-xs text-text-dim">Club: <strong className="text-text">{coaches[user || '']?.club}</strong></p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-text-dim">Club: <strong className="text-text">{coaches[user || '']?.club}</strong></p>
+                    <button 
+                      onClick={() => {
+                        const c = coaches[user || ''];
+                        if (c) {
+                          setCoachEditName(c.name || '');
+                          setCoachEditClub(c.club || '');
+                          setCoachEditPhone(c.phone || '');
+                          setCoachEditEmail(c.email || '');
+                          setCoachEditPassword(c.password || '');
+                          setShowCoachEditProfile(true);
+                        }
+                      }}
+                      className="text-[10px] border border-line hover:border-gold text-text-dim hover:text-gold px-2 py-0.5 rounded transition font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm"
+                    >
+                      <Edit className="w-3 h-3" />
+                      Edit Profile
+                    </button>
+                  </div>
                 </div>
               </div>
               {isRegistrationClosed(activeComp) ? (
@@ -5473,7 +5771,7 @@ export default function App() {
                                   <GripVertical className="w-3.5 h-3.5" />
                                 </div>
                                 <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '10px'), 10) + 3}px` : getFontSizePx(field.fontSize, '10px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-2 py-0.5 rounded border border-white/20 shrink-0" style={{ fontSize: getFontSizePx(field.fontSize, '10px'), color: field.color || '#ffffff' }}>{p.event}</span>}
+                                
                               </div>
                             );
                           }
@@ -5667,6 +5965,7 @@ export default function App() {
                                         />
                                       </div>
                                       <div className={textAlignmentClass}>
+                                        {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
                                         <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '10px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
                                         <p className="mt-0.5 leading-normal" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan at weigh-in station<br />to digitally verify athlete weight.</p>
                                       </div>
@@ -6627,6 +6926,7 @@ export default function App() {
                             setEditingRefereeNric(null);
                             setAdminRefName('');
                             setAdminRefNric('');
+                            setAdminRefPassword('');
                             setAdminRefPhone('');
                             setAdminRefClub('');
                             setAdminRefResidential('');
@@ -6669,6 +6969,18 @@ export default function App() {
                           value={adminRefNric}
                           onChange={(e) => setAdminRefNric(e.target.value)}
                           className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none disabled:opacity-55"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Password</label>
+                        <input
+                          type="password"
+                          required={!editingRefereeNric}
+                          placeholder={editingRefereeNric ? "(Leave blank to keep current)" : "Enter password"}
+                          value={adminRefPassword}
+                          onChange={(e) => setAdminRefPassword(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
                         />
                       </div>
 
@@ -6851,7 +7163,7 @@ export default function App() {
                           <thead>
                             <tr className="bg-ink/40 text-text-dim border-b border-line font-bold uppercase tracking-wider text-[10px]">
                               <th className="p-4">Full Name</th>
-                              <th className="p-4">NRIC / Phone</th>
+                              <th className="p-4">NRIC / Pass / Phone</th>
                               <th className="p-4">State / Club</th>
                               <th className="p-4">Travel / Distance</th>
                               <th className="p-4">Qualifications</th>
@@ -6876,6 +7188,7 @@ export default function App() {
                                   <td className="p-4 font-bold text-text uppercase">{ref.fullName}</td>
                                   <td className="p-4">
                                     <div className="font-mono text-gold font-bold">{ref.nric}</div>
+                                    <div className="font-mono text-text-dim text-[11px] font-bold">PW: {ref.password || 'N/A'}</div>
                                     <div className="text-text-dim text-[11px]">{ref.phone}</div>
                                   </td>
                                   <td className="p-4 uppercase text-text font-semibold">{ref.clubName || 'N/A'}</td>
@@ -6916,6 +7229,7 @@ export default function App() {
                                             setEditingRefereeNric(ref.nric);
                                             setAdminRefName(ref.fullName);
                                             setAdminRefNric(ref.nric);
+                                            setAdminRefPassword(ref.password || '');
                                             setAdminRefPhone(ref.phone);
                                             setAdminRefClub(ref.clubName || '');
                                             setAdminRefResidential(ref.residentialLocation || '');
@@ -7454,7 +7768,7 @@ export default function App() {
                                       <GripVertical className="w-3 h-3" />
                                     </div>
                                     <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                    {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
+                                    
                                   </div>
                                 );
                               }
@@ -7641,7 +7955,8 @@ export default function App() {
                                             />
                                           </div>
                                           <div className={textAlignmentClass}>
-                                            <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                                            {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                        <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
                                             <p className="mt-0.5 leading-normal" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                                           </div>
                                         </div>
@@ -8958,7 +9273,7 @@ export default function App() {
                               'justify-between'
                             } items-center px-3.5 shrink-0 shadow-sm w-full`}>
                               <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                              {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
+                              
                             </div>
                           );
                         }
@@ -9082,7 +9397,8 @@ export default function App() {
                                       />
                                     </div>
                                     <div className={textAlignmentClass}>
-                                      <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                                      {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                        <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
                                       <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                                     </div>
                                   </div>
@@ -9953,7 +10269,7 @@ export default function App() {
                     <thead>
                       <tr className="bg-surface-2 border-b border-line text-[10px] font-bold text-text-dim uppercase tracking-wider">
                         <th className="py-3 px-4">Referee / Club</th>
-                        <th className="py-3 px-4">NRIC & Phone</th>
+                        <th className="py-3 px-4">NRIC / Pass / Phone</th>
                         <th className="py-3 px-4 text-center">Status (K / P)</th>
                         <th className="py-3 px-4 text-center">Accommodation</th>
                         <th className="py-3 px-4 text-right">Distance (Go/Ret)</th>
@@ -9994,6 +10310,7 @@ export default function App() {
                              </td>
                             <td className="py-3 px-4 font-mono text-[11px] text-text-dim">
                               <div>{r.nric}</div>
+                              <div className="mt-0.5 text-gold font-bold">PW: {r.password || 'N/A'}</div>
                               <div className="mt-0.5 text-text">{r.phone}</div>
                             </td>
                             <td className="py-3 px-4 text-center">
@@ -10379,6 +10696,7 @@ export default function App() {
                   onClick={() => {
                     setRefereeFullName(activeReferee.fullName || '');
                     setRefereeNric(activeReferee.nric || '');
+                    setRefereePassword(activeReferee.password || '');
                     setRefereePhone(activeReferee.phone || '');
                     setRefereeClubName(activeReferee.clubName || '');
                     setRefereeResidential(activeReferee.residentialLocation || '');
@@ -11882,6 +12200,90 @@ export default function App() {
         </p>
       </footer>
 
+      {/* COACH EDIT PROFILE MODAL */}
+      {showCoachEditProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
+              <h2 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
+                <User className="w-5 h-5 text-gold" />
+                Edit Coach Profile
+              </h2>
+              <button 
+                onClick={() => setShowCoachEditProfile(false)}
+                className="text-text-dim hover:text-text transition p-2 hover:bg-surface border border-transparent hover:border-line rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="col-span-full">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Username (Cannot be changed)</label>
+                  <input type="text" value={user || ''} disabled className="w-full bg-ink/50 border border-line text-sm rounded-xl py-2 px-3 text-text-dim cursor-not-allowed" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Coach Name *</label>
+                  <input type="text" value={coachEditName} onChange={(e) => setCoachEditName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Club Name *</label>
+                  <input type="text" value={coachEditClub} onChange={(e) => setCoachEditClub(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number</label>
+                  <input type="tel" value={coachEditPhone} onChange={(e) => setCoachEditPhone(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Email Address</label>
+                  <input type="email" value={coachEditEmail} onChange={(e) => setCoachEditEmail(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                </div>
+                <div className="col-span-full">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Access Password * (Edit to change)</label>
+                  <input type="text" value={coachEditPassword} onChange={(e) => setCoachEditPassword(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-line bg-surface-2 flex justify-end gap-3">
+              <button 
+                onClick={() => setShowCoachEditProfile(false)}
+                className="px-6 py-2.5 rounded-xl font-bold text-sm text-text-dim border border-line hover:text-text transition"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  if (!coachEditName.trim() || !coachEditClub.trim() || !coachEditPassword.trim()) {
+                    triggerMsg('Name, Club, and Password are required.', 'error');
+                    return;
+                  }
+                  const updated = {
+                    ...coaches,
+                    [user || '']: {
+                      ...coaches[user || ''],
+                      name: coachEditName.trim(),
+                      club: coachEditClub.trim(),
+                      phone: coachEditPhone.trim() || undefined,
+                      email: coachEditEmail.trim() || undefined,
+                      password: coachEditPassword.trim()
+                    }
+                  };
+                  saveCoachesToStorage(updated);
+                  setShowCoachEditProfile(false);
+                  triggerMsg('Coach profile updated successfully!', 'ok');
+                }}
+                className="bg-gold hover:bg-yellow-400 text-ink px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* REFEREE EDIT PROFILE MODAL */}
       {showRefereeEditProfile && activeReferee && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
@@ -11911,6 +12313,10 @@ export default function App() {
                 <div>
                   <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">NRIC Number (Cannot be changed)</label>
                   <input type="text" value={refereeNric} disabled className="w-full bg-ink/50 border border-line text-sm rounded-xl py-2 px-3 text-text-dim cursor-not-allowed" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Password</label>
+                  <input type="text" value={refereePassword} onChange={(e) => setRefereePassword(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number *</label>
@@ -12003,6 +12409,7 @@ export default function App() {
                   
                   const updatedRefInfo = {
                     fullName: refereeFullName,
+                    password: refereePassword || undefined,
                     phone: refereePhone,
                     clubName: refereeClubName,
                     residentialLocation: refereeResidential,
@@ -12675,7 +13082,7 @@ export default function App() {
                                         'justify-between'
                                       } items-center px-3 shrink-0 shadow-sm w-full`}>
                                         <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                        {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
+                                        
                                       </div>
                                     );
                                   }
@@ -12794,7 +13201,8 @@ export default function App() {
                                           />
                                         </div>
                                         <div className={textAlignmentClass}>
-                                          <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                                          {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                        <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
                                           <p className="mt-0.5 leading-normal text-[5.5px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '5.5px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                                         </div>
                                       </div>
@@ -12869,7 +13277,7 @@ export default function App() {
                             'justify-between'
                           } items-center px-3 shrink-0 shadow-sm w-full`}>
                             <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                            {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
+                            
                           </div>
                         );
                       }
@@ -12988,7 +13396,8 @@ export default function App() {
                               />
                             </div>
                             <div className={textAlignmentClass}>
-                              <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                              {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                        <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
                               <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                             </div>
                           </div>
@@ -13047,7 +13456,7 @@ export default function App() {
                           'justify-between'
                         } items-center px-3 shrink-0 shadow-sm w-full`}>
                           <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                          {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <span className="font-display font-bold tracking-wider uppercase bg-slate-950/20 px-1.5 py-0.5 rounded border border-white/20 shrink-0 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.event || activeComp.name}</span>}
+                          
                         </div>
                       );
                     }
@@ -13166,7 +13575,8 @@ export default function App() {
                             />
                           </div>
                           <div className={textAlignmentClass}>
-                            <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                            {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                        <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
                             <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
                           </div>
                         </div>

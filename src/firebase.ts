@@ -452,6 +452,29 @@ export async function saveGlobalClubs(clubs: string[]): Promise<void> {
   }
 }
 
+export async function fetchAdminPassword(): Promise<string | null> {
+  try {
+    const docRef = doc(db, 'globalSettings', 'admin');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data().password || null;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'globalSettings/admin');
+    return null;
+  }
+}
+
+export async function saveAdminPasswordToFirestore(password: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'globalSettings', 'admin');
+    await setDoc(docRef, { password }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'globalSettings/admin');
+  }
+}
+
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));

@@ -102,6 +102,7 @@ export interface Referee {
   compId: string;
   fullName: string;
   nric: string;
+  password?: string;
   phone: string;
   clubName: string;
   residentialLocation: string;
