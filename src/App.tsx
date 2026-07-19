@@ -349,6 +349,8 @@ export default function App() {
     rate_game_master: number;
     rate_technical_operator: number;
     rate_virtual_referee: number;
+    default_accommodation_details: string;
+    default_accommodation_maps_link: string;
   }>(() => {
     return {
       km_0_50: 45,
@@ -372,6 +374,8 @@ export default function App() {
       rate_game_master: 220,
       rate_technical_operator: 180,
       rate_virtual_referee: 150,
+      default_accommodation_details: "",
+      default_accommodation_maps_link: "",
     };
   });
 
@@ -409,6 +413,8 @@ export default function App() {
             rate_game_master: parsed.rate_game_master ?? 220,
             rate_technical_operator: parsed.rate_technical_operator ?? 180,
             rate_virtual_referee: parsed.rate_virtual_referee ?? 150,
+            default_accommodation_details: parsed.default_accommodation_details ?? "",
+            default_accommodation_maps_link: parsed.default_accommodation_maps_link ?? "",
           });
         } catch (e) {
           console.error("Failed to parse stored referee fees", e);
@@ -436,6 +442,8 @@ export default function App() {
           rate_game_master: 220,
           rate_technical_operator: 180,
           rate_virtual_referee: 150,
+          default_accommodation_details: "",
+          default_accommodation_maps_link: "",
         });
       }
     }
@@ -459,6 +467,16 @@ export default function App() {
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showRefereeEditProfile, setShowRefereeEditProfile] = useState<boolean>(false);
   const [showOrganizerAddReferee, setShowOrganizerAddReferee] = useState<boolean>(false);
+  
+  // Edit Competition State
+  const [showEditCompModal, setShowEditCompModal] = useState<boolean>(false);
+  const [editCompName, setEditCompName] = useState<string>('');
+  const [editCompVenue, setEditCompVenue] = useState<string>('');
+  const [editCompDate, setEditCompDate] = useState<string>('');
+  const [editCompEndDate, setEditCompEndDate] = useState<string>('');
+  const [editCompRegistrationCloseDate, setEditCompRegistrationCloseDate] = useState<string>('');
+  const [editCompPasscode, setEditCompPasscode] = useState<string>('');
+
   const [editingAccReferee, setEditingAccReferee] = useState<Referee | null>(null);
   const [editingDistanceRefereeId, setEditingDistanceRefereeId] = useState<string | null>(null);
   const [editingDistanceValue, setEditingDistanceValue] = useState<string>('');
@@ -482,7 +500,7 @@ export default function App() {
     return (localStorage.getItem('app:layoutWidth') as any) || 'standard';
   });
   const [customBgColor, setCustomBgColor] = useState<string>(() => {
-    return localStorage.getItem('app:customBgColor') || '#FFFFFF'; // Default is white
+    return localStorage.getItem('app:customBgColor') || '#1E222B'; // Default is Carbon Black
   });
 
   const getLayoutWidthClass = () => {
@@ -7156,7 +7174,24 @@ export default function App() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-surface p-4 rounded-2xl border border-line shadow-sm">
               <div>
-                <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">{activeComp.name}</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">{activeComp.name}</h2>
+                  <button
+                    onClick={() => {
+                      setEditCompName(activeComp.name || '');
+                      setEditCompVenue(activeComp.venue || '');
+                      setEditCompDate(activeComp.date || '');
+                      setEditCompEndDate(activeComp.endDate || activeComp.date || '');
+                      setEditCompRegistrationCloseDate(activeComp.registrationCloseDate || activeComp.date || '');
+                      setEditCompPasscode(activeComp.staffCode || '');
+                      setShowEditCompModal(true);
+                    }}
+                    className="text-text-dim hover:text-gold transition p-1 hover:bg-gold/10 rounded-lg"
+                    title="Edit Tournament Details"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                </div>
                 <p className="text-xs text-text-dim">Venue: {activeComp.venue} · Date: {formatDateRange(activeComp.date, activeComp.endDate)}</p>
                 {activeComp.registrationCloseDate && (
                   <p className="text-xs text-text-dim mt-0.5">Registration Closes: {activeComp.registrationCloseDate}</p>
@@ -9550,6 +9585,8 @@ export default function App() {
                             rate_game_master: 150,
                             rate_technical_operator: 125,
                             rate_virtual_referee: 100,
+                            default_accommodation_details: "",
+                            default_accommodation_maps_link: "",
                           });
                           triggerMsg('Fees setup reset to standard Malaysian Taekwondo defaults', 'ok');
                         }}
@@ -9560,6 +9597,37 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* Section 4: Default Accommodation */}
+                <div className="border-t border-line/40 pt-4">
+                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">4. Default Global Lodging & Accommodation</h4>
+                  <p className="text-[10px] text-text-dim mb-3">Set the default hotel and Google Maps location. This applies to all referees requesting accommodation, unless overridden on their specific profile.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Accommodation Details</label>
+                      <textarea
+                        value={refereeFees.default_accommodation_details || ''}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_details: e.target.value })}
+                        placeholder="e.g. Hotel Grand Chancellor, Room 402. Check-in on 12th Oct 2 PM."
+                        className="w-full bg-ink border border-line rounded-lg py-2 px-3 text-xs text-text focus:outline-none focus:border-gold resize-none h-20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Google Maps Link</label>
+                      <input
+                        type="url"
+                        value={refereeFees.default_accommodation_maps_link || ''}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_maps_link: e.target.value })}
+                        placeholder="https://maps.app.goo.gl/..."
+                        className="w-full bg-ink border border-line rounded-lg py-2 px-3 text-xs text-text focus:outline-none focus:border-gold mb-2"
+                      />
+                      <div className="text-[9px] text-text-dim/80">
+                        Paste a valid Google Maps URL so referees can find the lodging easily.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             </div>
 
@@ -9943,15 +10011,15 @@ export default function App() {
                                   {r.accommodation === 'Yes' ? 'LODGING REQ' : 'No Lodge'}
                                 </span>
                                 
-                                {r.accommodationDetails && (
-                                  <span className="text-[10px] text-text-dim font-medium max-w-[120px] truncate block" title={r.accommodationDetails}>
-                                    🏨 {r.accommodationDetails}
+                                {((r.accommodationDetails || refereeFees.default_accommodation_details) && r.accommodation === 'Yes') && (
+                                  <span className="text-[10px] text-text-dim font-medium max-w-[120px] truncate block" title={r.accommodationDetails || refereeFees.default_accommodation_details}>
+                                    🏨 {r.accommodationDetails || refereeFees.default_accommodation_details}
                                   </span>
                                 )}
                                 
-                                {r.accommodationMapsLink && (
+                                {((r.accommodationMapsLink || refereeFees.default_accommodation_maps_link) && r.accommodation === 'Yes') && (
                                   <a 
-                                    href={r.accommodationMapsLink} 
+                                    href={r.accommodationMapsLink || refereeFees.default_accommodation_maps_link} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
                                     className="text-[9px] text-gold hover:underline flex items-center gap-0.5 font-semibold"
@@ -10309,8 +10377,8 @@ export default function App() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setRefereeFullName(activeReferee.fullName);
-                    setRefereeNric(activeReferee.nric);
+                    setRefereeFullName(activeReferee.fullName || '');
+                    setRefereeNric(activeReferee.nric || '');
                     setRefereePhone(activeReferee.phone || '');
                     setRefereeClubName(activeReferee.clubName || '');
                     setRefereeResidential(activeReferee.residentialLocation || '');
@@ -10642,19 +10710,19 @@ export default function App() {
                         )}
                       </div>
                       
-                      {(activeReferee.accommodationDetails || activeReferee.accommodationMapsLink) && (
+                      {((activeReferee.accommodationDetails || refereeFees.default_accommodation_details) || (activeReferee.accommodationMapsLink || refereeFees.default_accommodation_maps_link)) && activeReferee.accommodation === 'Yes' && (
                         <div className="bg-ink/30 border border-line/50 rounded-xl p-3.5 mt-2.5 space-y-2.5">
-                          {activeReferee.accommodationDetails && (
+                          {(activeReferee.accommodationDetails || refereeFees.default_accommodation_details) && (
                             <div>
                               <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block mb-1">Assigned Lodging Details</span>
-                              <p className="text-text font-medium text-xs leading-relaxed whitespace-pre-wrap">{activeReferee.accommodationDetails}</p>
+                              <p className="text-text font-medium text-xs leading-relaxed whitespace-pre-wrap">{activeReferee.accommodationDetails || refereeFees.default_accommodation_details}</p>
                             </div>
                           )}
                           
-                          {activeReferee.accommodationMapsLink && (
+                          {(activeReferee.accommodationMapsLink || refereeFees.default_accommodation_maps_link) && (
                             <div>
                               <a 
-                                href={activeReferee.accommodationMapsLink} 
+                                href={activeReferee.accommodationMapsLink || refereeFees.default_accommodation_maps_link} 
                                 target="_blank" 
                                 rel="noopener noreferrer" 
                                 className="inline-flex items-center gap-1.5 bg-gold hover:bg-yellow-400 text-ink font-bold px-3 py-1.5 rounded-lg text-xs transition shadow cursor-pointer mt-1"
@@ -13159,6 +13227,119 @@ export default function App() {
         </div>
       )}
 
+      {/* EDIT TOURNAMENT MODAL */}
+      {showEditCompModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
+              <h2 className="text-base font-bold text-text uppercase tracking-wider flex items-center gap-2">
+                <Edit className="w-5 h-5 text-gold" />
+                Edit Tournament Details
+              </h2>
+              <button 
+                onClick={() => setShowEditCompModal(false)}
+                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Championship Title *</label>
+                <input 
+                  type="text" 
+                  value={editCompName} 
+                  onChange={(e) => setEditCompName(e.target.value)}
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Venue *</label>
+                <input 
+                  type="text" 
+                  value={editCompVenue} 
+                  onChange={(e) => setEditCompVenue(e.target.value)}
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Start Date *</label>
+                  <input 
+                    type="date" 
+                    value={editCompDate} 
+                    onChange={(e) => setEditCompDate(e.target.value)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">End Date *</label>
+                  <input 
+                    type="date" 
+                    value={editCompEndDate} 
+                    onChange={(e) => setEditCompEndDate(e.target.value)}
+                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Registration Close Date *</label>
+                <input 
+                  type="date" 
+                  value={editCompRegistrationCloseDate} 
+                  onChange={(e) => setEditCompRegistrationCloseDate(e.target.value)}
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Coach / Team Auth Passcode *</label>
+                <input 
+                  type="text" 
+                  value={editCompPasscode} 
+                  onChange={(e) => setEditCompPasscode(e.target.value)}
+                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-end gap-3">
+              <button 
+                onClick={() => setShowEditCompModal(false)}
+                className="px-4 py-2 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={async () => {
+                  if (!editCompName.trim() || !editCompVenue.trim() || !editCompDate.trim() || !editCompEndDate.trim() || !editCompPasscode.trim()) {
+                    triggerMsg('Please fill in all required fields.', 'error');
+                    return;
+                  }
+                  const updated = competitions.map(c => 
+                    c.id === compId ? { 
+                      ...c, 
+                      name: editCompName.trim(),
+                      venue: editCompVenue.trim(),
+                      date: editCompDate,
+                      endDate: editCompEndDate,
+                      registrationCloseDate: editCompRegistrationCloseDate || undefined,
+                      staffCode: editCompPasscode.trim()
+                    } : c
+                  );
+                  await saveCompsToStorage(updated);
+                  setShowEditCompModal(false);
+                  triggerMsg('Tournament updated successfully.', 'ok');
+                }}
+                className="px-4 py-2 rounded-xl bg-gold hover:bg-yellow-400 text-ink font-bold text-xs transition"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* REFEREE ACCOMMODATION DETAILS MODAL */}
       {editingAccReferee && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
@@ -13186,7 +13367,7 @@ export default function App() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Accommodation Details</label>
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Accommodation Details (Override)</label>
                 <textarea
                   rows={3}
                   value={editAccDetails}
@@ -13194,7 +13375,7 @@ export default function App() {
                   placeholder="e.g. Hotel Grand Chancellor, Room 402. Check-in on 12th Oct 2 PM."
                   className="w-full bg-ink border border-line text-xs rounded-xl p-3 text-text focus:outline-none focus:border-gold resize-none"
                 />
-                <p className="text-[10px] text-text-dim">Provide hotel name, room allocation, check-in instructions or dates.</p>
+                <p className="text-[10px] text-text-dim">Leave blank to use the default global lodging settings. Fill in to override for this specific referee.</p>
               </div>
 
               <div className="space-y-1.5">
