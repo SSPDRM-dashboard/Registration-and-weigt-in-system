@@ -123,6 +123,8 @@ export interface Referee {
   specialRole?: 'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE';
   accommodationDetails?: string;
   accommodationMapsLink?: string;
+  hotelDaysProvided?: number;
+  hotelCheckoutDate?: string;
   createdAt: string;
 }
 

@@ -51,14 +51,22 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = initializeFirestore(app, { ignoreUndefinedProperties: true, experimentalForceLongPolling: true }, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
+const db = initializeFirestore(app, { ignoreUndefinedProperties: true }, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
 const auth = getAuth(app);
 
 export { db, auth };
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const isOffline = errMsg.includes('client is offline') || errMsg.includes('Could not reach Cloud Firestore backend');
+  
+  if (isOffline) {
+    console.warn(`[Firestore Offline] Operation ${operationType} on ${path} will rely on local fallback.`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -479,8 +487,8 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+    if (error instanceof Error && (error.message.includes('client is offline') || error.message.includes('Could not reach Cloud Firestore backend'))) {
+      console.warn("Firestore operating in offline mode. Local fallback enabled.");
     }
   }
 }

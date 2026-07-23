@@ -363,6 +363,8 @@ export default function App() {
     rate_virtual_referee: number;
     default_accommodation_details: string;
     default_accommodation_maps_link: string;
+    default_hotel_days_provided?: number;
+    default_hotel_checkout_date?: string;
   }>(() => {
     return {
       km_0_50: 45,
@@ -388,6 +390,8 @@ export default function App() {
       rate_virtual_referee: 150,
       default_accommodation_details: "",
       default_accommodation_maps_link: "",
+      default_hotel_days_provided: undefined,
+      default_hotel_checkout_date: "",
     };
   });
 
@@ -427,6 +431,8 @@ export default function App() {
             rate_virtual_referee: parsed.rate_virtual_referee ?? 150,
             default_accommodation_details: parsed.default_accommodation_details ?? "",
             default_accommodation_maps_link: parsed.default_accommodation_maps_link ?? "",
+            default_hotel_days_provided: parsed.default_hotel_days_provided ?? undefined,
+            default_hotel_checkout_date: parsed.default_hotel_checkout_date ?? "",
           });
         } catch (e) {
           console.error("Failed to parse stored referee fees", e);
@@ -456,6 +462,8 @@ export default function App() {
           rate_virtual_referee: 150,
           default_accommodation_details: "",
           default_accommodation_maps_link: "",
+          default_hotel_days_provided: undefined,
+          default_hotel_checkout_date: "",
         });
       }
     }
@@ -509,8 +517,10 @@ export default function App() {
   const [joiningVirtualDays, setJoiningVirtualDays] = useState<string>('0');
   const [editAccDetails, setEditAccDetails] = useState<string>('');
   const [editAccMapsLink, setEditAccMapsLink] = useState<string>('');
+  const [editAccHotelDays, setEditAccHotelDays] = useState<string>('');
+  const [editAccCheckoutDate, setEditAccCheckoutDate] = useState<string>('');
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
-  const [selectedExistingRefereeNric, setSelectedExistingRefereeNric] = useState<string>('');
+  const [selectedExistingRefereeNrics, setSelectedExistingRefereeNrics] = useState<string[]>([]);
   const [searchRegisteredQuery, setSearchRegisteredQuery] = useState('');
 
   // Custom layout & background color states
@@ -1832,7 +1842,7 @@ export default function App() {
 
   const handleOpenOrganizerAddReferee = () => {
     setAddRefereeModalTab('existing');
-    setSelectedExistingRefereeNric('');
+    setSelectedExistingRefereeNrics([]);
     setSearchRegisteredQuery('');
     setRefereeFullName('');
     setRefereeNric('');
@@ -1856,48 +1866,61 @@ export default function App() {
       triggerMsg('No active tournament selected.', 'error');
       return;
     }
-    if (!selectedExistingRefereeNric) {
-      triggerMsg('Please select a referee from the list.', 'error');
+    if (selectedExistingRefereeNrics.length === 0) {
+      triggerMsg('Please select at least one referee from the list.', 'error');
       return;
     }
 
-    const selectedAcc = refereeAccounts.find(
-      a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === selectedExistingRefereeNric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+    const selectedAccs = refereeAccounts.filter(a =>
+      selectedExistingRefereeNrics.some(nric => 
+        a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+      )
     );
 
-    if (!selectedAcc) {
-      triggerMsg('Selected referee account not found.', 'error');
+    if (selectedAccs.length === 0) {
+      triggerMsg('Selected referee account(s) not found.', 'error');
       return;
     }
 
-    const cleanIc = selectedAcc.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const alreadyExists = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === compId);
-    if (alreadyExists) {
-      triggerMsg('This referee is already registered for this tournament.', 'error');
-      return;
+    let addedCount = 0;
+    const errors: string[] = [];
+
+    for (const selectedAcc of selectedAccs) {
+      const cleanIc = selectedAcc.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const alreadyExists = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === compId);
+      if (alreadyExists) {
+        errors.push(`${selectedAcc.fullName} is already registered`);
+        continue;
+      }
+
+      const tournamentRef: Referee = {
+        ...selectedAcc,
+        id: `${compId}_${cleanIc}`,
+        compId: compId,
+        specialRole: refereeSpecialRole,
+        createdAt: new Date().toISOString()
+      };
+
+      // Remove old tournament-specific fields if any existed in the profile
+      delete tournamentRef.officiatingDays;
+      delete tournamentRef.kyorugiDays;
+      delete tournamentRef.poomsaeDays;
+      delete tournamentRef.virtualDays;
+
+      try {
+        await saveRefereeToFirestore(tournamentRef);
+        addedCount++;
+      } catch (e: any) {
+        console.error(e);
+        errors.push(`Failed to add ${selectedAcc.fullName}`);
+      }
     }
 
-    const tournamentRef: Referee = {
-      ...selectedAcc,
-      id: `${compId}_${cleanIc}`,
-      compId: compId,
-      specialRole: refereeSpecialRole,
-      createdAt: new Date().toISOString()
-    };
-
-    // Remove old tournament-specific fields if any existed in the profile
-    delete tournamentRef.officiatingDays;
-    delete tournamentRef.kyorugiDays;
-    delete tournamentRef.poomsaeDays;
-    delete tournamentRef.virtualDays;
-
-    try {
-      await saveRefereeToFirestore(tournamentRef);
+    if (addedCount > 0) {
       setShowOrganizerAddReferee(false);
-      triggerMsg(`Added existing referee ${selectedAcc.fullName} to the tournament`, 'ok');
-    } catch (e: any) {
-      console.error(e);
-      triggerMsg(`Failed to add referee: ${e.message || String(e)}`, 'error');
+      triggerMsg(`Successfully added ${addedCount} referee(s) to tournament`, 'ok');
+    } else if (errors.length > 0) {
+      triggerMsg(errors.join(', '), 'error');
     }
   };
 
@@ -9928,17 +9951,39 @@ export default function App() {
                         className="w-full bg-ink border border-line rounded-lg py-2 px-3 text-xs text-text focus:outline-none focus:border-gold resize-none h-20"
                       />
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Google Maps Link</label>
-                      <input
-                        type="url"
-                        value={refereeFees.default_accommodation_maps_link || ''}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_maps_link: e.target.value })}
-                        placeholder="https://maps.app.goo.gl/..."
-                        className="w-full bg-ink border border-line rounded-lg py-2 px-3 text-xs text-text focus:outline-none focus:border-gold mb-2"
-                      />
-                      <div className="text-[9px] text-text-dim/80">
-                        Paste a valid Google Maps URL so referees can find the lodging easily.
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Google Maps Link</label>
+                        <input
+                          type="url"
+                          value={refereeFees.default_accommodation_maps_link || ''}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_maps_link: e.target.value })}
+                          placeholder="https://maps.app.goo.gl/..."
+                          className="w-full bg-ink border border-line rounded-lg py-1.5 px-3 text-xs text-text focus:outline-none focus:border-gold"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Hotel Provided (Days)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={refereeFees.default_hotel_days_provided !== undefined ? refereeFees.default_hotel_days_provided : ''}
+                            onChange={(e) => updateRefereeFees({ ...refereeFees, default_hotel_days_provided: e.target.value !== '' ? Number(e.target.value) : undefined })}
+                            placeholder="e.g. 2"
+                            className="w-full bg-ink border border-line rounded-lg py-1.5 px-3 text-xs text-text focus:outline-none focus:border-gold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Check-Out Date / Day</label>
+                          <input
+                            type="text"
+                            value={refereeFees.default_hotel_checkout_date || ''}
+                            onChange={(e) => updateRefereeFees({ ...refereeFees, default_hotel_checkout_date: e.target.value })}
+                            placeholder="e.g. 15 Oct (12 PM)"
+                            className="w-full bg-ink border border-line rounded-lg py-1.5 px-3 text-xs text-text focus:outline-none focus:border-gold"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -10328,9 +10373,24 @@ export default function App() {
                                   {r.accommodation === 'Yes' ? 'LODGING REQ' : 'No Lodge'}
                                 </span>
                                 
+                                {r.accommodation === 'Yes' && (
+                                  <div className="flex flex-col items-center gap-0.5 text-[9px] text-text-dim">
+                                    {(r.hotelDaysProvided !== undefined || refereeFees.default_hotel_days_provided !== undefined) && (
+                                      <span className="bg-surface-2 text-text px-1.5 py-0.2 rounded font-mono font-medium">
+                                        🏨 {r.hotelDaysProvided ?? refereeFees.default_hotel_days_provided} Day(s) Hotel
+                                      </span>
+                                    )}
+                                    {(r.hotelCheckoutDate || refereeFees.default_hotel_checkout_date) && (
+                                      <span className="text-[9px] text-gold/90 font-medium">
+                                        🔑 Out: {r.hotelCheckoutDate || refereeFees.default_hotel_checkout_date}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
                                 {((r.accommodationDetails || refereeFees.default_accommodation_details) && r.accommodation === 'Yes') && (
                                   <span className="text-[10px] text-text-dim font-medium max-w-[120px] truncate block" title={r.accommodationDetails || refereeFees.default_accommodation_details}>
-                                    🏨 {r.accommodationDetails || refereeFees.default_accommodation_details}
+                                    📍 {r.accommodationDetails || refereeFees.default_accommodation_details}
                                   </span>
                                 )}
                                 
@@ -10352,6 +10412,8 @@ export default function App() {
                                     setEditingAccReferee(r);
                                     setEditAccDetails(r.accommodationDetails || '');
                                     setEditAccMapsLink(r.accommodationMapsLink || '');
+                                    setEditAccHotelDays(r.hotelDaysProvided !== undefined ? String(r.hotelDaysProvided) : (refereeFees.default_hotel_days_provided !== undefined ? String(refereeFees.default_hotel_days_provided) : ''));
+                                    setEditAccCheckoutDate(r.hotelCheckoutDate || refereeFees.default_hotel_checkout_date || '');
                                   }}
                                   className="text-[9px] text-gold hover:text-yellow-400 font-bold border border-gold/20 hover:border-gold/50 bg-gold/5 hover:bg-gold/10 px-1.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1"
                                 >
@@ -11028,8 +11090,33 @@ export default function App() {
                         )}
                       </div>
                       
-                      {((activeReferee.accommodationDetails || refereeFees.default_accommodation_details) || (activeReferee.accommodationMapsLink || refereeFees.default_accommodation_maps_link)) && activeReferee.accommodation === 'Yes' && (
-                        <div className="bg-ink/30 border border-line/50 rounded-xl p-3.5 mt-2.5 space-y-2.5">
+                      {activeReferee.accommodation === 'Yes' && (
+                        <div className="bg-ink/30 border border-line/50 rounded-xl p-3.5 mt-2.5 space-y-3">
+                          {/* Key Hotel Dates & Duration Summary */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-surface-2/60 border border-line/30 p-2.5 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">🏨</span>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block">Hotel Days Provided</span>
+                                <span className="text-text font-bold text-xs">
+                                  {(activeReferee.hotelDaysProvided !== undefined ? activeReferee.hotelDaysProvided : refereeFees.default_hotel_days_provided) !== undefined
+                                    ? `${activeReferee.hotelDaysProvided ?? refereeFees.default_hotel_days_provided} Day(s) / Night(s)`
+                                    : 'Arranged by Organizer'
+                                  }
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">🔑</span>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block">Check-Out Date / Day</span>
+                                <span className="text-gold font-bold text-xs">
+                                  {activeReferee.hotelCheckoutDate || refereeFees.default_hotel_checkout_date || 'Not specified'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
                           {(activeReferee.accommodationDetails || refereeFees.default_accommodation_details) && (
                             <div>
                               <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block mb-1">Assigned Lodging Details</span>
@@ -12522,7 +12609,7 @@ export default function App() {
                   </div>
 
                   <div className="border border-line rounded-2xl overflow-hidden bg-ink/30 flex flex-col max-h-[220px]">
-                    <div className="p-3 bg-surface border-b border-line text-[10px] font-bold uppercase tracking-wider text-text-dim flex justify-between shrink-0">
+                    <div className="p-3 bg-surface border-b border-line text-[10px] font-bold uppercase tracking-wider text-text-dim flex justify-between items-center shrink-0">
                       <span>Name & NRIC</span>
                       <span>Club & Qualifications</span>
                     </div>
@@ -12552,54 +12639,90 @@ export default function App() {
                           );
                         }
 
-                        return availableRegisteredReferees.map((acc) => {
-                          const isSelected = selectedExistingRefereeNric === acc.nric;
-                          return (
-                            <button
-                              key={acc.nric}
-                              type="button"
-                              onClick={() => {
-                                setSelectedExistingRefereeNric(acc.nric);
-                                setRefereeSpecialRole(acc.specialRole || 'None');
-                              }}
-                              className={`w-full text-left p-3.5 flex items-center justify-between text-sm transition cursor-pointer ${
-                                isSelected 
-                                  ? 'bg-gold/10 hover:bg-gold/15 border-l-4 border-gold' 
-                                  : 'hover:bg-surface-2/40 border-l-4 border-transparent'
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
-                                  isSelected ? 'border-gold bg-gold text-ink' : 'border-line'
+                        const allAvailableSelected = availableRegisteredReferees.length > 0 && availableRegisteredReferees.every(acc => selectedExistingRefereeNrics.includes(acc.nric));
+
+                        return (
+                          <>
+                            <div className="p-2.5 bg-surface-2/30 border-b border-line flex items-center justify-between text-xs">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (allAvailableSelected) {
+                                    setSelectedExistingRefereeNrics([]);
+                                  } else {
+                                    setSelectedExistingRefereeNrics(availableRegisteredReferees.map(a => a.nric));
+                                  }
+                                }}
+                                className="text-gold hover:underline font-bold text-xs flex items-center gap-2 cursor-pointer"
+                              >
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                                  allAvailableSelected ? 'border-gold bg-gold text-ink' : 'border-line bg-surface'
                                 }`}>
-                                  {isSelected && <Check className="w-3.5 h-3.5 font-bold" />}
+                                  {allAvailableSelected && <Check className="w-3 h-3 font-bold" />}
                                 </div>
-                                <div>
-                                  <div className="font-bold text-text text-sm">{acc.fullName}</div>
-                                  <div className="text-xs text-text-dim font-mono">{acc.nric}</div>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xs font-semibold text-text">{acc.clubName || 'N/A'}</div>
-                                <div className="flex gap-1.5 mt-1 justify-end">
-                                  <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
-                                    Kyorugi: {acc.kyorugiStatus}
-                                  </span>
-                                  <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
-                                    Poomsae: {acc.poomsaeStatus}
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        });
+                                {allAvailableSelected ? 'Deselect All' : `Select All (${availableRegisteredReferees.length})`}
+                              </button>
+                              {selectedExistingRefereeNrics.length > 0 && (
+                                <span className="text-text-dim font-medium">
+                                  {selectedExistingRefereeNrics.length} referee(s) selected
+                                </span>
+                              )}
+                            </div>
+                            {availableRegisteredReferees.map((acc) => {
+                              const isSelected = selectedExistingRefereeNrics.includes(acc.nric);
+                              return (
+                                <button
+                                  key={acc.nric}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setSelectedExistingRefereeNrics(prev => prev.filter(n => n !== acc.nric));
+                                    } else {
+                                      setSelectedExistingRefereeNrics(prev => [...prev, acc.nric]);
+                                      if (acc.specialRole) setRefereeSpecialRole(acc.specialRole);
+                                    }
+                                  }}
+                                  className={`w-full text-left p-3.5 flex items-center justify-between text-sm transition cursor-pointer ${
+                                    isSelected 
+                                      ? 'bg-gold/10 hover:bg-gold/15 border-l-4 border-gold' 
+                                      : 'hover:bg-surface-2/40 border-l-4 border-transparent'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${
+                                      isSelected ? 'border-gold bg-gold text-ink' : 'border-line'
+                                    }`}>
+                                      {isSelected && <Check className="w-3.5 h-3.5 font-bold" />}
+                                    </div>
+                                    <div>
+                                      <div className="font-bold text-text text-sm">{acc.fullName}</div>
+                                      <div className="text-xs text-text-dim font-mono">{acc.nric}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs font-semibold text-text">{acc.clubName || 'N/A'}</div>
+                                    <div className="flex gap-1.5 mt-1 justify-end">
+                                      <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
+                                        Kyorugi: {acc.kyorugiStatus}
+                                      </span>
+                                      <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
+                                        Poomsae: {acc.poomsaeStatus}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </>
+                        );
                       })()}
                     </div>
                   </div>
                 </div>
 
-                {selectedExistingRefereeNric && (() => {
-                  const acc = refereeAccounts.find(a => a.nric === selectedExistingRefereeNric);
+                {selectedExistingRefereeNrics.length === 1 && (() => {
+                  const singleNric = selectedExistingRefereeNrics[0];
+                  const acc = refereeAccounts.find(a => a.nric === singleNric);
                   if (!acc) return null;
                   return (
                     <div className="border border-line rounded-2xl p-5 bg-surface-2/20 space-y-4 animate-fade-in text-sm">
@@ -12638,6 +12761,59 @@ export default function App() {
                       <div className="pt-3 border-t border-line/60">
                         <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">
                           Assign Special Appointed Role for This Tournament
+                        </label>
+                        <select 
+                          value={refereeSpecialRole} 
+                          onChange={(e) => setRefereeSpecialRole(e.target.value as any)} 
+                          className="w-full sm:max-w-xs bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        >
+                          <option value="None">None (Standard Referee)</option>
+                          <option value="TD">Technical Delegate (TD)</option>
+                          <option value="CSB">Supervisory Board (CSB)</option>
+                          <option value="RIC">Referee In-Charge (RIC)</option>
+                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
+                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
+                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {selectedExistingRefereeNrics.length > 1 && (() => {
+                  const selectedAccs = refereeAccounts.filter(a => selectedExistingRefereeNrics.includes(a.nric));
+                  return (
+                    <div className="border border-line rounded-2xl p-5 bg-surface-2/20 space-y-4 animate-fade-in text-sm">
+                      <div className="flex justify-between items-center">
+                        <h4 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2">
+                          <span>{selectedExistingRefereeNrics.length} Referees Selected</span>
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedExistingRefereeNrics([])}
+                          className="text-xs text-text-dim hover:text-text underline cursor-pointer"
+                        >
+                          Clear Selection
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto p-1">
+                        {selectedAccs.map(acc => (
+                          <span key={acc.nric} className="text-xs bg-surface border border-line px-2.5 py-1 rounded-lg text-text flex items-center gap-1.5">
+                            <span className="font-semibold">{acc.fullName}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedExistingRefereeNrics(prev => prev.filter(n => n !== acc.nric))}
+                              className="text-text-dim hover:text-hong font-bold cursor-pointer"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="pt-3 border-t border-line/60">
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">
+                          Assign Special Appointed Role for Selected Referees
                         </label>
                         <select 
                           value={refereeSpecialRole} 
@@ -12748,15 +12924,17 @@ export default function App() {
               {addRefereeModalTab === 'existing' ? (
                 <button 
                   onClick={handleOrganizerAddExistingReferee}
-                  disabled={!selectedExistingRefereeNric}
+                  disabled={selectedExistingRefereeNrics.length === 0}
                   className={`px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2 ${
-                    selectedExistingRefereeNric
+                    selectedExistingRefereeNrics.length > 0
                       ? 'bg-gold hover:bg-yellow-400 text-ink cursor-pointer'
                       : 'bg-gold/40 text-ink/50 cursor-not-allowed'
                   }`}
                 >
                   <Plus className="w-4 h-4" />
-                  Add Referee
+                  {selectedExistingRefereeNrics.length > 1
+                    ? `Add ${selectedExistingRefereeNrics.length} Referees`
+                    : 'Add Referee'}
                 </button>
               ) : (
                 <button 
@@ -13776,6 +13954,32 @@ export default function App() {
                 <p className="text-[10px] text-text-dim font-mono">{editingAccReferee.nric}</p>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Hotel Provided (Days)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editAccHotelDays}
+                    onChange={(e) => setEditAccHotelDays(e.target.value)}
+                    placeholder={refereeFees.default_hotel_days_provided !== undefined ? `Default: ${refereeFees.default_hotel_days_provided}` : "e.g. 2"}
+                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                  <p className="text-[9px] text-text-dim">Number of days hotel is provided.</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Check-Out Date / Day</label>
+                  <input
+                    type="text"
+                    value={editAccCheckoutDate}
+                    onChange={(e) => setEditAccCheckoutDate(e.target.value)}
+                    placeholder={refereeFees.default_hotel_checkout_date ? `Default: ${refereeFees.default_hotel_checkout_date}` : "e.g. 15 Oct (12:00 PM)"}
+                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                  />
+                  <p className="text-[9px] text-text-dim">Day/time referee needs to check out.</p>
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Accommodation Details (Override)</label>
                 <textarea
@@ -13785,7 +13989,7 @@ export default function App() {
                   placeholder="e.g. Hotel Grand Chancellor, Room 402. Check-in on 12th Oct 2 PM."
                   className="w-full bg-ink border border-line text-xs rounded-xl p-3 text-text focus:outline-none focus:border-gold resize-none"
                 />
-                <p className="text-[10px] text-text-dim">Leave blank to use the default global lodging settings. Fill in to override for this specific referee.</p>
+                <p className="text-[10px] text-text-dim">Leave blank to use default global lodging details.</p>
               </div>
 
               <div className="space-y-1.5">
@@ -13814,10 +14018,15 @@ export default function App() {
                 type="button"
                 onClick={async () => {
                   try {
+                    const parsedHotelDays = editAccHotelDays.trim() !== '' ? Number(editAccHotelDays) : undefined;
+                    const parsedCheckout = editAccCheckoutDate.trim() || undefined;
+
                     const updatedReferee: Referee = {
                       ...editingAccReferee,
                       accommodationDetails: editAccDetails.trim(),
                       accommodationMapsLink: editAccMapsLink.trim(),
+                      hotelDaysProvided: parsedHotelDays,
+                      hotelCheckoutDate: parsedCheckout,
                     };
                     await saveRefereeToFirestore(updatedReferee);
                     
@@ -13829,6 +14038,8 @@ export default function App() {
                         ...existingAcc,
                         accommodationDetails: editAccDetails.trim(),
                         accommodationMapsLink: editAccMapsLink.trim(),
+                        hotelDaysProvided: parsedHotelDays,
+                        hotelCheckoutDate: parsedCheckout,
                       });
                     }
                     
