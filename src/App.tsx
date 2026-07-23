@@ -515,6 +515,7 @@ export default function App() {
   const [joiningKyorugiDays, setJoiningKyorugiDays] = useState<string>('0');
   const [joiningPoomsaeDays, setJoiningPoomsaeDays] = useState<string>('0');
   const [joiningVirtualDays, setJoiningVirtualDays] = useState<string>('0');
+  const [editAccStatus, setEditAccStatus] = useState<'Yes' | 'No'>('Yes');
   const [editAccDetails, setEditAccDetails] = useState<string>('');
   const [editAccMapsLink, setEditAccMapsLink] = useState<string>('');
   const [editAccHotelDays, setEditAccHotelDays] = useState<string>('');
@@ -10353,7 +10354,7 @@ export default function App() {
                                  </div>
                                </div>
                              </td>
-                            <td className="py-3 px-4 font-mono text-[11px] text-text-dim">
+                             <td className="py-3 px-4 font-mono text-[11px] text-text-dim">
                               <div>{r.nric}</div>
                               <div className="mt-0.5 text-gold font-bold">PW: {r.password || 'N/A'}</div>
                               <div className="mt-0.5 text-text">{r.phone}</div>
@@ -10365,13 +10366,32 @@ export default function App() {
                             </td>
                             <td className="py-3 px-4 text-center">
                               <div className="flex flex-col items-center gap-1.5">
-                                <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold ${
-                                  r.accommodation === 'Yes' 
-                                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
-                                    : 'bg-text-dim/10 text-text-dim'
-                                }`}>
-                                  {r.accommodation === 'Yes' ? 'LODGING REQ' : 'No Lodge'}
-                                </span>
+                                <select
+                                  value={r.accommodation || 'No'}
+                                  onChange={async (e) => {
+                                    const newAcc = e.target.value as 'Yes' | 'No';
+                                    const updatedRef: Referee = { ...r, accommodation: newAcc };
+                                    await saveRefereeToFirestore(updatedRef);
+                                    
+                                    const cleanIc = r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                                    const existingAcc = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+                                    if (existingAcc) {
+                                      await saveRefereeAccount({
+                                        ...existingAcc,
+                                        accommodation: newAcc
+                                      });
+                                    }
+                                    triggerMsg(`Updated lodging status for ${r.fullName} to ${newAcc === 'Yes' ? 'LODGING REQUIRED' : 'No Lodge'}`, 'ok');
+                                  }}
+                                  className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer focus:outline-none ${
+                                    r.accommodation === 'Yes' 
+                                      ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20' 
+                                      : 'bg-text-dim/10 text-text-dim border-line/50 hover:bg-text-dim/20 hover:text-text'
+                                  }`}
+                                >
+                                  <option value="Yes" className="bg-surface text-blue-400 font-bold">🏨 LODGING REQ</option>
+                                  <option value="No" className="bg-surface text-text-dim font-bold">🏠 No Lodge</option>
+                                </select>
                                 
                                 {r.accommodation === 'Yes' && (
                                   <div className="flex flex-col items-center gap-0.5 text-[9px] text-text-dim">
@@ -10410,6 +10430,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => {
                                     setEditingAccReferee(r);
+                                    setEditAccStatus(r.accommodation || 'Yes');
                                     setEditAccDetails(r.accommodationDetails || '');
                                     setEditAccMapsLink(r.accommodationMapsLink || '');
                                     setEditAccHotelDays(r.hotelDaysProvided !== undefined ? String(r.hotelDaysProvided) : (refereeFees.default_hotel_days_provided !== undefined ? String(refereeFees.default_hotel_days_provided) : ''));
@@ -13954,6 +13975,34 @@ export default function App() {
                 <p className="text-[10px] text-text-dim font-mono">{editingAccReferee.nric}</p>
               </div>
 
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Lodging Status / Preference</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditAccStatus('Yes')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      editAccStatus === 'Yes'
+                        ? 'bg-blue-500/20 border-blue-500 text-blue-400 shadow-sm'
+                        : 'bg-ink border-line text-text-dim hover:text-text'
+                    }`}
+                  >
+                    🏨 Lodging Required ('Yes')
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditAccStatus('No')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      editAccStatus === 'No'
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-sm'
+                        : 'bg-ink border-line text-text-dim hover:text-text'
+                    }`}
+                  >
+                    🏠 No Lodge / Self-Arranged ('No')
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Hotel Provided (Days)</label>
@@ -14023,6 +14072,7 @@ export default function App() {
 
                     const updatedReferee: Referee = {
                       ...editingAccReferee,
+                      accommodation: editAccStatus,
                       accommodationDetails: editAccDetails.trim(),
                       accommodationMapsLink: editAccMapsLink.trim(),
                       hotelDaysProvided: parsedHotelDays,
@@ -14036,6 +14086,7 @@ export default function App() {
                     if (existingAcc) {
                       await saveRefereeAccount({
                         ...existingAcc,
+                        accommodation: editAccStatus,
                         accommodationDetails: editAccDetails.trim(),
                         accommodationMapsLink: editAccMapsLink.trim(),
                         hotelDaysProvided: parsedHotelDays,
