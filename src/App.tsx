@@ -50,6 +50,140 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import SignatureCanvas from 'react-signature-canvas';
 
+export function parseBirthInfo(dob?: string, ic?: string): { birthYear: number | null; dob: string } {
+  let cleanDob = dob ? dob.trim() : '';
+  let cleanIc = ic ? ic.replace(/[^0-9]/g, '') : '';
+
+  // 1. Check DOB formatted YYYY-MM-DD
+  if (cleanDob && /^\d{4}-\d{2}-\d{2}$/.test(cleanDob)) {
+    const y = parseInt(cleanDob.split('-')[0], 10);
+    if (!isNaN(y) && y > 1900 && y < 2100) {
+      return { birthYear: y, dob: cleanDob };
+    }
+  }
+
+  // 2. Check DOB formatted DD/MM/YYYY or DD-MM-YYYY
+  if (cleanDob && /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(cleanDob)) {
+    const parts = cleanDob.split(/[\/\-]/);
+    const y = parseInt(parts[2], 10);
+    const m = String(parseInt(parts[1], 10)).padStart(2, '0');
+    const d = String(parseInt(parts[0], 10)).padStart(2, '0');
+    if (!isNaN(y) && y > 1900 && y < 2100) {
+      return { birthYear: y, dob: `${y}-${m}-${d}` };
+    }
+  }
+
+  // 3. Check Malaysian IC (e.g. YYMMDD-PB-### or 12 digits YYMMDDxxxxxx)
+  if (cleanIc.length >= 6) {
+    const yyStr = cleanIc.substring(0, 2);
+    const mmStr = cleanIc.substring(2, 4);
+    const ddStr = cleanIc.substring(4, 6);
+
+    const yy = parseInt(yyStr, 10);
+    const mm = parseInt(mmStr, 10);
+    const dd = parseInt(ddStr, 10);
+
+    if (!isNaN(yy) && !isNaN(mm) && !isNaN(dd) && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const currentYY = new Date().getFullYear() % 100;
+      const century = yy <= (currentYY + 5) ? 2000 : 1900;
+      const fullYear = century + yy;
+      const formattedDob = `${fullYear}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+      return {
+        birthYear: fullYear,
+        dob: cleanDob || formattedDob
+      };
+    }
+  }
+
+  // Fallback 4-digit year in DOB
+  if (cleanDob) {
+    const match = cleanDob.match(/\b(19\d\d|20\d\d)\b/);
+    if (match) {
+      return { birthYear: parseInt(match[1], 10), dob: cleanDob };
+    }
+  }
+
+  return { birthYear: null, dob: cleanDob };
+}
+
+export function getMatchingAgeGroup(
+  dob?: string,
+  ic?: string,
+  ageGroups: string[] = [],
+  compDate?: string
+): string | null {
+  if (!ageGroups || ageGroups.length === 0) return null;
+
+  const { birthYear } = parseBirthInfo(dob, ic);
+  if (!birthYear) return null;
+
+  let compYear = new Date().getFullYear();
+  if (compDate) {
+    const parsedYear = new Date(compDate).getFullYear();
+    if (!isNaN(parsedYear) && parsedYear > 1900) {
+      compYear = parsedYear;
+    }
+  }
+
+  const age = compYear - birthYear;
+
+  // 1. Explicit Year ranges in bracket e.g. "2015-2017" or "(Born 2012-2014)"
+  for (const ag of ageGroups) {
+    const yearMatches = ag.match(/\b(19\d\d|20\d\d)\b/g);
+    if (yearMatches) {
+      const years = yearMatches.map(y => parseInt(y, 10));
+      if (years.length >= 2) {
+        const minY = Math.min(...years);
+        const maxY = Math.max(...years);
+        if (birthYear >= minY && birthYear <= maxY) return ag;
+      } else if (years.length === 1 && birthYear === years[0]) {
+        return ag;
+      }
+    }
+  }
+
+  // 2. Age Range in string e.g. "9 to 11", "9 To 10", "12-14", "9-11"
+  for (const ag of ageGroups) {
+    const rangeMatch = ag.match(/(\d{1,2})\s*(?:to|-|until|–)\s*(\d{1,2})/i);
+    if (rangeMatch) {
+      const minA = parseInt(rangeMatch[1], 10);
+      const maxA = parseInt(rangeMatch[2], 10);
+      if (age >= minA && age <= maxA) return ag;
+    }
+  }
+
+  // 3. "Under X" or "X & Below"
+  for (const ag of ageGroups) {
+    const underMatch = ag.match(/(?:under|below|sub|\& below|and below|and younger)\s*(\d{1,2})/i) ||
+                       ag.match(/(\d{1,2})\s*(?:\& below|and below|years \& younger|and younger)/i);
+    if (underMatch) {
+      const limitA = parseInt(underMatch[1], 10);
+      if (age <= limitA) return ag;
+    }
+  }
+
+  // 4. "X & Above" or "X+" or "X & Older" or "Over X"
+  for (const ag of ageGroups) {
+    const aboveMatch = ag.match(/(?:above|older|over|senior|\& above|and above|\+)\s*(\d{1,2})/i) ||
+                       ag.match(/(\d{1,2})\s*(?:\+|years \& older|and older|\& older|\& above|and above)/i);
+    if (aboveMatch) {
+      const minA = parseInt(aboveMatch[1], 10);
+      if (age >= minA) return ag;
+    }
+  }
+
+  // 5. Single age match e.g. "12"
+  for (const ag of ageGroups) {
+    const singleMatch = ag.match(/\b(\d{1,2})\b/);
+    if (singleMatch) {
+      const targetA = parseInt(singleMatch[1], 10);
+      if (age === targetA) return ag;
+    }
+  }
+
+  return null;
+}
+
 const parseFeeToNumber = (feeStr: string | undefined | null): number => {
   if (!feeStr) return 0;
   const match = feeStr.replace(/,/g, '').match(/\d+(\.\d+)?/);
@@ -2969,7 +3103,7 @@ export default function App() {
         { header: 'Weight Class *', key: 'weightClass', width: 26 },
         { header: 'School Name *', key: 'schoolName', width: 26 },
         { header: 'School Code *', key: 'schoolCode', width: 16 },
-        { header: 'Affiliated Club / State *', key: 'club', width: 26 },
+        { header: 'Affiliated Club / State', key: 'club', width: 26 },
         { header: 'Race *', key: 'race', width: 14 }
       ];
 
@@ -3126,14 +3260,12 @@ export default function App() {
           error: 'School / Club Code is strictly required and cannot be left blank.'
         };
 
-        // Affiliated Club / State (Column J)
+        // Affiliated Club / State (Column J) - Optional
         ws.getCell(r, 10).dataValidation = {
           type: 'list',
-          allowBlank: false,
+          allowBlank: true,
           formulae: [`Dropdown_Data!$F$2:$F$${clubsList.length + 1}`],
-          showErrorMessage: true,
-          errorTitle: 'Required Field',
-          error: 'Please select an Affiliated Club / State option from the dropdown (required).'
+          showErrorMessage: false
         };
 
         // Race (Column K)
@@ -3272,10 +3404,7 @@ export default function App() {
 
           const rawAgeGroup = String(normalizedRow['agegroup'] || normalizedRow['agecategory'] || normalizedRow['category'] || '').trim();
           let matchedAgeGroup = '';
-          if (!rawAgeGroup) {
-            errors.push({ rowNum, name: rawName, error: 'Missing Age Group (Required).' });
-            rowHasError = true;
-          } else {
+          if (rawAgeGroup) {
             const found = activeComp.ageGroups.find(ag => ag.toLowerCase() === rawAgeGroup.toLowerCase());
             if (found) {
               matchedAgeGroup = found;
@@ -3283,10 +3412,16 @@ export default function App() {
               const partialFound = activeComp.ageGroups.find(ag => ag.toLowerCase().includes(rawAgeGroup.toLowerCase()));
               if (partialFound) {
                 matchedAgeGroup = partialFound;
-              } else {
-                errors.push({ rowNum, name: rawName, error: `Age Group "${rawAgeGroup}" doesn't match competition divisions.` });
-                rowHasError = true;
               }
+            }
+          }
+          if (!matchedAgeGroup) {
+            const derivedByYear = getMatchingAgeGroup(dob, ic, activeComp.ageGroups, activeComp.date);
+            if (derivedByYear) {
+              matchedAgeGroup = derivedByYear;
+            } else {
+              errors.push({ rowNum, name: rawName, error: `Age Group "${rawAgeGroup || 'unspecified'}" doesn't match competition divisions or birth year.` });
+              rowHasError = true;
             }
           }
 
@@ -3325,8 +3460,12 @@ export default function App() {
           const clubRaw = String(normalizedRow['affiliatedclubstate'] || normalizedRow['clubstate'] || normalizedRow['affiliatedclubteam'] || normalizedRow['affiliatedclub'] || normalizedRow['clubteam'] || normalizedRow['club'] || '').trim();
           let club = '';
           if (!clubRaw) {
-            errors.push({ rowNum, name: rawName, error: 'Missing Affiliated Club / State (Required).' });
-            rowHasError = true;
+            // Optional field: default to coach's registered club or active competition options if blank
+            const coachClubProfile = coaches[user || '']?.club || '';
+            const compClubs = globalClubs.length > 0
+              ? globalClubs
+              : Object.keys(DEMO_IMPORT.clubs);
+            club = coachClubProfile || compClubs[0] || '';
           } else {
             const compClubs = globalClubs.length > 0
               ? globalClubs
@@ -3335,8 +3474,7 @@ export default function App() {
             if (found) {
               club = found;
             } else {
-              errors.push({ rowNum, name: rawName, error: `Affiliated Club / State "${clubRaw}" does not match configured tournament options.` });
-              rowHasError = true;
+              club = clubRaw;
             }
           }
 
@@ -3676,7 +3814,32 @@ export default function App() {
         });
       };
 
-      // 1. Pass and Fail Result (Anyone who has undergone weigh-in)
+      // 1. All Registered Competitors (Every entrant in the competition)
+      const allPlayerRows = players.map(mapPlayerToRow);
+      if (allPlayerRows.length === 0) {
+        allPlayerRows.push({
+          'Competitor ID': 'No registered competitors found',
+          'Full Name': '',
+          'Identity Card': '',
+          'DOB': '',
+          'Gender': '',
+          'Club Represented': '',
+          'School Name': '',
+          'School Code': '',
+          'Race': '',
+          'Event': '',
+          'Division Bracket': '',
+          'Target Weight Class': '',
+          'Scale Weight (kg)': '',
+          'Weigh-In Decision': '',
+          'Timestamp': ''
+        } as any);
+      }
+      const wsAll = XLSX.utils.json_to_sheet(allPlayerRows);
+      setColWidths(wsAll, allPlayerRows);
+      XLSX.utils.book_append_sheet(wb, wsAll, "All Registered Players");
+
+      // 2. Pass and Fail Result (Anyone who has undergone weigh-in)
       const passAndFailPlayers = players.filter(p => p.weighIn !== null);
       const passAndFailRows = passAndFailPlayers.map(mapPlayerToRow);
       if (passAndFailRows.length === 0) {
@@ -3761,6 +3924,59 @@ export default function App() {
     } catch (err) {
       console.error('Failed to generate Excel sheet', err);
       triggerMsg('Failed to export Excel report.', 'error');
+    }
+  };
+
+  const downloadPlayersCSV = () => {
+    if (!activeComp) {
+      triggerMsg('No active competition selected.', 'error');
+      return;
+    }
+
+    try {
+      const mapPlayerToRow = (p: Player) => {
+        return {
+          'Competitor ID': p.id,
+          'Full Name': p.name,
+          'Identity Card': p.ic,
+          'DOB': p.dob,
+          'Gender': p.gender,
+          'Club Represented': p.club,
+          'School Name': p.schoolName || '—',
+          'School Code': p.schoolCode || '—',
+          'Race': p.race || '—',
+          'Event': p.event,
+          'Division Bracket': p.ageGroup,
+          'Target Weight Class': p.weightClass,
+          'Scale Weight (kg)': p.weighIn ? p.weighIn.weight : '—',
+          'Weigh-In Decision': p.weighIn ? p.weighIn.result : 'NOT WEIGHED',
+          'Timestamp': p.weighIn ? new Date(p.weighIn.time).toLocaleString() : '—',
+          'Station ID': p.weighIn?.stationId || '—'
+        };
+      };
+
+      const allPlayerRows = players.map(mapPlayerToRow);
+      if (allPlayerRows.length === 0) {
+        triggerMsg('No registered players to download.', 'error');
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(allPlayerRows);
+      const csvOutput = XLSX.utils.sheet_to_csv(ws);
+      
+      const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const cleanCompName = activeComp.name.replace(/[^a-zA-Z0-9]/g, '_');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `${cleanCompName}_All_Registered_Players.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      triggerMsg('All Registered Players downloaded as CSV successfully!', 'ok');
+    } catch (err) {
+      console.error('Failed to generate CSV file', err);
+      triggerMsg('Failed to export CSV report.', 'error');
     }
   };
 
@@ -5520,130 +5736,185 @@ export default function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">IC Number *</label>
-                  <input 
-                    type="text" 
-                    value={pIc}
-                    onChange={(e) => setPIc(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
-                    placeholder="e.g. 050412-10-1234" 
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Date of Birth *</label>
-                  <input 
-                    type="date" 
-                    value={pDob}
-                    onChange={(e) => setPDob(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-              </div>
+              {(() => {
+                const birthInfo = parseBirthInfo(pDob, pIc);
+                const compYr = activeComp?.date ? new Date(activeComp.date).getFullYear() : new Date().getFullYear();
+                const calcAge = birthInfo.birthYear ? (compYr - birthInfo.birthYear) : null;
+                const autoMatchedGroup = getMatchingAgeGroup(pDob, pIc, activeComp.ageGroups, activeComp.date);
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Gender Division *</label>
-                  <select 
-                    value={pGender}
-                    onChange={(e) => setPGender(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    {activeComp.genders.map(g => (
-                      <option key={g} value={g}>{g}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Affiliated Club / State *</label>
-                  <select 
-                    value={pClub}
-                    onChange={(e) => setPClub(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    {(globalClubs.length > 0
-                      ? globalClubs
-                      : Object.keys(DEMO_IMPORT.clubs)
-                    ).map(club => (
-                      <option key={club} value={club}>{club}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                return (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">IC Number *</label>
+                        <input 
+                          type="text" 
+                          value={pIc}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPIc(val);
+                            const info = parseBirthInfo(pDob, val);
+                            if (info.dob && info.dob !== pDob) {
+                              setPDob(info.dob);
+                            }
+                            if (activeComp?.ageGroups && activeComp.ageGroups.length > 0) {
+                              const matched = getMatchingAgeGroup(pDob || info.dob, val, activeComp.ageGroups, activeComp.date);
+                              if (matched) setPAgeGroup(matched);
+                            }
+                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
+                          placeholder="e.g. 050412-10-1234" 
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Date of Birth *</label>
+                        <input 
+                          type="date" 
+                          value={pDob}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPDob(val);
+                            if (activeComp?.ageGroups && activeComp.ageGroups.length > 0) {
+                              const matched = getMatchingAgeGroup(val, pIc, activeComp.ageGroups, activeComp.date);
+                              if (matched) setPAgeGroup(matched);
+                            }
+                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        />
+                        {birthInfo.birthYear && (
+                          <p className="text-[11px] text-gold font-medium mt-1.5 flex items-center gap-1">
+                            <CheckCircle className="w-3.5 h-3.5 text-gold shrink-0" />
+                            <span>Born <strong>{birthInfo.birthYear}</strong> · Calculated Competition Age: <strong>{calcAge} Yrs Old</strong> ({compYr})</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Name *</label>
-                  <input 
-                    type="text" 
-                    value={pSchoolName}
-                    onChange={(e) => setPSchoolName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
-                    placeholder="e.g. SMK Saujana Utama" 
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Code *</label>
-                  <input 
-                    type="text" 
-                    value={pSchoolCode}
-                    onChange={(e) => setPSchoolCode(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
-                    placeholder="e.g. BEA1234" 
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition uppercase"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Race *</label>
-                  <select 
-                    value={pRace}
-                    onChange={(e) => setPRace(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    <option value="Malay">Malay</option>
-                    <option value="Chinese">Chinese</option>
-                    <option value="Indian">Indian</option>
-                    <option value="Bumiputera Sabah">Bumiputera Sabah</option>
-                    <option value="Bumiputera Sarawak">Bumiputera Sarawak</option>
-                    <option value="Others">Others</option>
-                  </select>
-                </div>
-              </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Gender Division *</label>
+                        <select 
+                          value={pGender}
+                          onChange={(e) => setPGender(e.target.value)}
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        >
+                          {activeComp.genders.map(g => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Affiliated Club / State *</label>
+                        <select 
+                          value={pClub}
+                          onChange={(e) => setPClub(e.target.value)}
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        >
+                          {(globalClubs.length > 0
+                            ? globalClubs
+                            : Object.keys(DEMO_IMPORT.clubs)
+                          ).map(club => (
+                            <option key={club} value={club}>{club}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Event *</label>
-                  <select 
-                    value={pEvent}
-                    onChange={(e) => setPEvent(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    {activeComp.events.map(ev => (
-                      <option key={ev} value={ev}>{ev}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Age Group Category *</label>
-                  <select 
-                    value={pAgeGroup}
-                    onChange={(e) => setPAgeGroup(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    {activeComp.ageGroups.length === 0 ? (
-                      <option value="">No age groups defined by admin</option>
-                    ) : (
-                      activeComp.ageGroups.map(ag => (
-                        <option key={ag} value={ag}>{ag}</option>
-                      ))
-                    )}
-                  </select>
-                </div>
-              </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Name *</label>
+                        <input 
+                          type="text" 
+                          value={pSchoolName}
+                          onChange={(e) => setPSchoolName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
+                          placeholder="e.g. SMK Saujana Utama" 
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">School Code *</label>
+                        <input 
+                          type="text" 
+                          value={pSchoolCode}
+                          onChange={(e) => setPSchoolCode(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSavePlayer(); }}
+                          placeholder="e.g. BEA1234" 
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition uppercase"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Race *</label>
+                        <select 
+                          value={pRace}
+                          onChange={(e) => setPRace(e.target.value)}
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        >
+                          <option value="Malay">Malay</option>
+                          <option value="Chinese">Chinese</option>
+                          <option value="Indian">Indian</option>
+                          <option value="Bumiputera Sabah">Bumiputera Sabah</option>
+                          <option value="Bumiputera Sarawak">Bumiputera Sarawak</option>
+                          <option value="Others">Others</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Event *</label>
+                        <select 
+                          value={pEvent}
+                          onChange={(e) => setPEvent(e.target.value)}
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                        >
+                          {activeComp.events.map(ev => (
+                            <option key={ev} value={ev}>{ev}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                            Age Group Category *
+                          </label>
+                          {birthInfo.birthYear && (
+                            <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <CheckCircle className="w-2.5 h-2.5 text-gold shrink-0" />
+                              <span>Auto-Matched (Born {birthInfo.birthYear})</span>
+                            </span>
+                          )}
+                        </div>
+                        <select 
+                          value={pAgeGroup}
+                          onChange={(e) => setPAgeGroup(e.target.value)}
+                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
+                        >
+                          {activeComp.ageGroups.length === 0 ? (
+                            <option value="">No age groups defined by admin</option>
+                          ) : (
+                            activeComp.ageGroups.map(ag => {
+                              const isMatch = birthInfo.birthYear && ag === autoMatchedGroup;
+                              return (
+                                <option key={ag} value={ag}>
+                                  {ag}{isMatch ? ` ✓ (Matches Birth Year ${birthInfo.birthYear})` : ''}
+                                </option>
+                              );
+                            })
+                          )}
+                        </select>
+                        {birthInfo.birthYear && (
+                          <p className="text-[10px] text-text-dim/80 mt-1 italic">
+                            Category selected according to birth year <strong className="text-gold">{birthInfo.birthYear}</strong> (Age {calcAge} in {compYr}).
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
 
               <div>
                 <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Target Weight Class *</label>
@@ -6378,6 +6649,14 @@ export default function App() {
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                <button 
+                  onClick={downloadPlayersCSV}
+                  className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                  title="Download All Registered Players as CSV"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Download CSV</span>
+                </button>
                 <button 
                   onClick={downloadWeighInExcel}
                   className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
@@ -8305,10 +8584,18 @@ export default function App() {
                 {players.length > 0 && (
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button 
+                      onClick={downloadPlayersCSV}
+                      className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                      title="Download All Registered Players as CSV file"
+                    >
+                      <Download className="w-4 h-4 text-emerald-400" />
+                      <span>Download Players (CSV)</span>
+                    </button>
+                    <button 
                       onClick={downloadWeighInExcel}
                       className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                     >
-                      <Download className="w-4 h-4" />
+                      <Download className="w-4 h-4 text-gold" />
                       <span>Download Total Summary (Excel)</span>
                     </button>
                     <button 
@@ -8870,11 +9157,20 @@ export default function App() {
                         <span className="hidden sm:inline">{showSignatures ? 'Hide Signatures' : 'Show Signatures'}</span>
                       </button>
                       <button 
+                        onClick={downloadPlayersCSV}
+                        className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                        title="Download All Registered Players (CSV)"
+                      >
+                        <Download className="w-4 h-4 text-emerald-400" />
+                        <span className="hidden md:inline">Download CSV</span>
+                      </button>
+                      <button 
                         onClick={downloadWeighInExcel}
                         className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                         title="Download Total Summary (Excel)"
                       >
-                        <Download className="w-4 h-4" />
+                        <Download className="w-4 h-4 text-gold" />
+                        <span className="hidden md:inline">Export Excel</span>
                       </button>
                       <button 
                         onClick={() => setShowPrintAllCardsModal(true)}
@@ -14214,7 +14510,7 @@ export default function App() {
                         <li><strong className="text-text font-sans">Weight Class *</strong>: Athlete's weight category.</li>
                         <li><strong className="text-text font-sans">School Name *</strong>: School affiliated with the athlete.</li>
                         <li><strong className="text-text font-sans">School Code *</strong>: Official school code (e.g., BBA0012).</li>
-                        <li><strong className="text-text font-sans">Affiliated Club / State *</strong>: The dojang, club, or state team the athlete is registered with.</li>
+                        <li><strong className="text-text font-sans">Affiliated Club / State</strong> <span className="text-xs text-text-dim">(Optional)</span>: Dojang, club, or state team (defaults to coach's club if left blank).</li>
                       </ul>
                     </div>
                   </div>
