@@ -121,10 +121,31 @@ export interface Referee {
   includeOvertime?: boolean;
   includeOthers?: boolean;
   specialRole?: 'None' | 'TD' | 'CSB' | 'RIC' | 'GAME_MASTER' | 'TECHNICAL_OPERATOR' | 'VIRTUAL_REFEREE';
+  courtAssignment?: string; // e.g. "Ring 1", "Ring 2", "Ring 3", "Ring 4"
+  dutyRole?: string; // e.g. "Center Referee", "Corner Referee 1", "Corner Referee 2", "Technical Assistant", "Review Official", "Ring Inspector"
+  matchNo?: string; // Manual Match No or Match Range entered by RIC
   accommodationDetails?: string;
   accommodationMapsLink?: string;
   hotelDaysProvided?: number;
   hotelCheckoutDate?: string;
   createdAt: string;
+}
+
+export interface MatchAssignment {
+  id: string;
+  compId: string;
+  matchNo: string;
+  court: string;
+  division: string;
+  bluePlayerName?: string;
+  blueClub?: string;
+  redPlayerName?: string;
+  redClub?: string;
+  centerRefereeId?: string;
+  corner1RefereeId?: string;
+  corner2RefereeId?: string;
+  technicalAssistantId?: string;
+  reviewOfficialId?: string;
+  status?: 'Scheduled' | 'In Progress' | 'Completed';
 }
 

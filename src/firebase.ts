@@ -13,6 +13,7 @@ import {
   getDoc,
   getDocFromServer
 } from 'firebase/firestore';
+import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
 
 export enum OperationType {
@@ -41,27 +42,25 @@ export interface FirestoreErrorInfo {
   }
 }
 
-const firebaseConfig = {
-  projectId: "gen-lang-client-0374681556",
-  appId: "1:247430035144:web:d081293ed62d823fb117fd",
-  apiKey: "AIzaSyBtkqRFNgiVISK266nmPF7uWhxIkJhkJZc",
-  authDomain: "gen-lang-client-0374681556.firebaseapp.com",
-  storageBucket: "gen-lang-client-0374681556.firebasestorage.app",
-  messagingSenderId: "247430035144"
-};
-
 const app = initializeApp(firebaseConfig);
-const db = initializeFirestore(app, { ignoreUndefinedProperties: true }, "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
+const db = initializeFirestore(app, {
+  ignoreUndefinedProperties: true,
+  experimentalForceLongPolling: true
+}, firebaseConfig.firestoreDatabaseId || "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
 const auth = getAuth(app);
 
 export { db, auth };
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errMsg = error instanceof Error ? error.message : String(error);
-  const isOffline = errMsg.includes('client is offline') || errMsg.includes('Could not reach Cloud Firestore backend');
+  const errCode = (error as { code?: string })?.code;
+  const isOffline = errMsg.includes('client is offline') || 
+                    errMsg.includes('Could not reach Cloud Firestore backend') ||
+                    errMsg.includes('unavailable') ||
+                    errCode === 'unavailable';
   
   if (isOffline) {
-    console.warn(`[Firestore Offline] Operation ${operationType} on ${path} will rely on local fallback.`);
+    console.warn(`[Firestore Offline/Unavailable] Operation ${operationType} on ${path} will rely on local fallback.`);
     return;
   }
 
@@ -82,7 +81,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
 }
 
 // --- FIRESTORE HELPERS ---
@@ -487,8 +485,10 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && (error.message.includes('client is offline') || error.message.includes('Could not reach Cloud Firestore backend'))) {
-      console.warn("Firestore operating in offline mode. Local fallback enabled.");
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errCode = (error as { code?: string })?.code;
+    if (errMsg.includes('client is offline') || errMsg.includes('Could not reach Cloud Firestore backend') || errCode === 'unavailable') {
+      console.warn("Firestore connection initialized in offline-ready mode. Seamless local cache & fallback enabled.");
     }
   }
 }

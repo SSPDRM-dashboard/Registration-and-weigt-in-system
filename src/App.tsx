@@ -2,15 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Trophy, Users, CheckCircle, ShieldCheck, Scale, QrCode, Camera, 
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
-  AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText,
+  AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText, Clock,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
-  Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check, Copy, ExternalLink, Share2
+  Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check, Copy, ExternalLink, Share2,
+  Hash, Cpu, Video
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
 import ExcelJS from 'exceljs';
-import { Competition, Player, Coach, WeighIn, Organizer, Referee } from './types';
+import { Competition, Player, Coach, WeighIn, Organizer, Referee, MatchAssignment } from './types';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
 import { 
@@ -399,7 +400,7 @@ export function isRegistrationClosed(comp: Competition | undefined): boolean {
 export default function App() {
   // --- STATE ---
   const [screen, setScreen] = useState<string>('login'); // login, coachHome, coachRoster, coachPlayerForm, idCard, adminHome, adminCompDetail, adminCompForm, officialScan, officialLog, organizerDashboard, publicView
-  const [loginTab, setLoginTab] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | 'referee'>('coach');
+  const [loginTab, setLoginTab] = useState<'coach' | 'organizer' | 'official' | 'referee' | 'ric' | 'admin' | 'public'>('coach');
   const [organizerTab, setOrganizerTab] = useState<'dashboard' | 'idCard' | 'staffPasses' | 'referees'>('dashboard');
   const [role, setRole] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | 'referee' | null>(null);
   const [user, setUser] = useState<string | null>(null); // username
@@ -415,13 +416,18 @@ export default function App() {
   const [staffPassName, setStaffPassName] = useState('');
   const [staffPassRole, setStaffPassRole] = useState('Coach');
   const [staffPassClub, setStaffPassClub] = useState('');
-  const [masterAthletes, setMasterAthletes] = useState<Record<string, Partial<Player>>>({});
+  const [masterAthletes, setMasterAthletes] = useState<Record<string, Partial<Player>>>( {});
 
   // Referee login / registration state
   const [refereeLoginNric, setRefereeLoginNric] = useState('');
   const [refereeLoginPassword, setRefereeLoginPassword] = useState('');
   const [refereeLoginComp, setRefereeLoginComp] = useState('');
   const [activeReferee, setActiveReferee] = useState<Referee | null>(null);
+
+  // RIC Terminal Login state
+  const [ricLoginNric, setRicLoginNric] = useState('');
+  const [ricLoginPassword, setRicLoginPassword] = useState('');
+  const [ricLoginComp, setRicLoginComp] = useState('');
 
   // Referee Registration fields
   const [refereeFullName, setRefereeFullName] = useState('');
@@ -448,6 +454,19 @@ export default function App() {
   const [fpPhone, setFpPhone] = useState('');
   const [recoveredPassword, setRecoveredPassword] = useState<string | null>(null);
 
+  // RIC Dashboard state
+  const [ricTab, setRicTab] = useState<'courtAssignments' | 'refereeList' | 'matchScheduler' | 'export'>('courtAssignments');
+  const [ricSearchQuery, setRicSearchQuery] = useState('');
+  const [ricFilterQual, setRicFilterQual] = useState('all');
+  const [ricFilterRing, setRicFilterRing] = useState('all');
+  const [matchAssignments, setMatchAssignments] = useState<MatchAssignment[]>([]);
+  const [editingRefereeCourt, setEditingRefereeCourt] = useState<{ id: string; court: string; dutyRole: string } | null>(null);
+
+  // Referee Portal & Court Roster Display state
+  const [refereeTab, setRefereeTab] = useState<'pass' | 'courtRoster'>('pass');
+  const [rosterSearchQuery, setRosterSearchQuery] = useState('');
+  const [rosterSelectedRing, setRosterSelectedRing] = useState('all');
+
 
   
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
@@ -465,6 +484,16 @@ export default function App() {
   const [confirmDeleteAthleteId, setConfirmDeleteAthleteId] = useState<string | null>(null);
   const [confirmDeleteRefereeId, setConfirmDeleteRefereeId] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+
+  // Admin Coach Management state
+  const [adminCoachSearch, setAdminCoachSearch] = useState<string>('');
+  const [showAdminAddCoach, setShowAdminAddCoach] = useState<boolean>(false);
+  const [newCoachUsername, setNewCoachUsername] = useState<string>('');
+  const [newCoachPass, setNewCoachPass] = useState<string>('');
+  const [newCoachName, setNewCoachName] = useState<string>('');
+  const [newCoachClub, setNewCoachClub] = useState<string>('');
+  const [newCoachPhone, setNewCoachPhone] = useState<string>('');
+  const [newCoachEmail, setNewCoachEmail] = useState<string>('');
 
   // Coach Excel Upload states
   const [showCoachExcelModal, setShowCoachExcelModal] = useState<boolean>(false);
@@ -601,7 +630,27 @@ export default function App() {
         });
       }
     }
+
+    if (compId) {
+      const storedMatches = localStorage.getItem(`app:matchAssignments:${compId}`);
+      if (storedMatches) {
+        try {
+          setMatchAssignments(JSON.parse(storedMatches));
+        } catch (e) {
+          console.error("Failed to parse stored match assignments", e);
+        }
+      } else {
+        setMatchAssignments([]);
+      }
+    }
   }, [compId]);
+
+  const saveMatchAssignments = (assignments: MatchAssignment[]) => {
+    setMatchAssignments(assignments);
+    if (compId) {
+      localStorage.setItem(`app:matchAssignments:${compId}`, JSON.stringify(assignments));
+    }
+  };
 
   const updateRefereeFees = (newFees: typeof refereeFees) => {
     setRefereeFees(newFees);
@@ -657,6 +706,31 @@ export default function App() {
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
   const [selectedExistingRefereeNrics, setSelectedExistingRefereeNrics] = useState<string[]>([]);
   const [searchRegisteredQuery, setSearchRegisteredQuery] = useState('');
+
+  // Ring Match Numbers entered by RIC
+  const [ringMatchNumbers, setRingMatchNumbers] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('app:ringMatchNumbers');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    if (compId) {
+      const saved = localStorage.getItem(`app:ringMatchNumbers:${compId}`);
+      if (saved) {
+        try {
+          setRingMatchNumbers(JSON.parse(saved));
+        } catch (e) {
+          console.error("Failed to parse stored ring match numbers", e);
+        }
+      } else {
+        setRingMatchNumbers({});
+      }
+    }
+  }, [compId]);
 
   // Custom layout & background color states
   const [layoutDensity, setLayoutDensity] = useState<'bento' | 'compact'>(() => {
@@ -828,7 +902,7 @@ export default function App() {
     }
   }, []);
 
-  // Synchronize cComp, oComp, and refereeLoginComp with the list of active competitions
+  // Synchronize cComp, oComp, refereeLoginComp, and ricLoginComp with the list of active competitions
   useEffect(() => {
     const activeComps = competitions.filter(c => c.isActive !== false);
     if (activeComps.length > 0) {
@@ -844,12 +918,17 @@ export default function App() {
       if (!isValidActiveR) {
         setRefereeLoginComp(activeComps[0].id);
       }
+      const isValidActiveRIC = activeComps.some(c => c.id === ricLoginComp);
+      if (!isValidActiveRIC) {
+        setRicLoginComp(activeComps[0].id);
+      }
     } else {
       setCComp('');
       setOComp('');
       setRefereeLoginComp('');
+      setRicLoginComp('');
     }
-  }, [competitions, cComp, oComp, refereeLoginComp]);
+  }, [competitions, cComp, oComp, refereeLoginComp, ricLoginComp]);
 
   // If the active tournament is set to inactive, prevent coach, official, and public access, redirecting them.
   useEffect(() => {
@@ -883,7 +962,7 @@ export default function App() {
   const [editCoachEmail, setEditCoachEmail] = useState('');
   
   // Admin Navigation
-  const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security' | 'referees' | 'clubs'>('tournaments');
+  const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security' | 'referees' | 'clubs' | 'ric'>('tournaments');
   const [globalClubs, setGlobalClubs] = useState<string[]>([]);
   const [newGlobalClubOption, setNewGlobalClubOption] = useState('');
 
@@ -892,6 +971,14 @@ export default function App() {
   });
   const [newAdminPass, setNewAdminPass] = useState('');
   const [confirmAdminPass, setConfirmAdminPass] = useState('');
+
+  // Admin RIC Accounts & Settings state
+  const [adminRicName, setAdminRicName] = useState('');
+  const [adminRicNric, setAdminRicNric] = useState('');
+  const [adminRicPassword, setAdminRicPassword] = useState('');
+  const [adminRicPhone, setAdminRicPhone] = useState('');
+  const [adminRicCompId, setAdminRicCompId] = useState('');
+  const [editingRicNric, setEditingRicNric] = useState<string | null>(null);
 
   // Admin organizer edit
   const [orgUsername, setOrgUsername] = useState('');
@@ -1876,6 +1963,162 @@ export default function App() {
     triggerMsg(`Welcome, Referee ${legacyMatched.fullName}!`, 'ok');
   };
 
+  const handleRicLogin = () => {
+    const ic = ricLoginNric.trim();
+    if (!ic) {
+      triggerMsg('Please enter your registered NRIC Number.', 'error');
+      return;
+    }
+    const cleanIc = ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    // Look up global referee accounts first, then fallback to registered referees
+    let account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    if (!account) {
+      account = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    }
+
+    if (!account) {
+      triggerMsg('No referee account found with this NRIC.', 'error');
+      return;
+    }
+
+    if (account.password && account.password !== ricLoginPassword) {
+      triggerMsg('Invalid NRIC or Password.', 'error');
+      return;
+    }
+
+    // Verify special role set by admin/organizer
+    if (account.specialRole !== 'RIC') {
+      triggerMsg('Access Denied: Your account is not designated as Referee-in-Charge (RIC) by the administrator.', 'error');
+      return;
+    }
+
+    // Strict Enforcement of Assigned Tournament Event set by Admin
+    const assignedCompId = account.compId;
+    if (assignedCompId && assignedCompId !== 'GLOBAL') {
+      const assignedComp = competitions.find(c => c.id === assignedCompId);
+      if (!assignedComp || assignedComp.isActive === false) {
+        triggerMsg(`Access Denied: Your assigned tournament event (${assignedComp?.name || assignedCompId}) is currently inactive or not available.`, 'error');
+        return;
+      }
+
+      // If user selected a different tournament in the login dropdown, enforce restriction
+      if (ricLoginComp && ricLoginComp !== assignedCompId) {
+        triggerMsg(`Access Denied: As RIC, you are only authorized to enter your Assigned Tournament Event (${assignedComp.name}) set by Admin.`, 'error');
+        return;
+      }
+
+      setCompId(assignedCompId);
+      const userRef = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === assignedCompId);
+      setActiveReferee(userRef || {
+        ...account,
+        id: `RIC_${assignedCompId}_${cleanIc}`,
+        compId: assignedCompId,
+      });
+    } else {
+      // Global RIC access or unassigned
+      const targetCompId = ricLoginComp || (competitions.filter(c => c.isActive !== false)[0]?.id) || null;
+      setCompId(targetCompId);
+      const userRef = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === targetCompId);
+      setActiveReferee(userRef || {
+        ...account,
+        id: `RIC_GLOBAL_${cleanIc}`,
+        compId: targetCompId || 'GLOBAL',
+      });
+    }
+
+    setRole('referee');
+    setUser(account.nric);
+    setScreen('ricDashboard');
+
+    const activeCompName = competitions.find(c => c.id === (assignedCompId && assignedCompId !== 'GLOBAL' ? assignedCompId : ricLoginComp))?.name;
+    triggerMsg(`Welcome, Referee-in-Charge ${account.fullName}! ${activeCompName ? `Unlocked: ${activeCompName}` : ''}`, 'ok');
+  };
+
+  const handleAdminSaveRicAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminRicName.trim() || !adminRicNric.trim()) {
+      triggerMsg('Full Name and NRIC/Username are required.', 'error');
+      return;
+    }
+    const cleanNric = adminRicNric.trim();
+    const cleanIc = cleanNric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const existingIndex = refereeAccounts.findIndex(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+
+    let updatedAccount: Referee;
+    if (existingIndex >= 0) {
+      const old = refereeAccounts[existingIndex];
+      updatedAccount = {
+        ...old,
+        fullName: adminRicName.trim(),
+        nric: cleanNric,
+        password: adminRicPassword.trim() || old.password,
+        phone: adminRicPhone.trim() || old.phone,
+        specialRole: 'RIC',
+        compId: adminRicCompId || old.compId || 'GLOBAL',
+      };
+    } else {
+      if (!adminRicPassword.trim()) {
+        triggerMsg('Password is required for new RIC accounts.', 'error');
+        return;
+      }
+      updatedAccount = {
+        id: `REF_ACC_${Date.now()}`,
+        fullName: adminRicName.trim(),
+        nric: cleanNric,
+        password: adminRicPassword.trim(),
+        phone: adminRicPhone.trim() || '+60123456789',
+        clubName: 'REFEREE-IN-CHARGE',
+        residentialLocation: 'HQ',
+        distance: 0,
+        bankName: 'N/A',
+        bankAccount: 'N/A',
+        accommodation: 'No',
+        carPlate: 'N/A',
+        kyorugiStatus: 'IR',
+        poomsaeStatus: 'IR',
+        specialRole: 'RIC',
+        compId: adminRicCompId || 'GLOBAL',
+        createdAt: new Date().toISOString()
+      };
+    }
+
+    try {
+      await saveRefereeAccount(updatedAccount);
+      const newAccounts = existingIndex >= 0
+        ? refereeAccounts.map((a, idx) => idx === existingIndex ? updatedAccount : a)
+        : [...refereeAccounts, updatedAccount];
+
+      setRefereeAccounts(newAccounts);
+
+      // Also update active registered referees if exists
+      const updatedRefs = referees.map(r => {
+        if (r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc) {
+          return {
+            ...r,
+            fullName: updatedAccount.fullName,
+            password: updatedAccount.password,
+            specialRole: 'RIC' as const,
+          };
+        }
+        return r;
+      });
+      setReferees(updatedRefs);
+
+      setAdminRicName('');
+      setAdminRicNric('');
+      setAdminRicPassword('');
+      setAdminRicPhone('');
+      setAdminRicCompId('');
+      setEditingRicNric(null);
+
+      triggerMsg(`RIC account credentials for ${updatedAccount.fullName} saved successfully.`, 'ok');
+    } catch (err: any) {
+      console.error(err);
+      triggerMsg(`Failed to save RIC account: ${err.message || err}`, 'error');
+    }
+  };
+
   const handleRefereeRegister = async () => {
     const name = refereeFullName.trim();
     const ic = refereeNric.trim();
@@ -2206,12 +2449,62 @@ export default function App() {
     triggerMsg('Coach account updated successfully.', 'ok');
   };
 
-  const handleAdminDeleteCoach = (username: string) => {
-    const updated = { ...coaches };
-    delete updated[username];
-    saveCoachesToStorage(updated);
-    setConfirmDeleteCoachUsername(null);
-    triggerMsg('Coach account deleted.', 'ok');
+  const handleAdminCreateCoach = async () => {
+    const u = newCoachUsername.trim();
+    const p = newCoachPass.trim();
+    const name = newCoachName.trim();
+    const club = newCoachClub.trim();
+    const phone = newCoachPhone.trim();
+    const email = newCoachEmail.trim();
+
+    if (!u || !p || !name || !club) {
+      triggerMsg('Username, Password, Full Name, and Club are required.', 'error');
+      return;
+    }
+    if (coaches[u]) {
+      triggerMsg(`Coach username "${u}" already exists.`, 'error');
+      return;
+    }
+
+    const newCoachObj: Coach = {
+      username: u,
+      password: p,
+      name,
+      club,
+      phone: phone || undefined,
+      email: email || undefined
+    };
+
+    const updated = { ...coaches, [u]: newCoachObj };
+    try {
+      await saveCoach(newCoachObj);
+      await saveCoachesToStorage(updated);
+      setNewCoachUsername('');
+      setNewCoachPass('');
+      setNewCoachName('');
+      setNewCoachClub('');
+      setNewCoachPhone('');
+      setNewCoachEmail('');
+      setShowAdminAddCoach(false);
+      triggerMsg(`Coach account "${u}" created successfully!`, 'ok');
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Failed to create coach account.', 'error');
+    }
+  };
+
+  const handleAdminDeleteCoach = async (username: string) => {
+    try {
+      const updated = { ...coaches };
+      delete updated[username];
+      await deleteCoach(username);
+      await saveCoachesToStorage(updated);
+      setConfirmDeleteCoachUsername(null);
+      triggerMsg(`Coach account "${username}" has been permanently deleted.`, 'ok');
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Failed to delete coach account. Please try again.', 'error');
+    }
   };
 
   const handleAdminCreateOrganizer = () => {
@@ -3927,59 +4220,6 @@ export default function App() {
     }
   };
 
-  const downloadPlayersCSV = () => {
-    if (!activeComp) {
-      triggerMsg('No active competition selected.', 'error');
-      return;
-    }
-
-    try {
-      const mapPlayerToRow = (p: Player) => {
-        return {
-          'Competitor ID': p.id,
-          'Full Name': p.name,
-          'Identity Card': p.ic,
-          'DOB': p.dob,
-          'Gender': p.gender,
-          'Club Represented': p.club,
-          'School Name': p.schoolName || '—',
-          'School Code': p.schoolCode || '—',
-          'Race': p.race || '—',
-          'Event': p.event,
-          'Division Bracket': p.ageGroup,
-          'Target Weight Class': p.weightClass,
-          'Scale Weight (kg)': p.weighIn ? p.weighIn.weight : '—',
-          'Weigh-In Decision': p.weighIn ? p.weighIn.result : 'NOT WEIGHED',
-          'Timestamp': p.weighIn ? new Date(p.weighIn.time).toLocaleString() : '—',
-          'Station ID': p.weighIn?.stationId || '—'
-        };
-      };
-
-      const allPlayerRows = players.map(mapPlayerToRow);
-      if (allPlayerRows.length === 0) {
-        triggerMsg('No registered players to download.', 'error');
-        return;
-      }
-
-      const ws = XLSX.utils.json_to_sheet(allPlayerRows);
-      const csvOutput = XLSX.utils.sheet_to_csv(ws);
-      
-      const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const cleanCompName = activeComp.name.replace(/[^a-zA-Z0-9]/g, '_');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${cleanCompName}_All_Registered_Players.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      triggerMsg('All Registered Players downloaded as CSV successfully!', 'ok');
-    } catch (err) {
-      console.error('Failed to generate CSV file', err);
-      triggerMsg('Failed to export CSV report.', 'error');
-    }
-  };
-
   // --- SUB COMPONENTS & BLOCKS ---
 
   const renderBadge = (res?: 'PASS' | 'FAIL' | 'OVERRIDE PASS' | 'OVERRIDE FAIL' | 'MANUAL') => {
@@ -4053,6 +4293,19 @@ export default function App() {
               <span className="font-bold tracking-wide uppercase">Theme Station</span>
             </button>
 
+            {/* RIC DASHBOARD BUTTON */}
+            {(activeReferee?.specialRole === 'RIC' || role === 'admin' || role === 'organizer') && (
+              <button 
+                onClick={() => setScreen('ricDashboard')}
+                className="flex items-center space-x-1.5 text-xs bg-amber-500/10 hover:bg-gold/20 border border-gold/40 text-gold px-3.5 py-1.5 rounded-xl transition duration-200 shadow-sm cursor-pointer"
+                id="ric-dashboard-nav-btn"
+                title="Referee-In-Charge Dashboard"
+              >
+                <Sliders className="w-4 h-4 text-gold" />
+                <span className="font-bold tracking-wide uppercase">RIC Terminal</span>
+              </button>
+            )}
+
             {/* ATHLETE DATABASE BUTTON */}
             {role === 'admin' && (
               <button 
@@ -4109,18 +4362,18 @@ export default function App() {
         
         {/* LOGIN SCREEN */}
         {screen === 'login' && (
-          <div className="max-w-md mx-auto my-12 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
-            <div className="p-6 bg-gradient-to-b from-surface-2/50 to-transparent border-b border-line text-center">
+          <div className="max-w-[520px] mx-auto my-12 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
+            <div className="p-6 sm:p-8 bg-gradient-to-b from-surface-2/50 to-transparent border-b border-line text-center">
               <Trophy className="w-10 h-10 text-gold mx-auto mb-2 animate-bounce" />
-              <h2 className="text-xl font-bold uppercase tracking-wider text-text">Championship Portal</h2>
-              <p className="text-xs text-text-dim mt-1">Unlock your certified team access terminal</p>
+              <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-wider text-text">Championship Portal</h2>
+              <p className="text-xs sm:text-sm text-text-dim mt-1">Unlock your certified team access terminal</p>
             </div>
 
             {/* TAB SELECTOR */}
-            <div className="flex border-b border-line overflow-x-auto scrollbar-none">
+            <div className="flex border-b border-line overflow-x-auto scrollbar-none px-2 sm:px-4 bg-ink/20">
               <button 
                 onClick={() => setLoginTab('coach')}
-                className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                className={`flex-1 min-w-[75px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'coach' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -4128,7 +4381,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('organizer')}
-                className={`flex-1 min-w-[80px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                className={`flex-1 min-w-[85px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'organizer' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -4136,7 +4389,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('official')}
-                className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                className={`flex-1 min-w-[75px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'official' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -4144,15 +4397,24 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('referee')}
-                className={`flex-1 min-w-[70px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                className={`flex-1 min-w-[75px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'referee' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
                 Referee
               </button>
               <button 
+                onClick={() => setLoginTab('ric')}
+                className={`flex-1 min-w-[65px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
+                  loginTab === 'ric' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
+                }`}
+                id="login-tab-ric"
+              >
+                RIC
+              </button>
+              <button 
                 onClick={() => setLoginTab('admin')}
-                className={`flex-1 min-w-[60px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                className={`flex-1 min-w-[65px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'admin' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -4160,7 +4422,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setLoginTab('public')}
-                className={`flex-1 min-w-[95px] py-3 text-[10px] font-bold uppercase tracking-wider transition shrink-0 ${
+                className={`flex-1 min-w-[100px] py-3 text-[11px] font-bold uppercase tracking-wider transition shrink-0 ${
                   loginTab === 'public' ? 'border-b-2 border-gold text-gold bg-surface-2/20' : 'text-text-dim hover:text-text'
                 }`}
               >
@@ -4168,7 +4430,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 sm:p-8 space-y-4">
               {loginTab === 'coach' && (
                 <div className="space-y-3">
                   <div>
@@ -4283,6 +4545,82 @@ export default function App() {
                     >
                       Register New Referee
                     </button>
+                    <br />
+                    <button 
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-text-dim underline mt-2 hover:text-text transition"
+                    >
+                      Forgot Password?
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {loginTab === 'ric' && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-500/10 border border-gold/30 rounded-xl text-xs text-gold flex items-center gap-2 mb-2">
+                    <Sliders className="w-4 h-4 shrink-0 text-gold" />
+                    <span>Authorized access for designated <strong>Referee-in-Charge (RIC)</strong> personnel assigned by Administrator.</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Select Tournament Event</label>
+                    <select 
+                      value={ricLoginComp}
+                      onChange={(e) => setRicLoginComp(e.target.value)}
+                      className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                    >
+                      {competitions.filter(c => c.isActive !== false).length === 0 ? (
+                        <option value="">No active tournaments available...</option>
+                      ) : (
+                        competitions.filter(c => c.isActive !== false).map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">RIC NRIC Number (e.g. 850101-14-5555)</label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        placeholder="Enter registered NRIC"
+                        value={ricLoginNric} 
+                        onChange={(e) => setRicLoginNric(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleRicLogin(); }}
+                        className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
+                      />
+                      <User className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Password</label>
+                    <div className="relative">
+                      <input 
+                        type="password" 
+                        placeholder="Enter password"
+                        value={ricLoginPassword} 
+                        onChange={(e) => setRicLoginPassword(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleRicLogin(); }}
+                        className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text pl-10 focus:outline-none focus:border-gold transition"
+                      />
+                      <Lock className="w-4 h-4 text-text-dim/60 absolute left-3.5 top-3" />
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleRicLogin}
+                    className="w-full bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition mt-2 cursor-pointer shadow-md hover:shadow flex items-center justify-center gap-2"
+                    id="ric-login-btn"
+                  >
+                    <Sliders className="w-4 h-4" />
+                    <span>Enter RIC Terminal</span>
+                  </button>
+
+                  <p className="text-center text-xs text-text-dim pt-2">
+                    Not assigned as RIC? Contact the Tournament Administrator or Organizer to set your special role to RIC.
                     <br />
                     <button 
                       onClick={() => setShowForgotPassword(true)}
@@ -6650,14 +6988,6 @@ export default function App() {
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 <button 
-                  onClick={downloadPlayersCSV}
-                  className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
-                  title="Download All Registered Players as CSV"
-                >
-                  <Download className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Download CSV</span>
-                </button>
-                <button 
                   onClick={downloadWeighInExcel}
                   className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                 >
@@ -6819,6 +7149,18 @@ export default function App() {
                 Referee Accounts
               </button>
               <button
+                onClick={() => setAdminTab('ric')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
+                  adminTab === 'ric' 
+                    ? 'bg-gold text-ink shadow-sm' 
+                    : 'text-text-dim hover:bg-surface-2 hover:text-text'
+                }`}
+                id="admin-tab-ric"
+              >
+                <Sliders className="w-5 h-5" />
+                RIC Accounts & Settings
+              </button>
+              <button
                 onClick={() => setAdminTab('clubs')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
                   adminTab === 'clubs' 
@@ -6943,143 +7285,301 @@ export default function App() {
               )}
 
               {/* REGISTERED COACHES */}
-              {adminTab === 'coaches' && (
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold text-text-dim uppercase tracking-widest">Registered Coach Accounts ({Object.keys(coaches).length})</h3>
-                  
-                  {Object.keys(coaches).length === 0 ? (
-                    <div className="bg-surface p-12 text-center text-text-dim rounded-2xl border border-line">
-                      <Users className="w-12 h-12 text-text-dim/30 mx-auto mb-3" />
-                      <p className="text-sm font-semibold">No coaches registered yet.</p>
+              {adminTab === 'coaches' && (() => {
+                const allCoachesList = Object.entries(coaches);
+                const query = adminCoachSearch.trim().toLowerCase();
+                const filteredCoaches = allCoachesList.filter(([username, coach]: [string, any]) => {
+                  if (!query) return true;
+                  const uMatch = username.toLowerCase().includes(query);
+                  const nMatch = (coach?.name || '').toLowerCase().includes(query);
+                  const cMatch = (coach?.club || '').toLowerCase().includes(query);
+                  const pMatch = (coach?.phone || '').toLowerCase().includes(query);
+                  const eMatch = (coach?.email || '').toLowerCase().includes(query);
+                  return uMatch || nMatch || cMatch || pMatch || eMatch;
+                });
+
+                return (
+                  <div className="space-y-4">
+                    {/* Header Controls */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                      <div>
+                        <h3 className="text-xs font-bold text-text-dim uppercase tracking-widest flex items-center gap-2">
+                          <Users className="w-4 h-4 text-gold" />
+                          <span>Registered Coach Accounts ({allCoachesList.length})</span>
+                        </h3>
+                        <p className="text-[11px] text-text-dim mt-0.5">Manage credentials, clubs, contact information, and delete coach accounts.</p>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <div className="relative flex-1 sm:w-64">
+                          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                          <input 
+                            type="text" 
+                            value={adminCoachSearch}
+                            onChange={(e) => setAdminCoachSearch(e.target.value)}
+                            placeholder="Search coach, club, phone..."
+                            className="w-full bg-ink border border-line rounded-xl pl-8 pr-8 py-2 text-xs text-text placeholder:text-text-dim/60 focus:border-gold outline-none"
+                          />
+                          {adminCoachSearch && (
+                            <button
+                              onClick={() => setAdminCoachSearch('')}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-dim hover:text-text p-0.5"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setShowAdminAddCoach(prev => !prev)}
+                          className="bg-gold hover:opacity-90 text-ink font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shrink-0 shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{showAdminAddCoach ? 'Close Form' : 'Add Coach'}</span>
+                        </button>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="overflow-x-auto bg-surface rounded-2xl border border-line shadow-sm">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="border-b border-line bg-ink/50 text-text-dim font-semibold">
-                            <th className="p-4">Username</th>
-                            <th className="p-4">Password</th>
-                            <th className="p-4">Full Name</th>
-                            <th className="p-4">Club/Team</th>
-                            <th className="p-4">Phone</th>
-                            <th className="p-4">Email</th>
-                            <th className="p-4 text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-line/30">
-                          {Object.entries(coaches).map(([username, coach]: [string, any]) => (
-                            <React.Fragment key={username}>
-                              {editingCoachUsername === username ? (
-                                <tr className="bg-surface-2/30">
-                                  <td className="p-4 font-mono font-bold text-gold">{username}</td>
-                                  <td className="p-4">
-                                    <input
-                                      type="text"
-                                      value={editCoachPass}
-                                      onChange={(e) => setEditCoachPass(e.target.value)}
-                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
-                                    />
-                                  </td>
-                                  <td className="p-4">
-                                    <input
-                                      type="text"
-                                      value={editCoachName}
-                                      onChange={(e) => setEditCoachName(e.target.value)}
-                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
-                                    />
-                                  </td>
-                                  <td className="p-4">
-                                    <input
-                                      type="text"
-                                      value={editCoachClub}
-                                      onChange={(e) => setEditCoachClub(e.target.value)}
-                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
-                                    />
-                                  </td>
-                                  <td className="p-4">
-                                    <input
-                                      type="text"
-                                      value={editCoachPhone}
-                                      onChange={(e) => setEditCoachPhone(e.target.value)}
-                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
-                                    />
-                                  </td>
-                                  <td className="p-4">
-                                    <input
-                                      type="email"
-                                      value={editCoachEmail}
-                                      onChange={(e) => setEditCoachEmail(e.target.value)}
-                                      className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
-                                    />
-                                  </td>
-                                  <td className="p-4 text-right whitespace-nowrap">
-                                    <button
-                                      onClick={handleAdminSaveCoach}
-                                      className="text-good hover:bg-good/10 px-2 py-1 rounded transition mr-2"
-                                    >
-                                      Save
-                                    </button>
-                                    <button
-                                      onClick={() => setEditingCoachUsername(null)}
-                                      className="text-text-dim hover:bg-line/50 px-2 py-1 rounded transition"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </td>
-                                </tr>
-                              ) : (
-                                <tr className="hover:bg-surface-2/30 transition">
-                                  <td className="p-4 font-mono font-bold text-gold">{username}</td>
-                                  <td className="p-4 font-mono text-text-dim">{coach.password}</td>
-                                  <td className="p-4 text-text font-bold uppercase">{coach.name}</td>
-                                  <td className="p-4 text-text">{coach.club}</td>
-                                  <td className="p-4 text-text font-mono">{coach.phone || '-'}</td>
-                                  <td className="p-4 text-text">{coach.email || '-'}</td>
-                                  <td className="p-4 text-right whitespace-nowrap">
-                                    {confirmDeleteCoachUsername === username ? (
-                                      <div className="flex items-center justify-end space-x-1">
-                                        <button 
-                                          onClick={() => handleAdminDeleteCoach(username)}
-                                          className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-sm"
-                                        >
-                                          Confirm
-                                        </button>
-                                        <button 
-                                          onClick={() => setConfirmDeleteCoachUsername(null)}
-                                          className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1 rounded-lg text-[10px]"
-                                        >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <>
-                                        <button
-                                          onClick={() => handleAdminEditCoach(username, coach)}
-                                          className="text-chong hover:bg-chong/10 p-1.5 rounded transition mr-2"
-                                          title="Edit"
-                                        >
-                                          <Edit className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                          onClick={() => setConfirmDeleteCoachUsername(username)}
-                                          className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
-                                          title="Delete"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      </>
-                                    )}
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
+
+                    {/* Admin Add Coach Form */}
+                    {showAdminAddCoach && (
+                      <div className="bg-surface rounded-2xl border border-line shadow-sm p-4 space-y-4 animate-fade-in">
+                        <div className="flex items-center justify-between border-b border-line pb-2">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-text flex items-center gap-1.5">
+                            <UserPlus className="w-4 h-4 text-gold" />
+                            <span>Create New Coach Account</span>
+                          </h4>
+                          <button 
+                            onClick={() => setShowAdminAddCoach(false)}
+                            className="text-text-dim hover:text-text p-1"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Username *</label>
+                            <input 
+                              type="text" 
+                              value={newCoachUsername} 
+                              onChange={e => setNewCoachUsername(e.target.value)} 
+                              placeholder="e.g. coach_john"
+                              className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text focus:border-gold outline-none font-mono" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Password *</label>
+                            <input 
+                              type="text" 
+                              value={newCoachPass} 
+                              onChange={e => setNewCoachPass(e.target.value)} 
+                              placeholder="Access password"
+                              className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text focus:border-gold outline-none font-mono" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Full Name *</label>
+                            <input 
+                              type="text" 
+                              value={newCoachName} 
+                              onChange={e => setNewCoachName(e.target.value)} 
+                              placeholder="e.g. Master John Doe"
+                              className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text focus:border-gold outline-none" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Club / Team Name *</label>
+                            <input 
+                              type="text" 
+                              value={newCoachClub} 
+                              onChange={e => setNewCoachClub(e.target.value)} 
+                              placeholder="e.g. Eagle Taekwondo Academy"
+                              className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text focus:border-gold outline-none" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Phone Number</label>
+                            <input 
+                              type="text" 
+                              value={newCoachPhone} 
+                              onChange={e => setNewCoachPhone(e.target.value)} 
+                              placeholder="e.g. 012-3456789"
+                              className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text focus:border-gold outline-none font-mono" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Email Address</label>
+                            <input 
+                              type="email" 
+                              value={newCoachEmail} 
+                              onChange={e => setNewCoachEmail(e.target.value)} 
+                              placeholder="e.g. coach@academy.com"
+                              className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text focus:border-gold outline-none" 
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2 pt-1 border-t border-line/40">
+                          <button 
+                            onClick={() => setShowAdminAddCoach(false)} 
+                            className="bg-surface-2 hover:bg-line border border-line text-text-dim hover:text-text px-3.5 py-1.5 rounded-xl text-xs transition"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            onClick={handleAdminCreateCoach} 
+                            className="bg-gold text-ink font-bold px-4 py-1.5 rounded-xl text-xs hover:opacity-90 transition shadow-sm"
+                          >
+                            Create Coach Account
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {allCoachesList.length === 0 ? (
+                      <div className="bg-surface p-12 text-center text-text-dim rounded-2xl border border-line">
+                        <Users className="w-12 h-12 text-text-dim/30 mx-auto mb-3" />
+                        <p className="text-sm font-semibold">No coaches registered yet.</p>
+                        <p className="text-xs text-text-dim mt-1">Coaches can register via Coach Sign-Up or you can add them manually above.</p>
+                      </div>
+                    ) : filteredCoaches.length === 0 ? (
+                      <div className="bg-surface p-8 text-center text-text-dim rounded-2xl border border-line">
+                        <Search className="w-8 h-8 text-text-dim/30 mx-auto mb-2" />
+                        <p className="text-xs font-semibold">No coaches match "{adminCoachSearch}"</p>
+                        <button
+                          onClick={() => setAdminCoachSearch('')}
+                          className="mt-2 text-gold text-xs underline hover:opacity-80"
+                        >
+                          Clear search filter
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto bg-surface rounded-2xl border border-line shadow-sm">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="border-b border-line bg-ink/50 text-text-dim font-semibold">
+                              <th className="p-4">Username</th>
+                              <th className="p-4">Password</th>
+                              <th className="p-4">Full Name</th>
+                              <th className="p-4">Club/Team</th>
+                              <th className="p-4">Phone</th>
+                              <th className="p-4">Email</th>
+                              <th className="p-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-line/30">
+                            {filteredCoaches.map(([username, coach]: [string, any]) => (
+                              <React.Fragment key={username}>
+                                {editingCoachUsername === username ? (
+                                  <tr className="bg-surface-2/30">
+                                    <td className="p-4 font-mono font-bold text-gold">{username}</td>
+                                    <td className="p-4">
+                                      <input
+                                        type="text"
+                                        value={editCoachPass}
+                                        onChange={(e) => setEditCoachPass(e.target.value)}
+                                        className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                      />
+                                    </td>
+                                    <td className="p-4">
+                                      <input
+                                        type="text"
+                                        value={editCoachName}
+                                        onChange={(e) => setEditCoachName(e.target.value)}
+                                        className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                      />
+                                    </td>
+                                    <td className="p-4">
+                                      <input
+                                        type="text"
+                                        value={editCoachClub}
+                                        onChange={(e) => setEditCoachClub(e.target.value)}
+                                        className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                      />
+                                    </td>
+                                    <td className="p-4">
+                                      <input
+                                        type="text"
+                                        value={editCoachPhone}
+                                        onChange={(e) => setEditCoachPhone(e.target.value)}
+                                        className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                      />
+                                    </td>
+                                    <td className="p-4">
+                                      <input
+                                        type="email"
+                                        value={editCoachEmail}
+                                        onChange={(e) => setEditCoachEmail(e.target.value)}
+                                        className="w-full bg-ink border border-line rounded px-2 py-1 text-text focus:border-gold outline-none"
+                                      />
+                                    </td>
+                                    <td className="p-4 text-right whitespace-nowrap">
+                                      <button
+                                        onClick={handleAdminSaveCoach}
+                                        className="text-good hover:bg-good/10 px-2.5 py-1 rounded transition mr-2 font-semibold"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingCoachUsername(null)}
+                                        className="text-text-dim hover:bg-line/50 px-2 py-1 rounded transition"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  <tr className="hover:bg-surface-2/30 transition">
+                                    <td className="p-4 font-mono font-bold text-gold">{username}</td>
+                                    <td className="p-4 font-mono text-text-dim">{coach.password}</td>
+                                    <td className="p-4 text-text font-bold uppercase">{coach.name}</td>
+                                    <td className="p-4 text-text">{coach.club}</td>
+                                    <td className="p-4 text-text font-mono">{coach.phone || '-'}</td>
+                                    <td className="p-4 text-text">{coach.email || '-'}</td>
+                                    <td className="p-4 text-right whitespace-nowrap">
+                                      {confirmDeleteCoachUsername === username ? (
+                                        <div className="flex items-center justify-end space-x-1.5 animate-fade-in">
+                                          <span className="text-[10px] text-hong font-semibold mr-1">Delete?</span>
+                                          <button 
+                                            onClick={() => handleAdminDeleteCoach(username)}
+                                            className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-sm transition"
+                                          >
+                                            Confirm
+                                          </button>
+                                          <button 
+                                            onClick={() => setConfirmDeleteCoachUsername(null)}
+                                            className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1 rounded-lg text-[10px] transition"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-end space-x-1">
+                                          <button
+                                            onClick={() => handleAdminEditCoach(username, coach)}
+                                            className="text-chong hover:bg-chong/10 p-1.5 rounded transition"
+                                            title="Edit Coach Details"
+                                          >
+                                            <Edit className="w-4 h-4" />
+                                          </button>
+                                          <button
+                                            onClick={() => setConfirmDeleteCoachUsername(username)}
+                                            className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
+                                            title="Delete Coach Account"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* REGISTERED ORGANIZERS */}
               {adminTab === 'organizers' && (
@@ -7486,6 +7986,7 @@ export default function App() {
                                   r.phone.includes(q)
                                 );
                               })
+                              .sort((a, b) => a.fullName.localeCompare(b.fullName))
                               .map((ref) => (
                                 <tr key={ref.nric} className="hover:bg-surface-2/30 transition">
                                   <td className="p-4 font-bold text-text uppercase">{ref.fullName}</td>
@@ -7678,6 +8179,282 @@ export default function App() {
                           </span>
                         ))
                       )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {adminTab === 'ric' && (
+                <div className="space-y-6">
+                  <div className="bg-surface p-5 rounded-2xl border border-line shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <h3 className="text-base font-bold text-text uppercase tracking-wider flex items-center gap-2 font-display">
+                        <Sliders className="w-5 h-5 text-gold" />
+                        <span>Referee-In-Charge (RIC) Credentials & Event Settings</span>
+                      </h3>
+                      <p className="text-xs text-text-dim mt-1">Configure login credentials (NRIC/Username and Password) for RIC personnel and manage tournament event settings.</p>
+                    </div>
+                    <button 
+                      onClick={() => setScreen('ricDashboard')}
+                      className="bg-gold hover:opacity-90 text-ink font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow cursor-pointer shrink-0"
+                      id="ric-launch-terminal-btn"
+                    >
+                      <Sliders className="w-4 h-4" />
+                      <span>Enter RIC Terminal</span>
+                    </button>
+                  </div>
+
+                  {/* CREATE / EDIT RIC USER CREDENTIALS CARD */}
+                  <div className="bg-surface rounded-2xl border border-line shadow-sm p-6 space-y-4">
+                    <div className="flex justify-between items-center border-b border-line pb-3">
+                      <h4 className="text-xs font-bold text-text uppercase tracking-widest flex items-center gap-2">
+                        <UserPlus className="w-4 h-4 text-gold" />
+                        {editingRicNric ? 'Edit RIC Account Credentials' : 'Create / Set RIC User Credentials'}
+                      </h4>
+                      {editingRicNric && (
+                        <button 
+                          onClick={() => {
+                            setEditingRicNric(null);
+                            setAdminRicName('');
+                            setAdminRicNric('');
+                            setAdminRicPassword('');
+                            setAdminRicPhone('');
+                            setAdminRicCompId('');
+                          }}
+                          className="text-xs text-gold underline hover:text-text cursor-pointer"
+                        >
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+
+                    <form onSubmit={handleAdminSaveRicAccount} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                      <div className="col-span-1 md:col-span-2 lg:col-span-3 bg-surface-2/40 p-3.5 rounded-xl border border-line/70 flex flex-col sm:flex-row items-center gap-3">
+                        <label className="text-[10px] font-bold text-gold uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-gold" />
+                          <span>Select Referee to Autofill:</span>
+                        </label>
+                        <select
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const ref = [...refereeAccounts, ...referees].find(r => r.nric === val || r.fullName === val);
+                            if (ref) {
+                              setAdminRicName(ref.fullName);
+                              setAdminRicNric(ref.nric);
+                              setAdminRicPhone(ref.phone || '');
+                              if (ref.password) setAdminRicPassword(ref.password);
+                              if (ref.compId) setAdminRicCompId(ref.compId);
+                            }
+                          }}
+                          className="w-full bg-ink/40 border border-gold/40 focus:border-gold rounded-lg px-3 py-2 text-text text-xs outline-none cursor-pointer font-medium"
+                          defaultValue=""
+                        >
+                          <option value="">-- Choose from Registered Referee List (Autofills NRIC & Phone) --</option>
+                          {Array.from(new Map([...refereeAccounts, ...referees].filter(r => r.fullName && r.nric).map(r => [r.nric, r])).values())
+                            .sort((a, b) => a.fullName.localeCompare(b.fullName))
+                            .map((r) => (
+                            <option key={r.nric} value={r.nric}>
+                              {r.fullName} — NRIC/Username: {r.nric} {r.phone ? `(${r.phone})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Full Name *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Master Tan (RIC Lead)"
+                          value={adminRicName}
+                          onChange={(e) => setAdminRicName(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">NRIC / Username *</label>
+                        <input
+                          type="text"
+                          required
+                          disabled={!!editingRicNric}
+                          placeholder="e.g. RIC-001 or 850101-14-5555"
+                          value={adminRicNric}
+                          onChange={(e) => setAdminRicNric(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none disabled:opacity-55"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Password *</label>
+                        <input
+                          type="password"
+                          required={!editingRicNric}
+                          placeholder={editingRicNric ? "(Leave blank to keep current)" : "Enter password"}
+                          value={adminRicPassword}
+                          onChange={(e) => setAdminRicPassword(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Contact Phone</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. +60123456789"
+                          value={adminRicPhone}
+                          onChange={(e) => setAdminRicPhone(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Assigned Tournament Event</label>
+                        <select
+                          value={adminRicCompId}
+                          onChange={(e) => setAdminRicCompId(e.target.value)}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        >
+                          <option value="">-- All / Global Event Access --</option>
+                          {competitions.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-end">
+                        <button
+                          type="submit"
+                          className="w-full bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-xs transition cursor-pointer shadow flex items-center justify-center gap-2"
+                        >
+                          <Lock className="w-4 h-4" />
+                          <span>{editingRicNric ? 'Update RIC Credentials' : 'Save & Assign RIC Role'}</span>
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* DESIGNATED RIC ACCOUNTS LIST */}
+                  <div className="bg-surface rounded-2xl border border-line shadow-sm overflow-hidden">
+                    <div className="p-5 border-b border-line">
+                      <h4 className="text-xs font-bold text-text uppercase tracking-widest flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-gold" />
+                        Active Designated RIC Accounts ({refereeAccounts.filter(r => r.specialRole === 'RIC').length})
+                      </h4>
+                    </div>
+
+                    {refereeAccounts.filter(r => r.specialRole === 'RIC').length === 0 ? (
+                      <div className="text-center p-8 text-text-dim text-xs">
+                        No referee accounts are currently designated as RIC. Use the form above to create or set credentials for an RIC account.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-ink/40 text-text-dim border-b border-line font-bold uppercase tracking-wider text-[10px]">
+                              <th className="p-4">Full Name</th>
+                              <th className="p-4">NRIC / Username</th>
+                              <th className="p-4">Password</th>
+                              <th className="p-4">Phone</th>
+                              <th className="p-4">Assigned Tournament</th>
+                              <th className="p-4">Role Status</th>
+                              <th className="p-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-line/30">
+                            {refereeAccounts.filter(r => r.specialRole === 'RIC').sort((a, b) => a.fullName.localeCompare(b.fullName)).map((ref) => (
+                              <tr key={ref.nric} className="hover:bg-surface-2/30 transition">
+                                <td className="p-4 font-bold text-text uppercase">{ref.fullName}</td>
+                                <td className="p-4 font-mono text-gold font-bold">{ref.nric}</td>
+                                <td className="p-4 font-mono text-text-dim font-bold">{ref.password || '••••••••'}</td>
+                                <td className="p-4 text-text-dim">{ref.phone || 'N/A'}</td>
+                                <td className="p-4 text-text font-medium">{competitions.find(c => c.id === ref.compId)?.name || 'Global Access'}</td>
+                                <td className="p-4">
+                                  <span className="bg-amber-500/10 border border-gold/40 text-gold px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+                                    RIC ACTIVE
+                                  </span>
+                                </td>
+                                <td className="p-4 text-right whitespace-nowrap">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      onClick={() => {
+                                        setEditingRicNric(ref.nric);
+                                        setAdminRicName(ref.fullName);
+                                        setAdminRicNric(ref.nric);
+                                        setAdminRicPassword(ref.password || '');
+                                        setAdminRicPhone(ref.phone || '');
+                                        setAdminRicCompId(ref.compId || '');
+                                      }}
+                                      className="text-gold hover:bg-gold/10 p-1.5 rounded transition cursor-pointer"
+                                      title="Edit Credentials"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        const updated = refereeAccounts.map(a => a.nric === ref.nric ? { ...a, specialRole: 'None' as const } : a);
+                                        setRefereeAccounts(updated);
+                                        await saveRefereeAccount({ ...ref, specialRole: 'None' });
+                                        triggerMsg(`Revoked RIC role for ${ref.fullName}.`, 'ok');
+                                      }}
+                                      className="text-text-dim hover:text-red-400 hover:bg-red-500/10 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-line transition cursor-pointer"
+                                      title="Revoke RIC Role"
+                                    >
+                                      Revoke RIC Role
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* RIC EVENT SETTINGS CARD */}
+                  <div className="bg-surface rounded-2xl border border-line shadow-sm p-6 space-y-4">
+                    <h4 className="text-xs font-bold text-text uppercase tracking-widest flex items-center gap-2 border-b border-line pb-3">
+                      <Settings className="w-4 h-4 text-gold" />
+                      RIC Operational Event Defaults
+                    </h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">RIC Honorarium / Daily Allowance (RM)</label>
+                        <input
+                          type="number"
+                          value={refereeFees.rate_ric}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, rate_ric: Number(e.target.value) || 0 })}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none font-mono"
+                          placeholder="175"
+                        />
+                        <p className="text-[10px] text-text-dim mt-1">Default daily allowance rate for Referee-In-Charge.</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Default Ring/Court Count Preset</label>
+                        <select
+                          value="4"
+                          onChange={() => {}}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                        >
+                          <option value="4">Court 1 to Court 4 (4 Rings)</option>
+                          <option value="6">Court 1 to Court 6 (6 Rings)</option>
+                          <option value="8">Court 1 to Court 8 (8 Rings)</option>
+                        </select>
+                        <p className="text-[10px] text-text-dim mt-1">Court assignment rings in RIC Terminal.</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">RIC Control System Status</label>
+                        <div className="bg-ink/30 border border-line/80 rounded-xl px-3.5 py-2.5 text-gold font-bold flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-good animate-pulse"></span>
+                          <span>Real-Time Terminal Active</span>
+                        </div>
+                        <p className="text-[10px] text-text-dim mt-1">Live referee roster and match scheduler synced.</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -8584,18 +9361,10 @@ export default function App() {
                 {players.length > 0 && (
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button 
-                      onClick={downloadPlayersCSV}
-                      className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
-                      title="Download All Registered Players as CSV file"
-                    >
-                      <Download className="w-4 h-4 text-emerald-400" />
-                      <span>Download Players (CSV)</span>
-                    </button>
-                    <button 
                       onClick={downloadWeighInExcel}
                       className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                     >
-                      <Download className="w-4 h-4 text-gold" />
+                      <Download className="w-4 h-4" />
                       <span>Download Total Summary (Excel)</span>
                     </button>
                     <button 
@@ -9157,20 +9926,11 @@ export default function App() {
                         <span className="hidden sm:inline">{showSignatures ? 'Hide Signatures' : 'Show Signatures'}</span>
                       </button>
                       <button 
-                        onClick={downloadPlayersCSV}
-                        className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
-                        title="Download All Registered Players (CSV)"
-                      >
-                        <Download className="w-4 h-4 text-emerald-400" />
-                        <span className="hidden md:inline">Download CSV</span>
-                      </button>
-                      <button 
                         onClick={downloadWeighInExcel}
                         className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                         title="Download Total Summary (Excel)"
                       >
-                        <Download className="w-4 h-4 text-gold" />
-                        <span className="hidden md:inline">Export Excel</span>
+                        <Download className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={() => setShowPrintAllCardsModal(true)}
@@ -11268,8 +12028,52 @@ export default function App() {
                 </p>
               </div>
             ) : (
-              /* Main Grid */
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-6">
+                {/* Navigation Sub-Tabs */}
+                <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-surface border border-line p-2 rounded-2xl shadow-sm">
+                  <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+                    <button
+                      onClick={() => setRefereeTab('pass')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 cursor-pointer ${
+                        refereeTab === 'pass'
+                          ? 'bg-gold text-ink shadow'
+                          : 'bg-surface-2 text-text-dim hover:text-text hover:bg-line'
+                      }`}
+                    >
+                      <User className="w-4 h-4" />
+                      <span>My Pass & Allowance</span>
+                    </button>
+
+                    <button
+                      onClick={() => setRefereeTab('courtRoster')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 cursor-pointer ${
+                        refereeTab === 'courtRoster'
+                          ? 'bg-gold text-ink shadow'
+                          : 'bg-surface-2 text-text-dim hover:text-text hover:bg-line'
+                      }`}
+                    >
+                      <Layout className="w-4 h-4" />
+                      <span>Court Referee Distribution</span>
+                      {activeReferee.courtAssignment && activeReferee.courtAssignment !== 'Unassigned' && (
+                        <span className="bg-ink text-gold text-[9px] px-2 py-0.5 rounded-full font-bold ml-1 animate-pulse">
+                          {activeReferee.courtAssignment}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setScreen('courtRosterDisplay')}
+                    className="bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm shrink-0"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span>Open Live Display Board</span>
+                  </button>
+                </div>
+
+                {refereeTab === 'pass' ? (
+                  /* Main Grid */
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               
               {/* Officiating Pass Column */}
               <div className="space-y-4">
@@ -11574,11 +12378,1714 @@ export default function App() {
                 </div>
 
               </div>
-
             </div>
-          )}
-        </div>
-      )}
+                ) : (
+                  /* Court Referee Distribution View */
+                  <div className="space-y-6 animate-fade-in">
+                    {/* Personal Assignment Callout Card */}
+                    <div className={`p-5 rounded-2xl border transition-all ${
+                      activeReferee.courtAssignment && activeReferee.courtAssignment !== 'Unassigned'
+                        ? 'bg-gradient-to-r from-gold/10 via-amber-500/10 to-gold/10 border-gold/50 shadow-lg'
+                        : 'bg-surface border-line'
+                    }`}>
+                      {activeReferee.courtAssignment && activeReferee.courtAssignment !== 'Unassigned' ? (
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="bg-gold text-ink font-extrabold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                YOUR DUTY ASSIGNMENT TODAY
+                              </span>
+                              <span className="text-text-dim text-xs font-mono font-bold">
+                                Match Range: {ringMatchNumbers[activeReferee.courtAssignment] || activeReferee.matchNo || 'Active Session'}
+                              </span>
+                            </div>
+                            <h3 className="text-xl font-black text-text uppercase tracking-wide">
+                              {activeReferee.courtAssignment} — <span className="text-gold">{activeReferee.dutyRole || 'Corner Judge'}</span>
+                            </h3>
+                            <p className="text-xs text-text-dim">
+                              Officiating Panel: You are assigned as <strong>{activeReferee.dutyRole || 'Corner Judge'}</strong> on <strong>{activeReferee.courtAssignment}</strong>.
+                            </p>
+                          </div>
+
+                          {/* Panel Mates Mini Summary */}
+                          <div className="bg-ink/60 border border-line p-3 rounded-xl space-y-1 text-xs min-w-[240px]">
+                            <span className="text-[10px] text-gold font-bold uppercase tracking-wider block border-b border-line/40 pb-1">
+                              {activeReferee.courtAssignment} Panel Officials
+                            </span>
+                            {(() => {
+                              const ringRefs = referees.filter(r => r.courtAssignment === activeReferee.courtAssignment);
+                              return (
+                                <div className="space-y-1 text-[11px] pt-1">
+                                  {ringRefs.map(r => (
+                                    <div key={r.id} className={`flex justify-between items-center ${r.id === activeReferee.id ? 'font-bold text-gold' : 'text-text-dim'}`}>
+                                      <span>{r.dutyRole || 'Corner'}:</span>
+                                      <span className="truncate max-w-[130px]">{r.fullName} {r.id === activeReferee.id ? '(You)' : ''}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl">
+                          <div className="flex items-center gap-3">
+                            <Clock className="w-6 h-6 text-amber-400 shrink-0 animate-pulse" />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-black bg-amber-500 text-ink px-2 py-0.5 rounded uppercase tracking-wider">
+                                  STANDBY STATUS
+                                </span>
+                                <h4 className="text-sm font-bold text-text uppercase">Standby in Holding Area (Unassigned)</h4>
+                              </div>
+                              <p className="text-xs text-text-dim mt-1">
+                                You are currently on standby awaiting call from the Referee-in-Charge (RIC). Please remain in the referee holding area or check the Live Display Board.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setScreen('courtRosterDisplay')}
+                            className="bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-2 cursor-pointer shrink-0"
+                          >
+                            <Eye className="w-4 h-4" />
+                            <span>View Live Arena Board</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Search and Ring Filter Controls */}
+                    <div className="flex flex-col sm:flex-row justify-between items-center gap-3 bg-surface border border-line p-4 rounded-2xl">
+                      <div className="relative w-full sm:w-72">
+                        <Search className="w-4 h-4 text-text-dim absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          placeholder="Find referee name, NRIC or club..."
+                          value={rosterSearchQuery}
+                          onChange={(e) => setRosterSearchQuery(e.target.value)}
+                          className="w-full bg-ink border border-line rounded-xl pl-9 pr-3 py-2 text-xs text-text focus:border-gold outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none">
+                        {['all', 'Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map((ring) => (
+                          <button
+                            key={ring}
+                            onClick={() => setRosterSelectedRing(ring)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase transition cursor-pointer whitespace-nowrap ${
+                              rosterSelectedRing === ring
+                                ? 'bg-gold text-ink'
+                                : 'bg-surface-2 text-text-dim hover:text-text border border-line'
+                            }`}
+                          >
+                            {ring === 'all' ? 'All Rings' : ring}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 4-Ring Distribution Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4']
+                        .filter(ringName => rosterSelectedRing === 'all' || rosterSelectedRing === ringName)
+                        .map(ringName => {
+                          const ringRefs = referees.filter(r => r.courtAssignment === ringName);
+                          const matchRange = ringMatchNumbers[ringName];
+
+                          // Specific Roles
+                          const centerRef = ringRefs.find(r => r.dutyRole === 'Center Referee' || r.dutyRole === 'Center Ref (CR)');
+                          const corner1Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 1' || r.dutyRole === 'Corner Judge 1');
+                          const corner2Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 2' || r.dutyRole === 'Corner Judge 2');
+                          const techAssRef = ringRefs.find(r => r.dutyRole === 'Technical Assistant' || r.dutyRole === 'Technical Assistant (TA)');
+                          const reviewRef = ringRefs.find(r => r.dutyRole === 'Review Official' || r.dutyRole === 'Video Replay Official' || r.dutyRole === 'Video Replay / Review Official');
+
+                          // Other refs on this court that might not match exact role string
+                          const assignedRoleIds = new Set([centerRef?.id, corner1Ref?.id, corner2Ref?.id, techAssRef?.id, reviewRef?.id].filter(Boolean));
+                          const otherRefs = ringRefs.filter(r => !assignedRoleIds.has(r.id));
+
+                          const panelRoles = [
+                            { label: 'Center Referee (CR)', roleKey: 'CR', ref: centerRef, color: 'text-gold bg-gold/10 border-gold/30' },
+                            { label: 'Corner Judge 1', roleKey: 'CJ1', ref: corner1Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
+                            { label: 'Corner Judge 2', roleKey: 'CJ2', ref: corner2Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
+                            { label: 'Technical Assistant (TA)', roleKey: 'TA', ref: techAssRef, color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
+                            { label: 'Video Replay / Review Official', roleKey: 'VR', ref: reviewRef, color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
+                          ];
+
+                          return (
+                            <div key={ringName} className="bg-surface border border-line rounded-2xl p-5 shadow-md space-y-4 relative overflow-hidden">
+                              <div className="flex justify-between items-center border-b border-line pb-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center font-black text-gold text-base">
+                                    {ringName.replace('Ring ', 'R')}
+                                  </div>
+                                  <div>
+                                    <h3 className="font-extrabold text-gold text-base uppercase">{ringName}</h3>
+                                    {matchRange && (
+                                      <p className="text-[11px] font-mono font-bold text-gold/80">Match Range: {matchRange}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <span className="text-xs font-mono font-bold text-text-dim bg-ink/50 px-3 py-1 rounded-full border border-line">
+                                  {ringRefs.length} Assigned
+                                </span>
+                              </div>
+
+                              {/* Official 5-Person Panel List */}
+                              <div className="space-y-2 text-xs">
+                                {panelRoles.map(({ label, roleKey, ref, color }) => {
+                                  const isUser = ref && activeReferee && ref.id === activeReferee.id;
+                                  const isMatchSearch = rosterSearchQuery.trim() !== '' && ref && (
+                                    ref.fullName.toLowerCase().includes(rosterSearchQuery.toLowerCase()) ||
+                                    ref.clubName.toLowerCase().includes(rosterSearchQuery.toLowerCase()) ||
+                                    ref.nric.toLowerCase().includes(rosterSearchQuery.toLowerCase())
+                                  );
+
+                                  return (
+                                    <div
+                                      key={label}
+                                      className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                                        isUser
+                                          ? 'bg-gold/10 border-gold shadow-md ring-2 ring-gold/40'
+                                          : isMatchSearch
+                                          ? 'bg-emerald-500/10 border-emerald-500 ring-1 ring-emerald-500'
+                                          : ref
+                                          ? 'bg-ink/40 border-line/50 hover:border-text-dim/40'
+                                          : 'bg-surface-2/40 border-line/30'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 border ${color}`}>
+                                          {roleKey}
+                                        </span>
+                                        <div>
+                                          <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider block">{label}</span>
+                                          {ref ? (
+                                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                              <span className={`font-bold text-sm ${isUser ? 'text-gold' : 'text-text'}`}>
+                                                {ref.fullName}
+                                              </span>
+                                              <span className="text-[10px] font-bold text-gold/80 bg-gold/10 px-1.5 py-0.2 rounded">
+                                                {ref.kyorugiStatus}
+                                              </span>
+                                              <span className="text-[10px] text-text-dim truncate">
+                                                ({ref.clubName})
+                                              </span>
+                                              {isUser && (
+                                                <span className="text-[9px] bg-gold text-ink font-black px-1.5 py-0.2 rounded uppercase tracking-widest animate-pulse">
+                                                  YOU
+                                                </span>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span className="text-text-dim text-xs italic">Unassigned</span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {ref && (
+                                        <div className="text-right shrink-0">
+                                          <span className="text-[10px] text-text-dim block uppercase">Match #</span>
+                                          <span className="text-xs font-mono font-bold text-gold">{ref.matchNo || matchRange || '-'}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+
+                                {/* Extra Referees assigned to this court */}
+                                {otherRefs.length > 0 && (
+                                  <div className="pt-2 border-t border-line/30 mt-3">
+                                    <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider block mb-2">Additional Court Support:</span>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {otherRefs.map(r => (
+                                        <div key={r.id} className="bg-ink/30 p-2 rounded-lg border border-line/30 flex justify-between items-center text-xs">
+                                          <span className="font-semibold text-text truncate">{r.fullName} ({r.kyorugiStatus})</span>
+                                          <span className="text-[10px] text-gold font-mono">{r.dutyRole || 'Support'}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+
+                    {/* STANDBY / UNASSIGNED REFEREES HOLDING POOL */}
+                    {(() => {
+                      const unassignedRefs = referees.filter(r => !r.courtAssignment || r.courtAssignment === 'Unassigned' || !r.dutyRole || r.dutyRole === 'Unassigned');
+                      const filteredStandby = unassignedRefs.filter(r => {
+                        if (!rosterSearchQuery.trim()) return true;
+                        const q = rosterSearchQuery.toLowerCase();
+                        return r.fullName.toLowerCase().includes(q) || r.clubName.toLowerCase().includes(q) || r.nric.toLowerCase().includes(q);
+                      });
+
+                      return (
+                        <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4 mt-6">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-line/50 pb-3 gap-2">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center font-bold text-amber-400">
+                                <Users className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h3 className="font-extrabold text-text text-sm uppercase tracking-wider flex items-center gap-2">
+                                  <span>Standby Referees Holding Pool</span>
+                                  <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono px-2 py-0.5 rounded-full font-bold">
+                                    {unassignedRefs.length} Available
+                                  </span>
+                                </h3>
+                                <p className="text-[11px] text-text-dim">
+                                  Referees on standby awaiting court ring assignment from the Referee-in-Charge (RIC).
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {filteredStandby.length === 0 ? (
+                            <div className="py-6 text-center text-xs text-text-dim italic bg-ink/20 rounded-xl border border-line/30">
+                              {unassignedRefs.length === 0
+                                ? 'All registered referees are currently distributed on active ring duty panels.'
+                                : 'No standby referees matched your search filter.'}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                              {filteredStandby.map((r) => {
+                                const isCurrentRef = activeReferee && r.id === activeReferee.id;
+                                return (
+                                  <div
+                                    key={r.id}
+                                    className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                                      isCurrentRef
+                                        ? 'bg-amber-500/10 border-amber-500/60 ring-2 ring-amber-500/30'
+                                        : 'bg-ink/40 border-line/50 hover:border-amber-500/30'
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`font-bold text-xs truncate ${isCurrentRef ? 'text-amber-400' : 'text-text'}`}>
+                                          {r.fullName}
+                                        </span>
+                                        {isCurrentRef && (
+                                          <span className="text-[8px] font-black bg-amber-500 text-ink px-1 rounded uppercase">
+                                            YOU
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-text-dim">
+                                        <span className="text-gold font-bold">{r.kyorugiStatus} / {r.poomsaeStatus}</span>
+                                        <span>•</span>
+                                        <span className="truncate">{r.clubName}</span>
+                                      </div>
+                                    </div>
+                                    <span className="text-[9px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded shrink-0 uppercase tracking-wider">
+                                      Standby
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* REFEREE-IN-CHARGE (RIC) DASHBOARD */}
+        {screen === 'ricDashboard' && (
+          <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-surface via-surface-2 to-surface border border-line rounded-3xl p-6 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-gold/5 rounded-full blur-3xl pointer-events-none"></div>
+              
+              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0 shadow-inner">
+                    <Scale className="w-8 h-8 text-gold" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">Referee-in-Charge (RIC) Dashboard</h2>
+                      <span className="text-[10px] font-bold bg-gold text-ink px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        RIC Management
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-dim mt-1">
+                      Assign referees to courts/rings, manage officiating panels, oversee match duties, and verify conflict of interest.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Tournament Selector & Back to Pass */}
+                <div className="flex items-center gap-3 w-full lg:w-auto flex-wrap justify-end">
+                  <div className="flex items-center gap-2 bg-ink/40 p-2 rounded-xl border border-line/60">
+                    <Trophy className="w-4 h-4 text-gold shrink-0" />
+                    <select
+                      value={compId || ''}
+                      onChange={(e) => {
+                        const newId = e.target.value;
+                        const assignedCompId = activeReferee?.compId;
+                        if (assignedCompId && assignedCompId !== 'GLOBAL' && newId !== assignedCompId) {
+                          const assignedComp = competitions.find(c => c.id === assignedCompId);
+                          triggerMsg(`Access Denied: You are restricted to your Assigned Tournament Event (${assignedComp?.name || assignedCompId}).`, 'error');
+                          return;
+                        }
+                        setCompId(newId || null);
+                      }}
+                      className="bg-transparent text-xs font-bold text-text focus:outline-none cursor-pointer pr-2"
+                    >
+                      {competitions.filter(c => c.isActive !== false && (!activeReferee?.compId || activeReferee.compId === 'GLOBAL' || c.id === activeReferee.compId)).map(c => (
+                        <option key={c.id} value={c.id} className="bg-surface text-text">{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={() => setScreen('courtRosterDisplay')}
+                    className="bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span>Live Roster Board</span>
+                  </button>
+
+                  {activeReferee && (
+                    <button
+                      onClick={() => setScreen('refereeDashboard')}
+                      className="bg-surface-2 hover:bg-line border border-line text-text text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <User className="w-4 h-4 text-gold" />
+                      <span>My Referee Pass</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Tournament Summary Bar */}
+              {activeComp && (
+                <div className="mt-6 pt-4 border-t border-line/50 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
+                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">Total Registered Referees</span>
+                    <span className="text-base font-bold text-gold font-mono">{referees.length}</span>
+                  </div>
+                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
+                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">International / National (IR/NR)</span>
+                    <span className="text-base font-bold text-emerald-400 font-mono">
+                      {referees.filter(r => ['IR', 'NR'].includes(r.kyorugiStatus) || ['IR', 'NR'].includes(r.poomsaeStatus)).length}
+                    </span>
+                  </div>
+                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
+                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">State / Trainee (SR/TR)</span>
+                    <span className="text-base font-bold text-blue-400 font-mono">
+                      {referees.filter(r => !['IR', 'NR'].includes(r.kyorugiStatus) && !['IR', 'NR'].includes(r.poomsaeStatus)).length}
+                    </span>
+                  </div>
+                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
+                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">Assigned Court Referees</span>
+                    <span className="text-base font-bold text-amber-400 font-mono">
+                      {referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned').length} / {referees.length}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* TAB SELECTOR */}
+            <div className="flex border-b border-line overflow-x-auto scrollbar-none gap-2">
+              <button
+                onClick={() => setRicTab('courtAssignments')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  ricTab === 'courtAssignments'
+                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Layout className="w-4 h-4" />
+                <span>Ring / Court Roster</span>
+              </button>
+
+              <button
+                onClick={() => setRicTab('refereeList')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  ricTab === 'refereeList'
+                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Referee Directory & Roles ({referees.length})</span>
+              </button>
+
+              <button
+                onClick={() => setRicTab('matchScheduler')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  ricTab === 'matchScheduler'
+                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Activity className="w-4 h-4" />
+                <span>Match Duty Scheduler ({matchAssignments.length})</span>
+              </button>
+
+              <button
+                onClick={() => setRicTab('export')}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  ricTab === 'export'
+                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
+                    : 'border-transparent text-text-dim hover:text-text'
+                }`}
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print & Export Officiating Roster</span>
+              </button>
+            </div>
+
+            {/* TAB 1: RING / COURT ROSTER */}
+            {ricTab === 'courtAssignments' && (() => {
+              // Helper to filter available referees for selection
+              const getAvailableForSlot = (slotRefId?: string) => {
+                return referees.filter(r => {
+                  if (slotRefId && r.id === slotRefId) return true;
+                  const isAssigned = r.courtAssignment && r.courtAssignment !== 'Unassigned' && r.dutyRole && r.dutyRole !== 'Unassigned';
+                  return !isAssigned;
+                });
+              };
+
+              const unassignedCount = referees.filter(r => !r.courtAssignment || r.courtAssignment === 'Unassigned' || !r.dutyRole || r.dutyRole === 'Unassigned').length;
+              const assignedCount = referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned' && r.dutyRole && r.dutyRole !== 'Unassigned').length;
+
+              return (
+                <div className="space-y-6 animate-fade-in">
+                  {/* Auto Balance Banner */}
+                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-bold text-text uppercase tracking-wider text-sm flex items-center gap-2">
+                        <Sliders className="w-4 h-4 text-gold" />
+                        <span>Court Referee Panel Distribution</span>
+                      </h3>
+                      <p className="text-xs text-text-dim mt-0.5">Assign Center Referees, Corner Referees, and Ring Controllers to each competition mat/ring.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          if (referees.length === 0) {
+                            triggerMsg('No registered referees found for this tournament.', 'error');
+                            return;
+                          }
+                          const courts = ['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'];
+                          const roles = ['Center Referee', 'Corner Referee 1', 'Corner Referee 2', 'Technical Assistant', 'Review Official'];
+                          
+                          // Sort referees: IR/NR first
+                          const sortedRefs = [...referees].sort((a, b) => {
+                            const aRank = ['IR', 'NR'].includes(a.kyorugiStatus) || ['IR', 'NR'].includes(a.poomsaeStatus) ? 2 : 1;
+                            const bRank = ['IR', 'NR'].includes(b.kyorugiStatus) || ['IR', 'NR'].includes(b.poomsaeStatus) ? 2 : 1;
+                            return bRank - aRank;
+                          });
+
+                          const updatedRefList: Referee[] = [];
+                          for (let i = 0; i < sortedRefs.length; i++) {
+                            const courtName = courts[i % courts.length];
+                            const roleName = roles[Math.floor(i / courts.length) % roles.length];
+                            const updated = {
+                              ...sortedRefs[i],
+                              courtAssignment: courtName,
+                              dutyRole: roleName
+                            };
+                            await saveRefereeToFirestore(updated);
+                            updatedRefList.push(updated);
+                          }
+                          setReferees(prev => prev.map(r => updatedRefList.find(u => u.id === r.id) || r));
+                          triggerMsg('Smart Balanced Referees evenly across Rings 1-4!', 'ok');
+                        }}
+                        className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow cursor-pointer"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        <span>Smart Auto-Balance Rings</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Available Pool Summary Bar */}
+                  <div className="bg-ink/40 border border-line/60 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-emerald-400" />
+                        <span className="font-bold text-text">Available Pool (Unassigned):</span>
+                        <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold text-xs">
+                          {unassignedCount} Referees
+                        </span>
+                      </div>
+                      <span className="text-text-dim hidden sm:inline">•</span>
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-gold" />
+                        <span className="font-bold text-text">Distributed on Duty:</span>
+                        <span className="bg-gold/20 text-gold border border-gold/30 px-2.5 py-0.5 rounded-full font-mono font-bold text-xs">
+                          {assignedCount} Referees
+                        </span>
+                      </div>
+                    </div>
+
+                    {assignedCount > 0 && (
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm('Finish session for ALL rings and return all referees to the available list?')) return;
+                          const assignedRefs = referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned');
+                          for (const r of assignedRefs) {
+                            await saveRefereeToFirestore({ ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+                          }
+                          setReferees(prev => prev.map(r => ({ ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' })));
+                          triggerMsg('Finished all ring sessions! All referees returned to available list.', 'ok');
+                        }}
+                        className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Finish All Rings & Release Pool</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Rings Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map((ringName) => {
+                      const ringRefs = referees.filter(r => r.courtAssignment === ringName && r.dutyRole && r.dutyRole !== 'Unassigned');
+                      const centerRef = ringRefs.find(r => r.dutyRole === 'Center Referee');
+                      const corner1 = ringRefs.find(r => r.dutyRole === 'Corner Referee 1' || r.dutyRole === 'Corner Judge 1');
+                      const corner2 = ringRefs.find(r => r.dutyRole === 'Corner Referee 2' || r.dutyRole === 'Corner Judge 2');
+                      const techAssistant = ringRefs.find(r => r.dutyRole === 'Technical Assistant' || r.dutyRole === 'TA');
+                      const reviewOff = ringRefs.find(r => r.dutyRole === 'Review Official' || r.dutyRole === 'Video Replay Official' || r.dutyRole === 'Video Replay / Review Official');
+
+                      return (
+                        <div key={ringName} className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                          <div>
+                            <div className="flex justify-between items-center border-b border-line pb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="w-3 h-3 rounded-full bg-gold"></span>
+                                <h3 className="font-bold text-text text-base uppercase tracking-wider">{ringName}</h3>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded font-mono">
+                                  {ringRefs.length} Referees
+                                </span>
+                                {ringRefs.length > 0 && (
+                                  <button
+                                    onClick={async () => {
+                                      if (!window.confirm(`Finish match session for ${ringName}? All ${ringRefs.length} assigned referee(s) will be released back to the available name list.`)) return;
+                                      const updatedRefs: Referee[] = [];
+                                      for (const ref of ringRefs) {
+                                        const updated = { ...ref, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' };
+                                        await saveRefereeToFirestore(updated);
+                                        updatedRefs.push(updated);
+                                      }
+                                      setReferees(prev => prev.map(r => {
+                                        const u = updatedRefs.find(item => item.id === r.id);
+                                        return u || r;
+                                      }));
+                                      triggerMsg(`Finished ${ringName} session! ${ringRefs.length} referee(s) returned to available list.`, 'ok');
+                                    }}
+                                    className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold px-2 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer shadow-sm"
+                                    title={`Finish ${ringName} session and release referees back to available name list`}
+                                  >
+                                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Finish</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Ring Level Match No / Range */}
+                            <div className="mt-3 bg-ink/60 border border-line/80 rounded-xl p-2 flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-bold text-gold uppercase tracking-wider shrink-0 flex items-center gap-1">
+                                <Hash className="w-3.5 h-3.5" /> Match Range:
+                              </span>
+                              <input
+                                type="text"
+                                placeholder="e.g. M1 - M25"
+                                value={ringMatchNumbers[ringName] || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setRingMatchNumbers(prev => {
+                                    const next = { ...prev, [ringName]: val };
+                                    if (compId) {
+                                      localStorage.setItem(`app:ringMatchNumbers:${compId}`, JSON.stringify(next));
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className="bg-surface text-xs font-bold text-text border border-line/50 rounded-lg px-2 py-1 focus:outline-none focus:border-gold w-28 placeholder:text-text-dim/40"
+                              />
+                            </div>
+
+                            <div className="space-y-3 mt-4">
+                              {/* Position 1: Center Referee (CR) */}
+                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
+                                <div className="flex justify-between items-center">
+                                  <label className="text-[10px] font-bold uppercase tracking-wider text-gold flex items-center gap-1">
+                                    <Shield className="w-3 h-3" /> Center Referee (1 CR)
+                                  </label>
+                                  {centerRef && (
+                                    <span className="text-[9px] bg-gold/20 text-gold px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
+                                  )}
+                                </div>
+                                <select
+                                  value={centerRef?.id || ''}
+                                  onChange={async (e) => {
+                                    const refId = e.target.value;
+                                    if (centerRef && centerRef.id !== refId) {
+                                      await saveRefereeToFirestore({ ...centerRef, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+                                    }
+                                    if (refId) {
+                                      const targetRef = referees.find(r => r.id === refId);
+                                      if (targetRef) {
+                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Center Referee' };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (centerRef && r.id === centerRef.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
+                                        triggerMsg(`Assigned ${targetRef.fullName} as Center Referee for ${ringName}`, 'ok');
+                                      }
+                                    } else if (centerRef) {
+                                      setReferees(prev => prev.map(r => r.id === centerRef.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
+                                      triggerMsg(`Unassigned Center Referee from ${ringName}`, 'ok');
+                                    }
+                                  }}
+                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
+                                >
+                                  <option value="">-- Assign Center Ref --</option>
+                                  {getAvailableForSlot(centerRef?.id).map(r => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.fullName} ({r.kyorugiStatus}/{r.poomsaeStatus}) - {r.clubName}
+                                    </option>
+                                  ))}
+                                </select>
+                                {centerRef && (
+                                  <div className="flex items-center gap-1.5 pt-1">
+                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. 1-15 or M101"
+                                      value={centerRef.matchNo || ''}
+                                      onChange={async (e) => {
+                                        const val = e.target.value;
+                                        const updated = { ...centerRef, matchNo: val };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
+                                      }}
+                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Position 2: Corner Judge 1 */}
+                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
+                                <div className="flex justify-between items-center">
+                                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim flex items-center gap-1">
+                                    <User className="w-3 h-3 text-blue-400" /> Corner Judge 1
+                                  </label>
+                                  {corner1 && (
+                                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
+                                  )}
+                                </div>
+                                <select
+                                  value={corner1?.id || ''}
+                                  onChange={async (e) => {
+                                    const refId = e.target.value;
+                                    if (corner1 && corner1.id !== refId) {
+                                      await saveRefereeToFirestore({ ...corner1, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+                                    }
+                                    if (refId) {
+                                      const targetRef = referees.find(r => r.id === refId);
+                                      if (targetRef) {
+                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Corner Referee 1' };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (corner1 && r.id === corner1.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
+                                        triggerMsg(`Assigned ${targetRef.fullName} as Corner Judge 1 for ${ringName}`, 'ok');
+                                      }
+                                    } else if (corner1) {
+                                      setReferees(prev => prev.map(r => r.id === corner1.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
+                                      triggerMsg(`Unassigned Corner Judge 1 from ${ringName}`, 'ok');
+                                    }
+                                  }}
+                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
+                                >
+                                  <option value="">-- Assign Corner Judge 1 --</option>
+                                  {getAvailableForSlot(corner1?.id).map(r => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
+                                    </option>
+                                  ))}
+                                </select>
+                                {corner1 && (
+                                  <div className="flex items-center gap-1.5 pt-1">
+                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. 1-15 or M101"
+                                      value={corner1.matchNo || ''}
+                                      onChange={async (e) => {
+                                        const val = e.target.value;
+                                        const updated = { ...corner1, matchNo: val };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
+                                      }}
+                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Position 3: Corner Judge 2 */}
+                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
+                                <div className="flex justify-between items-center">
+                                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim flex items-center gap-1">
+                                    <User className="w-3 h-3 text-blue-400" /> Corner Judge 2
+                                  </label>
+                                  {corner2 && (
+                                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
+                                  )}
+                                </div>
+                                <select
+                                  value={corner2?.id || ''}
+                                  onChange={async (e) => {
+                                    const refId = e.target.value;
+                                    if (corner2 && corner2.id !== refId) {
+                                      await saveRefereeToFirestore({ ...corner2, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+                                    }
+                                    if (refId) {
+                                      const targetRef = referees.find(r => r.id === refId);
+                                      if (targetRef) {
+                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Corner Referee 2' };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (corner2 && r.id === corner2.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
+                                        triggerMsg(`Assigned ${targetRef.fullName} as Corner Judge 2 for ${ringName}`, 'ok');
+                                      }
+                                    } else if (corner2) {
+                                      setReferees(prev => prev.map(r => r.id === corner2.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
+                                      triggerMsg(`Unassigned Corner Judge 2 from ${ringName}`, 'ok');
+                                    }
+                                  }}
+                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
+                                >
+                                  <option value="">-- Assign Corner Judge 2 --</option>
+                                  {getAvailableForSlot(corner2?.id).map(r => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
+                                    </option>
+                                  ))}
+                                </select>
+                                {corner2 && (
+                                  <div className="flex items-center gap-1.5 pt-1">
+                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. 1-15 or M101"
+                                      value={corner2.matchNo || ''}
+                                      onChange={async (e) => {
+                                        const val = e.target.value;
+                                        const updated = { ...corner2, matchNo: val };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
+                                      }}
+                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Position 4: Technical Assistant */}
+                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
+                                <div className="flex justify-between items-center">
+                                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                                    <Cpu className="w-3 h-3" /> Technical Assistant (TA)
+                                  </label>
+                                  {techAssistant && (
+                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
+                                  )}
+                                </div>
+                                <select
+                                  value={techAssistant?.id || ''}
+                                  onChange={async (e) => {
+                                    const refId = e.target.value;
+                                    if (techAssistant && techAssistant.id !== refId) {
+                                      await saveRefereeToFirestore({ ...techAssistant, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+                                    }
+                                    if (refId) {
+                                      const targetRef = referees.find(r => r.id === refId);
+                                      if (targetRef) {
+                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Technical Assistant' };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (techAssistant && r.id === techAssistant.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
+                                        triggerMsg(`Assigned ${targetRef.fullName} as Technical Assistant for ${ringName}`, 'ok');
+                                      }
+                                    } else if (techAssistant) {
+                                      setReferees(prev => prev.map(r => r.id === techAssistant.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
+                                      triggerMsg(`Unassigned Technical Assistant from ${ringName}`, 'ok');
+                                    }
+                                  }}
+                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
+                                >
+                                  <option value="">-- Assign Technical Assistant --</option>
+                                  {getAvailableForSlot(techAssistant?.id).map(r => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
+                                    </option>
+                                  ))}
+                                </select>
+                                {techAssistant && (
+                                  <div className="flex items-center gap-1.5 pt-1">
+                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. 1-15 or M101"
+                                      value={techAssistant.matchNo || ''}
+                                      onChange={async (e) => {
+                                        const val = e.target.value;
+                                        const updated = { ...techAssistant, matchNo: val };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
+                                      }}
+                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Position 5: Video Replay / Review Official */}
+                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
+                                <div className="flex justify-between items-center">
+                                  <label className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1">
+                                    <Video className="w-3 h-3" /> Video Replay / Review Official
+                                  </label>
+                                  {reviewOff && (
+                                    <span className="text-[9px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
+                                  )}
+                                </div>
+                                <select
+                                  value={reviewOff?.id || ''}
+                                  onChange={async (e) => {
+                                    const refId = e.target.value;
+                                    if (reviewOff && reviewOff.id !== refId) {
+                                      await saveRefereeToFirestore({ ...reviewOff, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+                                    }
+                                    if (refId) {
+                                      const targetRef = referees.find(r => r.id === refId);
+                                      if (targetRef) {
+                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Review Official' };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (reviewOff && r.id === reviewOff.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
+                                        triggerMsg(`Assigned ${targetRef.fullName} as Review Official for ${ringName}`, 'ok');
+                                      }
+                                    } else if (reviewOff) {
+                                      setReferees(prev => prev.map(r => r.id === reviewOff.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
+                                      triggerMsg(`Unassigned Review Official from ${ringName}`, 'ok');
+                                    }
+                                  }}
+                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
+                                >
+                                  <option value="">-- Assign Review Official --</option>
+                                  {getAvailableForSlot(reviewOff?.id).map(r => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
+                                    </option>
+                                  ))}
+                                </select>
+                                {reviewOff && (
+                                  <div className="flex items-center gap-1.5 pt-1">
+                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
+                                    <input
+                                      type="text"
+                                      placeholder="e.g. 1-15 or M101"
+                                      value={reviewOff.matchNo || ''}
+                                      onChange={async (e) => {
+                                        const val = e.target.value;
+                                        const updated = { ...reviewOff, matchNo: val };
+                                        await saveRefereeToFirestore(updated);
+                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
+                                      }}
+                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Ring Quality Indicator */}
+                          <div className="pt-3 border-t border-line/40 text-[10px] text-text-dim flex justify-between items-center">
+                            <span>Qualification Mix:</span>
+                            <span className="font-bold text-gold">
+                              {ringRefs.filter(r => ['IR', 'NR'].includes(r.kyorugiStatus)).length} Senior / {ringRefs.filter(r => ['SR', 'TR'].includes(r.kyorugiStatus)).length} State
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* TAB 2: REFEREE DIRECTORY */}
+            {ricTab === 'refereeList' && (
+              <div className="space-y-6 animate-fade-in">
+                {/* Search & Filter Bar */}
+                <div className="bg-surface border border-line p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="relative w-full sm:w-72">
+                    <Search className="w-4 h-4 text-text-dim absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      placeholder="Search referee name, club, or NRIC..."
+                      value={ricSearchQuery}
+                      onChange={(e) => setRicSearchQuery(e.target.value)}
+                      className="w-full bg-ink border border-line text-xs font-semibold rounded-xl py-2 pl-9 pr-3 text-text focus:outline-none focus:border-gold"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <select
+                      value={ricFilterQual}
+                      onChange={(e) => setRicFilterQual(e.target.value)}
+                      className="bg-ink border border-line text-xs font-bold rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold cursor-pointer"
+                    >
+                      <option value="all">All Qualifications</option>
+                      <option value="IR">IR - International</option>
+                      <option value="NR">NR - National</option>
+                      <option value="SR">SR - State</option>
+                      <option value="TR">TR - Trainee</option>
+                    </select>
+
+                    <select
+                      value={ricFilterRing}
+                      onChange={(e) => setRicFilterRing(e.target.value)}
+                      className="bg-ink border border-line text-xs font-bold rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold cursor-pointer"
+                    >
+                      <option value="all">All Rings / Courts</option>
+                      <option value="Ring 1">Ring 1</option>
+                      <option value="Ring 2">Ring 2</option>
+                      <option value="Ring 3">Ring 3</option>
+                      <option value="Ring 4">Ring 4</option>
+                      <option value="Unassigned">Unassigned Only</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Referees Directory Table */}
+                <div className="bg-surface border border-line rounded-2xl shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-surface-2/60 text-text-dim uppercase tracking-wider text-[10px] border-b border-line">
+                        <tr>
+                          <th className="p-4 font-bold">Referee Name & NRIC</th>
+                          <th className="p-4 font-bold">State / Club</th>
+                          <th className="p-4 font-bold">Qualifications</th>
+                          <th className="p-4 font-bold">Assigned Ring</th>
+                          <th className="p-4 font-bold">Duty Role</th>
+                          <th className="p-4 font-bold">Match No</th>
+                          <th className="p-4 font-bold">Special Role</th>
+                          <th className="p-4 font-bold text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line/40 font-medium">
+                        {referees
+                          .filter(r => {
+                            const matchSearch = r.fullName.toLowerCase().includes(ricSearchQuery.toLowerCase()) ||
+                                              r.nric.toLowerCase().includes(ricSearchQuery.toLowerCase()) ||
+                                              r.clubName.toLowerCase().includes(ricSearchQuery.toLowerCase());
+                            const matchQual = ricFilterQual === 'all' || r.kyorugiStatus === ricFilterQual || r.poomsaeStatus === ricFilterQual;
+                            const matchRing = ricFilterRing === 'all' || 
+                              (ricFilterRing === 'Unassigned' ? (!r.courtAssignment || r.courtAssignment === 'Unassigned') : r.courtAssignment === ricFilterRing);
+                            return matchSearch && matchQual && matchRing;
+                          })
+                          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+                          .map((r) => (
+                            <tr key={r.id} className="hover:bg-ink/20 transition">
+                              <td className="p-4">
+                                <div className="flex items-center space-x-3">
+                                  <div className="w-8 h-8 rounded-full bg-ink border border-line flex items-center justify-center shrink-0 font-bold text-gold">
+                                    {r.photo ? (
+                                      <img src={r.photo} alt={r.fullName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      r.fullName.charAt(0)
+                                    )}
+                                  </div>
+                                  <div>
+                                    <span className="font-bold text-text text-sm block">{r.fullName}</span>
+                                    <span className="text-[10px] text-text-dim font-mono">{r.nric} • {r.phone}</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="p-4 font-semibold text-text">{r.clubName}</td>
+
+                              <td className="p-4">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    Kyo: {r.kyorugiStatus}
+                                  </span>
+                                  <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    Poo: {r.poomsaeStatus}
+                                  </span>
+                                </div>
+                              </td>
+
+                              <td className="p-4">
+                                <select
+                                  value={r.courtAssignment || 'Unassigned'}
+                                  onChange={async (e) => {
+                                    const updated = { ...r, courtAssignment: e.target.value };
+                                    await saveRefereeToFirestore(updated);
+                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
+                                    triggerMsg(`Updated court for ${r.fullName}`, 'ok');
+                                  }}
+                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-text focus:border-gold outline-none cursor-pointer"
+                                >
+                                  <option value="Unassigned">Unassigned</option>
+                                  <option value="Ring 1">Ring 1</option>
+                                  <option value="Ring 2">Ring 2</option>
+                                  <option value="Ring 3">Ring 3</option>
+                                  <option value="Ring 4">Ring 4</option>
+                                </select>
+                              </td>
+
+                              <td className="p-4">
+                                <select
+                                  value={r.dutyRole || 'Unassigned'}
+                                  onChange={async (e) => {
+                                    const updated = { ...r, dutyRole: e.target.value };
+                                    await saveRefereeToFirestore(updated);
+                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
+                                    triggerMsg(`Updated duty role for ${r.fullName}`, 'ok');
+                                  }}
+                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-text focus:border-gold outline-none cursor-pointer"
+                                >
+                                  <option value="Unassigned">Unassigned</option>
+                                  <option value="Center Referee">Center Referee</option>
+                                  <option value="Corner Referee 1">Corner Referee 1</option>
+                                  <option value="Corner Referee 2">Corner Referee 2</option>
+                                  <option value="Technical Assistant">Technical Assistant</option>
+                                  <option value="Review Official">Review Official</option>
+                                  <option value="Ring Inspector">Ring Inspector</option>
+                                </select>
+                              </td>
+
+                              <td className="p-4">
+                                <input
+                                  type="text"
+                                  placeholder="e.g. M1-10"
+                                  value={r.matchNo || ''}
+                                  onChange={async (e) => {
+                                    const updated = { ...r, matchNo: e.target.value };
+                                    await saveRefereeToFirestore(updated);
+                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
+                                  }}
+                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-gold focus:border-gold outline-none w-24"
+                                />
+                              </td>
+
+                              <td className="p-4">
+                                <select
+                                  value={r.specialRole || 'None'}
+                                  onChange={async (e) => {
+                                    const updated = { ...r, specialRole: e.target.value as any };
+                                    await saveRefereeToFirestore(updated);
+                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
+                                    triggerMsg(`Updated special role for ${r.fullName}`, 'ok');
+                                  }}
+                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-gold focus:border-gold outline-none cursor-pointer"
+                                >
+                                  <option value="None">None (Standard)</option>
+                                  <option value="RIC">RIC (Referee In-Charge)</option>
+                                  <option value="TD">TD (Technical Delegate)</option>
+                                  <option value="CSB">CSB (Supervisory Board)</option>
+                                  <option value="GAME_MASTER">Game Master</option>
+                                  <option value="TECHNICAL_OPERATOR">Technical Operator</option>
+                                  <option value="VIRTUAL_REFEREE">Virtual Referee</option>
+                                </select>
+                              </td>
+
+                              <td className="p-4 text-right">
+                                <span className="text-[10px] text-text-dim">{r.residentialLocation} ({r.distance} KM)</span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: MATCH DUTY SCHEDULER */}
+            {ricTab === 'matchScheduler' && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-text uppercase tracking-wider text-sm flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-gold" />
+                      <span>Match Officiating Panel Scheduler</span>
+                    </h3>
+                    <p className="text-xs text-text-dim mt-0.5">Assign referee panels to specific match numbers and verify conflict-of-interest checks.</p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      const newMatch: MatchAssignment = {
+                        id: `MATCH_${Date.now()}`,
+                        compId: compId || 'GLOBAL',
+                        matchNo: `M${matchAssignments.length + 101}`,
+                        court: 'Ring 1',
+                        division: 'Kyorugi Male Senior Finweight',
+                        bluePlayerName: 'Ali Bin Ahmad',
+                        blueClub: 'PERAK TKD',
+                        redPlayerName: 'Chong Wei',
+                        redClub: 'SELANGOR TKD',
+                        status: 'Scheduled'
+                      };
+                      const updated = [...matchAssignments, newMatch];
+                      saveMatchAssignments(updated);
+                      triggerMsg('Added new match slot for referee assignment.', 'ok');
+                    }}
+                    className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Create Match Slot</span>
+                  </button>
+                </div>
+
+                {/* Match Cards List */}
+                <div className="space-y-4">
+                  {matchAssignments.length === 0 ? (
+                    <div className="bg-surface p-8 rounded-2xl border border-line text-center space-y-3">
+                      <Activity className="w-10 h-10 text-gold/30 mx-auto" />
+                      <p className="text-sm font-bold text-text uppercase">No Match Schedules Created Yet</p>
+                      <p className="text-xs text-text-dim">Click "Create Match Slot" above to begin scheduling match referee panels.</p>
+                    </div>
+                  ) : (
+                    matchAssignments.map((match) => {
+                      const centerRef = referees.find(r => r.id === match.centerRefereeId);
+                      const corner1Ref = referees.find(r => r.id === match.corner1RefereeId);
+                      const corner2Ref = referees.find(r => r.id === match.corner2RefereeId);
+                      const techAssRef = referees.find(r => r.id === match.technicalAssistantId);
+                      const reviewRef = referees.find(r => r.id === match.reviewOfficialId);
+
+                      // Conflict Check: Check if any assigned referee belongs to the same club as Blue or Red player!
+                      const assignedReferees = [centerRef, corner1Ref, corner2Ref, techAssRef, reviewRef].filter(Boolean) as Referee[];
+                      const conflicts = assignedReferees.filter(r => 
+                        (match.blueClub && r.clubName.toLowerCase().includes(match.blueClub.toLowerCase())) ||
+                        (match.redClub && r.clubName.toLowerCase().includes(match.redClub.toLowerCase()))
+                      );
+
+                      return (
+                        <div key={match.id} className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-line/40 pb-3">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono font-bold text-base text-gold bg-gold/10 px-3 py-1 rounded-lg border border-gold/20">
+                                {match.matchNo}
+                              </span>
+                              <div>
+                                <span className="font-bold text-text text-sm uppercase">{match.division}</span>
+                                <span className="text-xs text-text-dim block">{match.court}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              {conflicts.length > 0 ? (
+                                <span className="text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3" />
+                                  <span>Conflict Warning: {conflicts.map(c => c.fullName).join(', ')}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" />
+                                  <span>Clean Panel (No Conflict)</span>
+                                </span>
+                              )}
+
+                              <button
+                                onClick={() => {
+                                  const updated = matchAssignments.filter(m => m.id !== match.id);
+                                  saveMatchAssignments(updated);
+                                  triggerMsg(`Deleted match ${match.matchNo}`, 'ok');
+                                }}
+                                className="text-hong hover:text-red-400 p-1 cursor-pointer"
+                                title="Delete Match"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Match Competitors */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-ink/30 p-3 rounded-xl border border-line/30 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-blue-500 shrink-0"></span>
+                              <span className="font-bold text-blue-400">BLUE:</span>
+                              <span className="text-text font-semibold">{match.bluePlayerName}</span>
+                              <span className="text-text-dim font-mono">({match.blueClub})</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-red-500 shrink-0"></span>
+                              <span className="font-bold text-red-400">RED:</span>
+                              <span className="text-text font-semibold">{match.redPlayerName}</span>
+                              <span className="text-text-dim font-mono">({match.redClub})</span>
+                            </div>
+                          </div>
+
+                          {/* Referee Panel Selectors */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+                            <div>
+                              <label className="text-[10px] font-bold text-gold uppercase tracking-wider block mb-1">
+                                Center Ref (CR)
+                              </label>
+                              <select
+                                value={match.centerRefereeId || ''}
+                                onChange={(e) => {
+                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, centerRefereeId: e.target.value } : m);
+                                  saveMatchAssignments(updated);
+                                }}
+                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
+                              >
+                                <option value="">-- Center Ref --</option>
+                                {referees.map(r => (
+                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider block mb-1">
+                                Corner Judge 1
+                              </label>
+                              <select
+                                value={match.corner1RefereeId || ''}
+                                onChange={(e) => {
+                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, corner1RefereeId: e.target.value } : m);
+                                  saveMatchAssignments(updated);
+                                }}
+                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
+                              >
+                                <option value="">-- Corner 1 --</option>
+                                {referees.map(r => (
+                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider block mb-1">
+                                Corner Judge 2
+                              </label>
+                              <select
+                                value={match.corner2RefereeId || ''}
+                                onChange={(e) => {
+                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, corner2RefereeId: e.target.value } : m);
+                                  saveMatchAssignments(updated);
+                                }}
+                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
+                              >
+                                <option value="">-- Corner 2 --</option>
+                                {referees.map(r => (
+                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-1">
+                                Tech Assistant (TA)
+                              </label>
+                              <select
+                                value={match.technicalAssistantId || ''}
+                                onChange={(e) => {
+                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, technicalAssistantId: e.target.value } : m);
+                                  saveMatchAssignments(updated);
+                                }}
+                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
+                              >
+                                <option value="">-- Tech Assistant --</option>
+                                {referees.map(r => (
+                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block mb-1">
+                                Video Replay / Review
+                              </label>
+                              <select
+                                value={match.reviewOfficialId || ''}
+                                onChange={(e) => {
+                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, reviewOfficialId: e.target.value } : m);
+                                  saveMatchAssignments(updated);
+                                }}
+                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
+                              >
+                                <option value="">-- Review Official --</option>
+                                {referees.map(r => (
+                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: PRINT & EXPORT */}
+            {ricTab === 'export' && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-text uppercase tracking-wider text-sm flex items-center gap-2">
+                      <Printer className="w-4 h-4 text-gold" />
+                      <span>Official Ring Referee Duty Roster</span>
+                    </h3>
+                    <p className="text-xs text-text-dim mt-0.5">Export printable officiating schedule for tournament bulletin board & broadcast.</p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        window.print();
+                      }}
+                      className="bg-surface-2 hover:bg-line border border-line text-text text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Printer className="w-4 h-4 text-gold" />
+                      <span>Print Roster</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const lines = [
+                          `🏆 *${activeComp?.name || 'TAEKWONDO CHAMPIONSHIP'} - REFEREE DUTY ROSTER*`,
+                          `📅 Date: ${activeComp?.date || ''} | Venue: ${activeComp?.venue || ''}`,
+                          `----------------------------------------`,
+                          ...['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map(ring => {
+                            const ringRefs = referees.filter(r => r.courtAssignment === ring);
+                            const range = ringMatchNumbers[ring] ? ` [Matches: ${ringMatchNumbers[ring]}]` : '';
+                            return `\n*${ring.toUpperCase()}*${range} (${ringRefs.length} Referees):\n` +
+                              (ringRefs.length > 0
+                                ? ringRefs.map(r => `• ${r.dutyRole || 'Corner'}: ${r.fullName} (${r.kyorugiStatus})${r.matchNo ? ` [Match #${r.matchNo}]` : ''} - ${r.clubName}`).join('\n')
+                                : '• None assigned');
+                          })
+                        ];
+                        navigator.clipboard.writeText(lines.join('\n'));
+                        triggerMsg('Copied WhatsApp Broadcast Roster to Clipboard!', 'ok');
+                      }}
+                      className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow"
+                    >
+                      <Copy className="w-4 h-4" />
+                      <span>Copy WhatsApp Broadcast Text</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Printable Duty Table */}
+                <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm space-y-6">
+                  <div className="text-center border-b border-line pb-4">
+                    <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">
+                      {activeComp?.name || 'TAEKWONDO CHAMPIONSHIP'}
+                    </h2>
+                    <p className="text-xs text-gold font-bold uppercase tracking-widest mt-1">Official Ring Referee Assignment Roster</p>
+                    <p className="text-[10px] text-text-dim mt-0.5">Approved by Referee-in-Charge (RIC)</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map(ringName => {
+                      const ringRefs = referees.filter(r => r.courtAssignment === ringName);
+                      return (
+                        <div key={ringName} className="border border-line rounded-xl p-4 space-y-3 bg-ink/20">
+                          <div className="flex justify-between items-center border-b border-line/40 pb-2">
+                            <div>
+                              <span className="font-bold text-gold text-sm uppercase">{ringName}</span>
+                              {ringMatchNumbers[ringName] && (
+                                <span className="text-[10px] text-gold/80 font-mono font-bold block">Match Range: {ringMatchNumbers[ringName]}</span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-text-dim font-mono">{ringRefs.length} Assigned</span>
+                          </div>
+
+                          <table className="w-full text-left text-xs">
+                            <thead className="text-[9px] text-text-dim uppercase font-bold border-b border-line/20">
+                              <tr>
+                                <th className="py-1">Role</th>
+                                <th className="py-1">Match #</th>
+                                <th className="py-1">Referee Name</th>
+                                <th className="py-1">Rank</th>
+                                <th className="py-1">Club</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-line/20">
+                              {ringRefs.length === 0 ? (
+                                <tr>
+                                  <td colSpan={5} className="py-2 text-[10px] text-text-dim text-center italic">No referees assigned yet</td>
+                                </tr>
+                              ) : (
+                                ringRefs.map(r => (
+                                  <tr key={r.id}>
+                                    <td className="py-1.5 font-bold text-gold text-[10px]">{r.dutyRole || 'Corner'}</td>
+                                    <td className="py-1.5 font-mono text-gold text-[10px] font-bold">{r.matchNo || '-'}</td>
+                                    <td className="py-1.5 font-semibold text-text">{r.fullName}</td>
+                                    <td className="py-1.5 text-text-dim text-[10px]">{r.kyorugiStatus}</td>
+                                    <td className="py-1.5 text-text-dim text-[10px]">{r.clubName}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STANDALONE COURT REFEREE DISTRIBUTION BOARD (LIVE TV / REFEREE DISPLAY) */}
+        {screen === 'courtRosterDisplay' && (
+          <div className="max-w-[1600px] mx-auto space-y-6 animate-fade-in p-2 sm:p-4">
+            {/* Top Control Bar */}
+            <div className="bg-surface border border-line rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-gold/10 border border-gold/40 flex items-center justify-center shrink-0 shadow-inner">
+                  <Scale className="w-8 h-8 text-gold" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-black bg-emerald-500 text-ink px-2.5 py-0.5 rounded-full uppercase tracking-widest animate-pulse">
+                      LIVE DISPLAY BOARD
+                    </span>
+                    <span className="text-[10px] font-bold text-gold bg-gold/10 border border-gold/30 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                      RIC Referee Distribution
+                    </span>
+                  </div>
+                  <h1 className="text-2xl font-black uppercase tracking-wider text-text font-sans mt-1">
+                    {activeComp?.name || 'TAEKWONDO CHAMPIONSHIP'}
+                  </h1>
+                  <p className="text-xs text-text-dim flex items-center gap-3 mt-1">
+                    <span>Venue: <strong className="text-text">{activeComp?.venue || 'Main Arena'}</strong></span>
+                    <span>•</span>
+                    <span>Total Referees: <strong className="text-gold">{referees.length}</strong></span>
+                    <span>•</span>
+                    <span>Assigned: <strong className="text-emerald-400">{referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned').length}</strong></span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Actions & Navigation */}
+              <div className="flex items-center gap-3 flex-wrap justify-end w-full md:w-auto">
+                {/* Search Bar */}
+                <div className="relative w-full md:w-64">
+                  <Search className="w-4 h-4 text-text-dim absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search referee name, club..."
+                    value={rosterSearchQuery}
+                    onChange={(e) => setRosterSearchQuery(e.target.value)}
+                    className="w-full bg-ink border border-line rounded-xl pl-9 pr-3 py-2 text-xs text-text focus:border-gold outline-none"
+                  />
+                  {rosterSearchQuery && (
+                    <button onClick={() => setRosterSearchQuery('')} className="absolute right-2 top-2 text-text-dim hover:text-text text-xs">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => window.print()}
+                  className="bg-surface-2 hover:bg-line border border-line text-text text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-gold" />
+                  <span>Print Board</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if ((role as string) === 'ric' || user?.startsWith('RIC_')) {
+                      setScreen('ricDashboard');
+                    } else if (role === 'referee' || activeReferee) {
+                      setScreen('refereeDashboard');
+                    } else {
+                      setScreen('login');
+                    }
+                  }}
+                  className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Exit Board</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 4-Ring Distribution Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map((ringName) => {
+                const ringRefs = referees.filter(r => r.courtAssignment === ringName);
+                const matchRange = ringMatchNumbers[ringName];
+
+                const centerRef = ringRefs.find(r => r.dutyRole === 'Center Referee' || r.dutyRole === 'Center Ref (CR)');
+                const corner1Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 1' || r.dutyRole === 'Corner Judge 1');
+                const corner2Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 2' || r.dutyRole === 'Corner Judge 2');
+                const techAssRef = ringRefs.find(r => r.dutyRole === 'Technical Assistant' || r.dutyRole === 'Technical Assistant (TA)');
+                const reviewRef = ringRefs.find(r => r.dutyRole === 'Review Official' || r.dutyRole === 'Video Replay Official' || r.dutyRole === 'Video Replay / Review Official');
+
+                const panelRoles = [
+                  { label: 'Center Referee (CR)', roleKey: 'CR', ref: centerRef, color: 'text-gold bg-gold/10 border-gold/40' },
+                  { label: 'Corner Judge 1', roleKey: 'CJ1', ref: corner1Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/40' },
+                  { label: 'Corner Judge 2', roleKey: 'CJ2', ref: corner2Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/40' },
+                  { label: 'Technical Assistant (TA)', roleKey: 'TA', ref: techAssRef, color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/40' },
+                  { label: 'Video Replay / Review Official', roleKey: 'VR', ref: reviewRef, color: 'text-purple-400 bg-purple-500/10 border-purple-500/40' },
+                ];
+
+                return (
+                  <div key={ringName} className="bg-surface border-2 border-line rounded-3xl p-6 shadow-xl space-y-4 relative overflow-hidden bg-gradient-to-b from-surface via-surface-2 to-surface">
+                    <div className="flex justify-between items-center border-b border-line/60 pb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-gold/10 border border-gold/40 flex items-center justify-center font-black text-gold text-xl shadow-inner">
+                          {ringName.replace('Ring ', 'R')}
+                        </div>
+                        <div>
+                          <h2 className="font-black text-gold text-xl uppercase tracking-wider">{ringName}</h2>
+                          {matchRange && (
+                            <span className="text-xs font-mono font-bold text-gold/90 bg-gold/10 border border-gold/20 px-2.5 py-0.5 rounded-md inline-block mt-0.5">
+                              Matches: {matchRange}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-text bg-ink/80 px-3.5 py-1.5 rounded-xl border border-line">
+                        {ringRefs.length} Officials Assigned
+                      </span>
+                    </div>
+
+                    {/* 5 Official Rows */}
+                    <div className="space-y-3">
+                      {panelRoles.map(({ label, roleKey, ref, color }) => {
+                        const isMatch = rosterSearchQuery.trim() !== '' && ref && (
+                          ref.fullName.toLowerCase().includes(rosterSearchQuery.toLowerCase()) ||
+                          ref.clubName.toLowerCase().includes(rosterSearchQuery.toLowerCase())
+                        );
+
+                        return (
+                          <div
+                            key={label}
+                            className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                              isMatch
+                                ? 'bg-gold/20 border-gold ring-2 ring-gold/60 scale-[1.01]'
+                                : ref
+                                ? 'bg-ink/50 border-line/60 hover:border-text-dim'
+                                : 'bg-surface-2/30 border-dashed border-line/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className={`text-xs font-black px-2.5 py-1 rounded-lg uppercase tracking-wider shrink-0 border ${color}`}>
+                                {roleKey}
+                              </span>
+                              <div className="min-w-0">
+                                <span className="text-[10px] text-text-dim uppercase font-bold tracking-widest block">{label}</span>
+                                {ref ? (
+                                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                    <span className="font-black text-base text-text tracking-wide">
+                                      {ref.fullName}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-gold bg-gold/10 px-2 py-0.5 rounded border border-gold/20">
+                                      {ref.kyorugiStatus}
+                                    </span>
+                                    <span className="text-xs text-text-dim truncate">
+                                      ({ref.clubName})
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-text-dim text-xs italic font-medium">Unassigned</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {ref && (
+                              <div className="text-right shrink-0">
+                                <span className="text-[9px] text-text-dim uppercase block font-bold tracking-wider">Match #</span>
+                                <span className="text-sm font-mono font-bold text-gold">{ref.matchNo || matchRange || '-'}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* STANDBY / UNASSIGNED REFEREES HOLDING POOL BOARD */}
+            {(() => {
+              const unassignedRefs = referees.filter(r => !r.courtAssignment || r.courtAssignment === 'Unassigned' || !r.dutyRole || r.dutyRole === 'Unassigned');
+              const filteredStandby = unassignedRefs.filter(r => {
+                if (!rosterSearchQuery.trim()) return true;
+                const q = rosterSearchQuery.toLowerCase();
+                return r.fullName.toLowerCase().includes(q) || r.clubName.toLowerCase().includes(q);
+              });
+
+              return (
+                <div className="bg-surface border-2 border-line rounded-3xl p-6 shadow-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-line/60 pb-3 gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center font-bold text-amber-400">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="font-black text-text text-lg uppercase tracking-wider flex items-center gap-2">
+                          <span>Standby Referees Holding Pool</span>
+                          <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono px-2.5 py-0.5 rounded-full font-bold">
+                            {unassignedRefs.length} Available
+                          </span>
+                        </h2>
+                        <p className="text-xs text-text-dim">
+                          Referees currently awaiting ring call from the RIC. Please remain in the referee waiting area.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {filteredStandby.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-text-dim italic bg-ink/30 rounded-2xl border border-line/40">
+                      {unassignedRefs.length === 0
+                        ? 'All registered referees are currently distributed on active ring duty panels.'
+                        : 'No standby referees matched your search filter.'}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {filteredStandby.map((r) => (
+                        <div key={r.id} className="bg-ink/60 border border-line/60 rounded-xl p-3 flex items-center justify-between gap-2 hover:border-amber-500/40 transition">
+                          <div className="min-w-0">
+                            <span className="font-bold text-text text-sm block truncate">{r.fullName}</span>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-text-dim">
+                              <span className="text-gold font-bold">{r.kyorugiStatus} / {r.poomsaeStatus}</span>
+                              <span>•</span>
+                              <span className="truncate">{r.clubName}</span>
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded shrink-0 uppercase tracking-wider">
+                            Standby
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {/* PARENT INDEMNITY SCREEN */}
         {screen === 'parentIndemnity' && (
