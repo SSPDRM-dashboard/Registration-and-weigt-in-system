@@ -78,6 +78,7 @@ export interface Competition {
   publicViewPassword?: string;
   hideScaleReadout?: boolean;
   affiliatedClubs?: string[];
+  rings?: string[];
 }
 
 export interface Coach {

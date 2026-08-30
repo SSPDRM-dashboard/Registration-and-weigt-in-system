@@ -5,7 +5,7 @@ import {
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText, Clock,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
   Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check, Copy, ExternalLink, Share2,
-  Hash, Cpu, Video
+  Hash, Cpu, Video, Maximize2, Minimize2, Grid, LayoutGrid
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
@@ -42,6 +42,7 @@ import {
   deleteRefereeAccount,
   subscribeToRefereeAccounts,
   subscribeToMyReferees,
+  deduplicateReferees,
   fetchGlobalClubs,
   saveGlobalClubs,
   fetchAdminPassword,
@@ -461,11 +462,15 @@ export default function App() {
   const [ricFilterRing, setRicFilterRing] = useState('all');
   const [matchAssignments, setMatchAssignments] = useState<MatchAssignment[]>([]);
   const [editingRefereeCourt, setEditingRefereeCourt] = useState<{ id: string; court: string; dutyRole: string } | null>(null);
+  const [isAddingRing, setIsAddingRing] = useState<boolean>(false);
+  const [customRingInput, setCustomRingInput] = useState<string>('');
 
   // Referee Portal & Court Roster Display state
   const [refereeTab, setRefereeTab] = useState<'pass' | 'courtRoster'>('pass');
   const [rosterSearchQuery, setRosterSearchQuery] = useState('');
   const [rosterSelectedRing, setRosterSelectedRing] = useState('all');
+  const [fitToWindow, setFitToWindow] = useState<boolean>(true);
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
 
 
   
@@ -682,6 +687,7 @@ export default function App() {
   
   // Edit Competition State
   const [showEditCompModal, setShowEditCompModal] = useState<boolean>(false);
+  const [ringToDelete, setRingToDelete] = useState<string | null>(null);
   const [editCompName, setEditCompName] = useState<string>('');
   const [editCompVenue, setEditCompVenue] = useState<string>('');
   const [editCompDate, setEditCompDate] = useState<string>('');
@@ -1397,19 +1403,23 @@ export default function App() {
   // Fetch referees dynamically based on role and compId
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
-    if (role === 'referee' && user) {
+    if (compId) {
+      // Real-time synchronization of all tournament referees for RIC, Organizers, and Court Panels
+      unsubscribe = subscribeToRefereesForComp(compId, (cloudReferees) => {
+        setReferees(cloudReferees);
+        if (role === 'referee' && user) {
+          const cleanUser = user.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          const matched = cloudReferees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanUser);
+          if (matched) setActiveReferee(matched);
+        }
+      }, (err) => console.error("Failed to sync referees", err));
+    } else if (role === 'referee' && user) {
       const cleanUser = user.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       unsubscribe = subscribeToMyReferees(cleanUser, (myReferees) => {
         setReferees(myReferees);
-        if (compId) {
-          const matched = myReferees.find(r => r.compId === compId);
-          if (matched) setActiveReferee(matched);
-        }
+        const matched = myReferees[0];
+        if (matched) setActiveReferee(matched);
       }, (err) => console.error("Failed to sync my referees", err));
-    } else if (compId) {
-      unsubscribe = subscribeToRefereesForComp(compId, (cloudReferees) => {
-        setReferees(cloudReferees);
-      }, (err) => console.error("Failed to sync referees", err));
     } else {
       setReferees([]);
     }
@@ -1919,7 +1929,13 @@ export default function App() {
       setUser(account.nric);
       
       const userRefs = referees.filter(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
-      if (userRefs.length === 1) {
+      const lastCompId = localStorage.getItem(`lastCompId_${cleanIc}`);
+      const lastRef = lastCompId ? userRefs.find(r => r.compId === lastCompId) : null;
+
+      if (lastRef) {
+        setCompId(lastRef.compId);
+        setActiveReferee(lastRef);
+      } else if (userRefs.length === 1) {
         setCompId(userRefs[0].compId);
         setActiveReferee(userRefs[0]);
       } else {
@@ -1948,7 +1964,13 @@ export default function App() {
     setUser(legacyMatched.nric);
     
     const userRefsLegacy = referees.filter(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
-    if (userRefsLegacy.length === 1) {
+    const lastCompIdLegacy = localStorage.getItem(`lastCompId_${cleanIc}`);
+    const lastRefLegacy = lastCompIdLegacy ? userRefsLegacy.find(r => r.compId === lastCompIdLegacy) : null;
+
+    if (lastRefLegacy) {
+      setCompId(lastRefLegacy.compId);
+      setActiveReferee(lastRefLegacy);
+    } else if (userRefsLegacy.length === 1) {
       setCompId(userRefsLegacy[0].compId);
       setActiveReferee(userRefsLegacy[0]);
     } else {
@@ -2012,7 +2034,7 @@ export default function App() {
       const userRef = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === assignedCompId);
       setActiveReferee(userRef || {
         ...account,
-        id: `RIC_${assignedCompId}_${cleanIc}`,
+        id: `${assignedCompId}_${cleanIc}`,
         compId: assignedCompId,
       });
     } else {
@@ -2022,7 +2044,7 @@ export default function App() {
       const userRef = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc && r.compId === targetCompId);
       setActiveReferee(userRef || {
         ...account,
-        id: `RIC_GLOBAL_${cleanIc}`,
+        id: targetCompId ? `${targetCompId}_${cleanIc}` : `ACC_${cleanIc}`,
         compId: targetCompId || 'GLOBAL',
       });
     }
@@ -2103,7 +2125,7 @@ export default function App() {
         }
         return r;
       });
-      setReferees(updatedRefs);
+      setReferees(deduplicateReferees(updatedRefs));
 
       setAdminRicName('');
       setAdminRicNric('');
@@ -2676,7 +2698,7 @@ export default function App() {
         // Find existing registration or create new
         const existingReg = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
         const tournamentRef: Referee = {
-          id: existingReg?.id || `REF_${compId}_${cleanIc}`,
+          id: `${compId}_${cleanIc}`,
           compId: compId,
           fullName: orgRefName.trim(),
           nric: orgRefNric.trim(),
@@ -4254,7 +4276,107 @@ export default function App() {
            (p.race && p.race.toLowerCase().includes(publicSearchQuery.toLowerCase()));
   });
 
-  const activeComp = competitions.find(c => c.id === compId);
+  const activeComp = competitions.find(c => c.id === compId) || competitions.find(c => c.isActive !== false) || (competitions.length > 0 ? competitions[0] : undefined);
+  const defaultRings = ['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'];
+  const currentRings = (activeComp?.rings && activeComp.rings.length > 0) ? activeComp.rings : defaultRings;
+
+  const handleAddRing = async (customName?: string) => {
+    const targetComp = activeComp || (competitions.length > 0 ? competitions[0] : undefined);
+    if (!targetComp) {
+      triggerMsg('Please create or select a tournament first.', 'error');
+      return;
+    }
+    let newRingName = customName?.trim();
+    if (!newRingName) {
+      let nextNum = currentRings.length + 1;
+      while (currentRings.includes(`Ring ${nextNum}`)) {
+        nextNum++;
+      }
+      newRingName = `Ring ${nextNum}`;
+    }
+    
+    if (currentRings.includes(newRingName)) {
+      triggerMsg(`"${newRingName}" already exists in this tournament!`, 'error');
+      return;
+    }
+    
+    const updatedRings = [...currentRings, newRingName];
+    const updatedComp: Competition = {
+      ...targetComp,
+      rings: updatedRings,
+    };
+    const updatedComps = competitions.map(c => c.id === targetComp.id ? updatedComp : c);
+    await saveCompsToStorage(updatedComps);
+    triggerMsg(`Added ${newRingName} successfully!`, 'ok');
+  };
+
+  const handleRemoveRing = (ringNameToRemove: string) => {
+    setRingToDelete(ringNameToRemove);
+  };
+
+  const executeRemoveRing = async (ringNameToRemove: string) => {
+    const targetComp = activeComp || (competitions.length > 0 ? competitions[0] : undefined);
+    if (!targetComp) {
+      triggerMsg('No tournament found.', 'error');
+      setRingToDelete(null);
+      return;
+    }
+    if (currentRings.length <= 1) {
+      triggerMsg('You must keep at least one ring.', 'error');
+      setRingToDelete(null);
+      return;
+    }
+    
+    const assignedToRing = referees.filter(r => r.courtAssignment === ringNameToRemove && r.courtAssignment !== 'Unassigned');
+    if (assignedToRing.length > 0) {
+      for (const ref of assignedToRing) {
+        await saveRefereeToFirestore({ ...ref, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
+      }
+      setReferees(prev => prev.map(r => r.courtAssignment === ringNameToRemove ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
+    }
+
+    const updatedRings = currentRings.filter(r => r !== ringNameToRemove);
+    const updatedComp: Competition = {
+      ...targetComp,
+      rings: updatedRings,
+    };
+    const updatedComps = competitions.map(c => c.id === targetComp.id ? updatedComp : c);
+    await saveCompsToStorage(updatedComps);
+    if (rosterSelectedRing === ringNameToRemove) {
+      setRosterSelectedRing('all');
+    }
+    setRingToDelete(null);
+    triggerMsg(`Removed ${ringNameToRemove} successfully.`, 'ok');
+  };
+
+  const getRingGridCols = (count: number, fit: boolean = true) => {
+    if (fit) {
+      if (count <= 1) return 'grid-cols-1 max-w-2xl mx-auto';
+      if (count === 2) return 'grid-cols-1 md:grid-cols-2';
+      if (count === 3) return 'grid-cols-1 md:grid-cols-3';
+      if (count === 4) return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4';
+      if (count === 5) return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5';
+      if (count === 6) return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6';
+      if (count === 7) return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7';
+      if (count === 8) return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8';
+      return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6';
+    }
+    if (count <= 1) return 'grid-cols-1 max-w-2xl mx-auto';
+    if (count === 2) return 'grid-cols-1 md:grid-cols-2';
+    if (count === 3) return 'grid-cols-1 md:grid-cols-3';
+    if (count === 4) return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4';
+    if (count === 5) return 'grid-cols-1 md:grid-cols-3 xl:grid-cols-5';
+    if (count === 6) return 'grid-cols-1 md:grid-cols-3 xl:grid-cols-6';
+    return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+  };
+
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => setIsFullScreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullScreen(false)).catch(() => {});
+    }
+  };
 
   return (
     <div className={`theme-${theme} bg-ink text-text min-h-screen flex flex-col antialiased selection:bg-gold selection:text-slate-950 transition-colors duration-300`}>
@@ -8434,17 +8556,30 @@ export default function App() {
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Default Ring/Court Count Preset</label>
+                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Default Ring/Court Count Preset ({currentRings.length} Active)</label>
                         <select
-                          value="4"
-                          onChange={() => {}}
-                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none"
+                          value={currentRings.length.toString()}
+                          onChange={async (e) => {
+                            const count = parseInt(e.target.value, 10);
+                            if (!activeComp || isNaN(count)) return;
+                            const newRings = Array.from({ length: count }, (_, i) => `Ring ${i + 1}`);
+                            const updatedComp: Competition = { ...activeComp, rings: newRings };
+                            const updatedComps = competitions.map(c => c.id === activeComp.id ? updatedComp : c);
+                            await saveCompsToStorage(updatedComps);
+                            triggerMsg(`Updated tournament court setup to ${count} rings!`, 'ok');
+                          }}
+                          className="w-full bg-ink/30 border border-line/80 focus:border-gold rounded-xl px-3.5 py-2.5 text-text outline-none cursor-pointer"
                         >
-                          <option value="4">Court 1 to Court 4 (4 Rings)</option>
-                          <option value="6">Court 1 to Court 6 (6 Rings)</option>
-                          <option value="8">Court 1 to Court 8 (8 Rings)</option>
+                          <option value="2">2 Rings (Ring 1 - 2)</option>
+                          <option value="3">3 Rings (Ring 1 - 3)</option>
+                          <option value="4">4 Rings (Ring 1 - 4)</option>
+                          <option value="5">5 Rings (Ring 1 - 5)</option>
+                          <option value="6">6 Rings (Ring 1 - 6)</option>
+                          <option value="8">8 Rings (Ring 1 - 8)</option>
+                          <option value="10">10 Rings (Ring 1 - 10)</option>
+                          <option value="12">12 Rings (Ring 1 - 12)</option>
                         </select>
-                        <p className="text-[10px] text-text-dim mt-1">Court assignment rings in RIC Terminal.</p>
+                        <p className="text-[10px] text-text-dim mt-1">Court assignment rings in RIC Terminal and live displays.</p>
                       </div>
 
                       <div>
@@ -10175,7258 +10310,268 @@ export default function App() {
                         <div 
                           key={field.id} 
                           draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData('text/plain', field.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                            e.currentTarget.classList.add('opacity-40');
-                          }}
-                          onDragEnd={(e) => {
-                            e.currentTarget.classList.remove('opacity-40');
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.currentTarget.classList.add('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
-                          }}
-                          onDragLeave={(e) => {
-                            e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
-                            const draggedId = e.dataTransfer.getData('text/plain');
-                            if (draggedId && draggedId !== field.id) {
-                              handleSwapFields(draggedId, field.id);
-                            }
-                          }}
-                          className="pt-3 first:pt-0 space-y-1.5 border border-transparent p-1 hover:bg-white/5 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-150"
-                        >
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center space-x-1.5 min-w-0">
-                              <GripVertical className="w-3 h-3 text-text-dim/40 cursor-grab shrink-0" />
-                              <span className="text-[11px] font-bold text-text uppercase tracking-wide truncate max-w-[150px]">{field.name}</span>
-                            </div>
-                            <span className={`text-[8px] uppercase font-bold tracking-widest ${field.visible ? 'text-good' : 'text-bad'}`}>
-                              {field.visible ? 'Visible' : 'Deleted'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <div className="flex items-center border border-line rounded overflow-hidden bg-ink">
-                                <button
-                                  type="button"
-                                  disabled={idx === 0}
-                                  onClick={() => handleMoveField(idx, 'up')}
-                                  className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
-                                >
-                                  ‚ñ≤
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={idx === arr.length - 1}
-                                  onClick={() => handleMoveField(idx, 'down')}
-                                  className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
-                                >
-                                  ‚ñº
-                                </button>
-                              </div>
-
-                              {/* Alignment Selector */}
-                              {['header', 'photo', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
-                                <select
-                                  value={field.align || (field.id === 'qrcode' ? 'left' : 'center')}
-                                  onChange={(e) => handleChangeFieldAlign(field.id, e.target.value as any)}
-                                  className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
-                                  title="Align Element"
-                                >
-                                  <option value="left">L Align</option>
-                                  <option value="center">C Align</option>
-                                  <option value="right">R Align</option>
-                                </select>
-                              )}
-
-                              {['header', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
-                                <div className="flex items-center gap-1.5">
-                                  <select
-                                    value={field.fontSize}
-                                    onChange={(e) => handleChangeFieldFontSize(field.id, e.target.value as any)}
-                                    className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
-                                    title="Font Size"
-                                  >
-                                    <option value="xs">XS</option>
-                                    <option value="sm">SM</option>
-                                    <option value="base">MD</option>
-                                    <option value="lg">LG</option>
-                                    <option value="xl">XL</option>
-                                    <option value="2xl">2X</option>
-                                    <option value="3xl">3X</option>
-                                  </select>
-
-                                  <div className="relative flex items-center bg-ink border border-line rounded px-1.5 py-0.5 gap-1.5" title="Font Color">
-                                    <input
-                                      type="color"
-                                      value={field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}
-                                      onChange={(e) => handleChangeFieldColor(field.id, e.target.value)}
-                                      className="w-3.5 h-3.5 rounded-full border border-line/40 cursor-pointer overflow-hidden p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border-none shrink-0"
-                                    />
-                                    <span className="text-[8px] font-mono text-text-dim uppercase leading-none">{field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}</span>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleToggleFieldVisibility(field.id)}
-                              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition border ${
-                                field.visible 
-                                  ? 'text-bad bg-bad/5 border-bad/20 hover:bg-bad/10' 
-                                  : 'text-good bg-good/5 border-good/20 hover:bg-good/10'
-                              }`}
-                            >
-                              {field.visible ? 'Del' : 'Add'}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Right Column: Premium High-Fidelity Large Live Preview */}
-            <div className="lg:col-span-7 bg-surface rounded-2xl border border-line p-8 flex flex-col items-center justify-center space-y-6 shadow-sm sticky top-6">
-              <div className="w-full border-b border-line/50 pb-3 flex justify-between items-center">
-                <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Live Design Preview (Sample Athlete Badge)</span>
-                <span className="text-[9px] font-bold text-gold bg-gold/15 px-2.5 py-1 rounded-full border border-gold/30">Drag & Drop Enabled</span>
-              </div>
-
-              {/* ID CARD GRAPHIC PREVIEW CONTAINER */}
-              <div className="relative w-full max-w-[340px] aspect-[1/1.4] rounded-2xl border border-line/80 overflow-hidden shadow-2xl flex flex-col bg-gradient-to-br from-[#12211C] to-[#0A1310] animate-fade-in">
-                {activeComp.idCardBgUrl && (
-                  <>
-                    <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
-                    <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
-                  </>
-                )}
-                
-                {(() => {
-                  const demoMockupPlayer = {
-                    id: 'ATH-8899',
-                    name: 'MUHAMMAD AMIRUL',
-                    club: 'KUALA LUMPUR DRAGONS',
-                    event: 'Kyorugi (Sparring)',
-                    ageGroup: 'Junior (15-17)',
-                    gender: 'MALE',
-                    weightClass: 'Under 55kg',
-                    dob: '2010-04-12',
-                    photo: ''
-                  };
-                  const p = demoMockupPlayer;
-                  const belt = '#000000'; // Black belt default mockup
-                  const fieldsList = getIdCardFields(activeComp);
-                  
-                  const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
-                    const map: Record<string, string> = {
-                      'xs': '8px',
-                      'sm': '10px',
-                      'base': '12px',
-                      'lg': '14px',
-                      'xl': '17px',
-                      '2xl': '21px',
-                      '3xl': '25px'
-                    };
-                    return map[size] || defaultVal;
-                  };
-
-                  return (
-                    <div className="relative z-10 h-full flex-1 flex flex-col justify-between text-[11px] py-3">
-                      {fieldsList.filter(f => f.visible).map(field => {
-                        if (field.id === 'header') {
-                          return (
-                            <div key="header" className={`h-8.5 bg-gradient-to-r from-hong via-hong to-chong flex ${
-                              field.align === 'left' ? 'justify-start gap-1.5' :
-                              field.align === 'right' ? 'justify-end gap-1.5' :
-                              field.align === 'center' ? 'justify-center gap-1.5' :
-                              'justify-between'
-                            } items-center px-3.5 shrink-0 shadow-sm w-full`}>
-                              <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                              
-                            </div>
-                          );
-                        }
-                        if (field.id === 'belt') {
-                          return (
-                            <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }}></div>
-                          );
-                        }
-
-                        // Render interactive card items in high fidelity
-                        return (
-                          <div key={field.id} className="px-4.5 py-1 shrink-0">
-                            {(() => {
-                              if (field.id === 'photo') {
-                                return (
-                                  <div className={`flex ${
-                                    field.align === 'left' ? 'justify-start' :
-                                    field.align === 'right' ? 'justify-end' :
-                                    'justify-center'
-                                  }`}>
-                                    <div className="w-14 h-16 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                                      <User className="w-5 h-5 text-text-dim/40 mx-auto" />
-                                    </div>
-                                  </div>
-                                );
-                              }
-                              if (field.id === 'name') {
-                                return (
-                                  <div className={
-                                    field.align === 'left' ? 'text-left' :
-                                    field.align === 'right' ? 'text-right' :
-                                    'text-center'
-                                  }>
-                                    <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2" style={{ fontSize: getFontSizePx(field.fontSize, '12px'), color: field.color || '#ffffff' }}>{p.name}</h3>
-                                  </div>
-                                );
-                              }
-                              if (field.id === 'club') {
-                                return (
-                                  <div className={
-                                    field.align === 'left' ? 'text-left' :
-                                    field.align === 'right' ? 'text-right' :
-                                    'text-center'
-                                  }>
-                                    <p className="uppercase tracking-widest font-semibold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
-                                  </div>
-                                );
-                              }
-                              if (field.id === 'athleteId') {
-                                if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
-                                return (
-                                  <div className={
-                                    field.align === 'left' ? 'text-left' :
-                                    field.align === 'right' ? 'text-right' :
-                                    'text-center'
-                                  }>
-                                    <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
-                                  </div>
-                                );
-                              }
-                              if (field.id === 'metadata') {
-                                if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
-                                  return (
-                                    <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
-                                      <span 
-                                        className="font-display font-bold tracking-widest uppercase text-white" 
-                                        style={{ 
-                                          fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
-                                          color: field.color || '#ffffff' 
-                                        }}
-                                      >
-                                        {p.event}
-                                      </span>
-                                    </div>
-                                  );
-                                }
-    return (
-                                  <div className={`grid grid-cols-2 gap-2 text-[9px] border-t border-line/30 pt-2 ${
-                                    field.align === 'left' ? 'text-left' :
-                                    field.align === 'right' ? 'text-right' :
-                                    'text-center'
-                                  }`}>
-                                    <div>
-                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
-                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
-                                    </div>
-                                    <div>
-                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
-                                      <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.gender}</span>
-                                    </div>
-                                    <div>
-                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
-                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
-                                    </div>
-                                    <div>
-                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
-                                      <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.dob}</span>
-                                    </div>
-                                  </div>
-                                );
-                              }
-                              if (field.id === 'qrcode') {
-                                const containerClass = 
-                                  field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
-                                  field.align === 'center' ? 'flex flex-col items-center justify-center gap-1.5 text-center' :
-                                  'flex items-center justify-between';
-                                
-                                const textAlignmentClass = 
-                                  field.align === 'right' ? 'text-left min-w-0' :
-                                  field.align === 'center' ? 'text-center min-w-0' :
-                                  'text-right min-w-0';
-
-                                return (
-                                  <div className={`${containerClass} border-t border-dashed border-line/30 pt-2`}>
-                                    <div className="bg-white p-0.5 rounded inline-block shadow shrink-0">
-                                      <QRCodeSVG 
-                                        value={`${activeComp.id}::${p.id}`} 
-                                        size={32} 
-                                        level="M" 
-                                        includeMargin={false}
-                                      />
-                                    </div>
-                                    <div className={textAlignmentClass}>
-                                      {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
-                                        <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                                      <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
-                                    </div>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            })()}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div className="text-center max-w-md bg-ink/20 border border-line rounded-xl p-3">
-                <span className="text-[10px] font-bold text-gold uppercase tracking-wider block mb-1">Visual Design Guidelines</span>
-                <p className="text-[10px] text-text-dim leading-relaxed">
-                  Badges will auto-scale to standard physical CR80 sizes (3.375" x 2.125") upon PDF compilation and batch printing. Use the live mockup above to preview placement & layout proportions.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {organizerTab === 'staffPasses' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full animate-fade-in">
-            {/* Left Column: Form */}
-            <div className="lg:col-span-4 bg-surface rounded-2xl border border-line p-6 space-y-6 shadow-sm">
-              <div className="border-b border-line/50 pb-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                  <UserPlus className="w-4 h-4 text-gold" />
-                  Add Custom Staff Pass
-                </h3>
-              </div>
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Full Name</label>
-                  <input
-                    type="text"
-                    value={staffPassName}
-                    onChange={(e) => setStaffPassName(e.target.value)}
-                    placeholder="e.g. Ali Bin Abu"
-                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Role / Title</label>
-                  <select
-                    value={staffPassRole}
-                    onChange={(e) => setStaffPassRole(e.target.value)}
-                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
-                  >
-                    <option value="Coach">Coach</option>
-                    <option value="Team Manager">Team Manager</option>
-                    <option value="Referee">Referee</option>
-                    <option value="VIP">VIP</option>
-                    <option value="Staff">Staff</option>
-                    <option value="Medical">Medical</option>
-                    <option value="Media">Media</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Organization / Club</label>
-                  <input
-                    type="text"
-                    value={staffPassClub}
-                    onChange={(e) => setStaffPassClub(e.target.value)}
-                    placeholder="e.g. Taekwondo Malaysia"
-                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
-                  />
-                </div>
-                <button
-                  onClick={() => {
-                    if (!staffPassName) {
-                      triggerMsg('Please enter a name.', 'error');
-                      return;
-                    }
-                    if (!compId) return;
-                    const newStaff: Player = {
-                      id: `STAFF-${Date.now().toString().slice(-6)}`,
-                      compId,
-                      name: staffPassName.toUpperCase(),
-                      club: staffPassClub.toUpperCase(),
-                      ic: '',
-                      dob: 'N/A',
-                      gender: 'N/A',
-                      coachUsername: '',
-                      event: staffPassRole.toUpperCase(),
-                      ageGroup: 'STAFF',
-                      weightClass: 'N/A',
-                      createdAt: new Date().toISOString(),
-                      weighIn: null
-                    };
-                    saveStaffPassesToStorage(compId, [...staffPasses, newStaff]);
-                    setStaffPassName('');
-                    setStaffPassClub('');
-                    triggerMsg('Staff pass generated.', 'ok');
-                  }}
-                  className="w-full bg-gold hover:opacity-90 text-ink font-bold py-3 rounded-xl transition duration-200 cursor-pointer text-xs uppercase tracking-wider"
-                >
-                  Generate Pass
-                </button>
-              </div>
-            </div>
-
-            {/* Right Column: Grid */}
-            <div className="lg:col-span-8 bg-surface rounded-2xl border border-line p-6 shadow-sm min-h-[400px]">
-              <div className="border-b border-line/50 pb-3 mb-6 flex justify-between items-center">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                  <Users className="w-4 h-4 text-gold" />
-                  Generated Passes
-                </h3>
-              </div>
-              
-              {staffPasses.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-text-dim space-y-3 bg-ink/30 border border-dashed border-line rounded-2xl">
-                  <UserPlus className="w-8 h-8 text-text-dim/40" />
-                  <p className="text-sm font-bold">No custom passes generated</p>
-                  <p className="text-xs">Use the form on the left to add staff passes.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {staffPasses.map(staff => (
-                    <div key={staff.id} className="bg-ink rounded-2xl border border-line p-4 flex flex-col justify-between shadow-sm relative group">
-                      <button
-                        onClick={() => {
-                          if (!compId) return;
-                          saveStaffPassesToStorage(compId, staffPasses.filter(s => s.id !== staff.id));
-                        }}
-                        className="absolute -top-2 -right-2 bg-hong text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow hover:scale-110 cursor-pointer"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                      <div>
-                        <div className="text-[10px] font-bold text-gold uppercase tracking-wider mb-1">{staff.event}</div>
-                        <h4 className="font-display font-bold text-text truncate mb-1" title={staff.name}>{staff.name}</h4>
-                        <div className="text-xs text-text-dim truncate" title={staff.club}>{staff.club || '-'}</div>
-                      </div>
-                      <div className="mt-4 pt-4 border-t border-line/50 flex justify-end">
-                        <button
-                          onClick={() => {
-                            // Let's use the print functionality for single card. 
-                            // Since we don't have a single-card generator yet, we can add it or just re-use the global batch export for staff.
-                            // To keep it simple, we'll set it as a selected staff and open a modal, or just download it directly if we had a hidden container.
-                            // I'll implement a hidden container for staff passes specifically below.
-                            const el = document.getElementById(`staff-card-${staff.id}`);
-                            if (el) {
-                              triggerMsg('Generating PNG...', 'ok');
-                              htmlToImage.toPng(el, { backgroundColor: '#12211C', pixelRatio: 3.125 }).then(dataUrl => {
-                                const link = document.createElement('a');
-                                link.download = `DOJANG_STAFF_${staff.event}_${staff.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
-                                link.href = dataUrl;
-                                link.click();
-                              }).catch(err => {
-                                console.error('Failed to generate staff pass', err);
-                                triggerMsg('Failed to generate PNG', 'error');
-                              });
-                            }
-                          }}
-                          className="bg-surface-2 hover:bg-line border border-line text-text text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Download PNG
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {organizerTab === 'referees' && (
-          <div className="space-y-6 animate-fade-in">
-            {/* Referee Event Fees Setup */}
-            <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm space-y-5">
-              <div className="flex items-center justify-between border-b border-line pb-3">
-                <div className="flex items-center space-x-2">
-                  <Coins className="w-5 h-5 text-gold" />
-                  <div>
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-text">Referee Event Fees & Allowances Setup</h3>
-                    <p className="text-[11px] text-text-dim mt-0.5">Configure mileage allowances, daily duty allowances, and supplemental officiating pay</p>
-                  </div>
-                </div>
-                <span className="text-[10px] bg-gold/10 text-gold border border-gold/20 px-2.5 py-0.5 rounded font-mono font-bold">
-                  RM / Flat Rate
-                </span>
-              </div>
-              
-              <div>
-                <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">1. Travel Mileage Bracket Allowances</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">0 - 50 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_0_50}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_0_50: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">50 - 100 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_50_100}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_50_100: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">100 - 150 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_100_150}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_100_150: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">150 - 200 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_150_200}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_150_200: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">200 - 250 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_200_250}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_200_250: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">250 - 300 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_250_300}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_250_300: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">300 - 350 km</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_300_350}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_300_350: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">350 km & above</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        value={refereeFees.km_350_above}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_350_above: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-line rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gold uppercase tracking-wider mb-1">TD / CSB Rate (Per KM)</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-text-dim/60 text-[11px] font-mono">RM</span>
-                      <input 
-                        type="number"
-                        step="0.05"
-                        value={refereeFees.km_rate_special}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_rate_special: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-ink border border-gold/50 rounded-lg py-1 pl-7 pr-1.5 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-line/40 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">2. Daily Duty Allowance Rates</h4>
-                  <div className="space-y-4">
-                    <div>
-                      <div className="text-[9px] text-text-dim uppercase tracking-wider font-bold mb-1.5">Standard Referee Statuses</div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">IR (International)</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_ir}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_ir: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">NR (National)</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_nr}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_nr: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">SR (State/Senior)</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_sr}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_sr: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">TR (Trainee)</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_tr}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_tr: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-line/20 pt-3">
-                      <div className="text-[9px] text-text-dim uppercase tracking-wider font-bold mb-1.5">Special Appointed Officials</div>
-                      <div className="grid grid-cols-3 gap-2.5">
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Technical Delegate</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_td}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_td: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Supervisory Board</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_csb}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_csb: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Referee In-Charge</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_ric}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_ric: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-line/20 pt-3">
-                      <div className="text-[9px] text-text-dim uppercase tracking-wider font-bold mb-1.5">Virtual Taekwondo Officials</div>
-                      <div className="grid grid-cols-3 gap-2.5">
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Game Master</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_game_master}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_game_master: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Technical Operator</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_technical_operator}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_technical_operator: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Virtual Referee</label>
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                            <input 
-                              type="number"
-                              value={refereeFees.rate_virtual_referee}
-                              onChange={(e) => updateRefereeFees({ ...refereeFees, rate_virtual_referee: parseFloat(e.target.value) || 0 })}
-                              className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">3. Supplemental Officiating Pay & Actions</h4>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Overtime Fee</label>
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                        <input 
-                          type="number"
-                          value={refereeFees.overtime}
-                          onChange={(e) => updateRefereeFees({ ...refereeFees, overtime: parseFloat(e.target.value) || 0 })}
-                          className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Others Fee</label>
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-2 text-text-dim/60 text-xs font-mono">RM</span>
-                        <input 
-                          type="number"
-                          value={refereeFees.others}
-                          onChange={(e) => updateRefereeFees({ ...refereeFees, others: parseFloat(e.target.value) || 0 })}
-                          className="w-full bg-ink border border-line rounded-lg py-1.5 pl-8 pr-2 text-xs font-mono font-bold text-text focus:outline-none focus:border-gold"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-end">
-                      <button
-                        onClick={() => {
-                          updateRefereeFees({
-                            km_0_50: 45,
-                            km_50_100: 75,
-                            km_100_150: 105,
-                            km_150_200: 135,
-                            km_200_250: 165,
-                            km_250_300: 195,
-                            km_300_350: 225,
-                            km_350_above: 280,
-                            km_rate_special: 1.00,
-                            overtime: 20,
-                            others: 0,
-                            rate_ir: 150,
-                            rate_nr: 125,
-                            rate_sr: 100,
-                            rate_tr: 75,
-                            rate_td: 250,
-                            rate_csb: 200,
-                            rate_ric: 175,
-                            rate_game_master: 150,
-                            rate_technical_operator: 125,
-                            rate_virtual_referee: 100,
-                            default_accommodation_details: "",
-                            default_accommodation_maps_link: "",
-                          });
-                          triggerMsg('Fees setup reset to standard Malaysian Taekwondo defaults', 'ok');
-                        }}
-                        className="w-full bg-ink hover:bg-line border border-line text-text text-[10px] font-bold py-2 rounded-lg transition cursor-pointer text-center"
-                      >
-                        Reset Defaults
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section 4: Default Accommodation */}
-                <div className="border-t border-line/40 pt-4">
-                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">4. Default Global Lodging & Accommodation</h4>
-                  <p className="text-[10px] text-text-dim mb-3">Set the default hotel and Google Maps location. This applies to all referees requesting accommodation, unless overridden on their specific profile.</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Accommodation Details</label>
-                      <textarea
-                        value={refereeFees.default_accommodation_details || ''}
-                        onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_details: e.target.value })}
-                        placeholder="e.g. Hotel Grand Chancellor, Room 402. Check-in on 12th Oct 2 PM."
-                        className="w-full bg-ink border border-line rounded-lg py-2 px-3 text-xs text-text focus:outline-none focus:border-gold resize-none h-20"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Google Maps Link</label>
-                        <input
-                          type="url"
-                          value={refereeFees.default_accommodation_maps_link || ''}
-                          onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_maps_link: e.target.value })}
-                          placeholder="https://maps.app.goo.gl/..."
-                          className="w-full bg-ink border border-line rounded-lg py-1.5 px-3 text-xs text-text focus:outline-none focus:border-gold"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Hotel Provided (Days)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={refereeFees.default_hotel_days_provided !== undefined ? refereeFees.default_hotel_days_provided : ''}
-                            onChange={(e) => updateRefereeFees({ ...refereeFees, default_hotel_days_provided: e.target.value !== '' ? Number(e.target.value) : undefined })}
-                            placeholder="e.g. 2"
-                            className="w-full bg-ink border border-line rounded-lg py-1.5 px-3 text-xs text-text focus:outline-none focus:border-gold"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Check-Out Date / Day</label>
-                          <input
-                            type="text"
-                            value={refereeFees.default_hotel_checkout_date || ''}
-                            onChange={(e) => updateRefereeFees({ ...refereeFees, default_hotel_checkout_date: e.target.value })}
-                            placeholder="e.g. 15 Oct (12 PM)"
-                            className="w-full bg-ink border border-line rounded-lg py-1.5 px-3 text-xs text-text focus:outline-none focus:border-gold"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Referee Account Database & Tournament Assignment */}
-            <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm space-y-5">
-              <div className="flex items-center justify-between border-b border-line pb-3">
-                <div className="flex items-center space-x-2">
-                  <UserPlus className="w-5 h-5 text-gold" />
-                  <div>
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-text">Referee Roles Configuration</h3>
-                    <p className="text-[11px] text-text-dim mt-0.5">Assign special roles to referees that have joined this tournament</p>
-                  </div>
-                </div>
-                <div className="flex bg-ink/50 p-0.5 rounded-lg border border-line/40">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOrgEditingRefereeNric(null);
-                      setOrgRefName('');
-                      setOrgRefNric('');
-                      setOrgRefPhone('');
-                      setOrgRefClub('');
-                      setOrgRefResidential('');
-                      setOrgRefDistance('');
-                      setOrgRefBankName('');
-                      setOrgRefBankAccount('');
-                      setOrgRefAccommodation('No');
-                      setOrgRefKyorugi('TR');
-                      setOrgRefPoomsae('TR');
-                      setOrgRefCarPlate('');
-                      setOrgRefSpecialRole('None');
-                    }}
-                    className={`text-[10px] font-bold px-3 py-1.5 rounded-md transition cursor-pointer ${
-                      !orgEditingRefereeNric ? 'bg-gold text-ink' : 'text-text-dim hover:text-text'
-                    }`}
-                  >
-                    Assign Special Roles
-                  </button>
-                  {orgEditingRefereeNric && (
-                    <span className="text-[10px] font-bold px-3 py-1.5 rounded-md bg-gold text-ink animate-fade-in">
-                      Editing Account ({orgEditingRefereeNric})
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Sub-panels */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Panel 1: Search & Assign Existing Accounts */}
-                <div className="lg:col-span-5 space-y-4 border-r border-line/30 pr-0 lg:pr-6">
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-gold">Configure Special Roles</h4>
-                    <p className="text-[10px] text-text-dim">Search tournament referees and configure their roles.</p>
-                  </div>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-text-dim/60" />
-                    <input 
-                      type="text"
-                      placeholder="Search referee by name or NRIC..."
-                      value={orgAssignSearch}
-                      onChange={(e) => setOrgAssignSearch(e.target.value)}
-                      className="w-full bg-ink/40 border border-line rounded-xl py-1.5 pl-9 pr-3 text-xs text-text focus:outline-none focus:border-gold"
-                    />
-                  </div>
-
-                  <div className="bg-ink/30 border border-line rounded-xl p-2 max-h-52 overflow-y-auto space-y-1.5">
-                    {(() => {
-                      const queryClean = orgAssignSearch.toLowerCase().trim();
-                      const filtered = referees.filter(a => {
-                        const nameMatch = a.fullName.toLowerCase().includes(queryClean);
-                        const nricMatch = a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(queryClean.replace(/[^a-zA-Z0-9]/g, ''));
-                        return nameMatch || nricMatch;
-                      });
-
-                      if (filtered.length === 0) {
-                        return <div className="text-[11px] text-text-dim text-center py-4">No matching referees found.</div>;
-                      }
-
-                      return filtered.map(a => {
-                        return (
-                          <div 
-                            key={a.nric} 
-                            className="flex items-center justify-between p-2 rounded-lg bg-surface/50 border border-line/40 hover:border-gold/30 transition text-xs"
-                          >
-                            <div className="space-y-0.5 min-w-0 pr-2">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-text truncate">{a.fullName}</span>
-                                <span className="text-[8px] px-1 bg-ink/80 border border-line rounded text-text-dim font-mono">{a.kyorugiStatus}</span>
-                              </div>
-                              <div className="text-[9px] text-text-dim flex items-center gap-2 font-mono">
-                                <span>{a.nric}</span>
-                                {a.specialRole && a.specialRole !== 'None' && (
-                                  <span className="text-[8px] bg-gold/10 text-gold px-1 rounded uppercase font-bold">
-                                    {formatSpecialRole(a.specialRole)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => handleOrgEditRefereeAccount(a)}
-                                className="text-[10px] text-text hover:text-gold border border-line hover:bg-line/40 px-2 py-1 rounded font-bold cursor-pointer transition"
-                              >
-                                Edit Role
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-                </div>
-
-                {/* Panel 2: Assign Special Role */}
-                <div className="lg:col-span-7 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-gold">
-                        {orgEditingRefereeNric ? `Assign Role: ${orgRefName}` : 'Assign Special Role'}
-                      </h4>
-                      <p className="text-[10px] text-text-dim">
-                        {orgEditingRefereeNric 
-                          ? 'Select a special appointed role for this referee.' 
-                          : 'Select a referee from the list to assign a special role.'}
-                      </p>
-                    </div>
-                    {orgEditingRefereeNric && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOrgEditingRefereeNric(null);
-                          setOrgRefName('');
-                          setOrgRefNric('');
-                          setOrgRefPhone('');
-                          setOrgRefClub('');
-                          setOrgRefResidential('');
-                          setOrgRefDistance('');
-                          setOrgRefBankName('');
-                          setOrgRefBankAccount('');
-                          setOrgRefAccommodation('No');
-                          setOrgRefKyorugi('TR');
-                          setOrgRefPoomsae('TR');
-                          setOrgRefCarPlate('');
-                          setOrgRefSpecialRole('None');
-                        }}
-                        className="text-[10px] text-hong hover:underline font-bold cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-
-                  {orgEditingRefereeNric ? (
-                    <form onSubmit={handleOrgSaveRefereeAccount} className="grid grid-cols-1 gap-3 text-xs bg-ink/30 border border-line rounded-xl p-4">
-                      <div>
-                        <label className="block text-[10px] font-bold text-text-dim uppercase tracking-wider mb-2">Special Appointed Role</label>
-                        <select
-                          value={orgRefSpecialRole}
-                          onChange={(e) => setOrgRefSpecialRole(e.target.value as any)}
-                          className="w-full bg-ink border border-line focus:border-gold rounded-xl px-3 py-2.5 text-text outline-none cursor-pointer"
-                        >
-                          <option value="None">None (Standard Referee)</option>
-                          <option value="TD">Technical Delegate (TD)</option>
-                          <option value="CSB">Supervisory Board (CSB)</option>
-                          <option value="RIC">Referee In-Charge (RIC)</option>
-                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
-                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
-                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
-                        </select>
-                      </div>
-
-                      <div className="pt-2">
-                        <button
-                          type="submit"
-                          className="w-full bg-gold hover:bg-gold/90 text-ink text-xs font-bold py-2.5 rounded-xl transition cursor-pointer"
-                        >
-                          Update Special Role
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 px-4 bg-ink/20 border border-line/40 border-dashed rounded-xl text-center">
-                      <p className="text-xs text-text-dim font-medium max-w-[200px]">
-                        Click "Edit Profile" on an assigned referee to configure their special role.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Stats row */}
-            {(() => {
-              let totalRefereesCount = referees.length;
-              let totalAllowanceAmount = 0;
-              let totalAccommodationCount = 0;
-              
-              referees.forEach(r => {
-                const allowance = getRefereeAllowance(r, refereeFees);
-                totalAllowanceAmount += allowance.totalPay;
-                if (r.accommodation === 'Yes') {
-                  totalAccommodationCount++;
-                }
-              });
-              
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Total Registered Referees</span>
-                      <Users className="w-5 h-5 text-gold" />
-                    </div>
-                    <h3 className="text-2xl font-bold mt-2 text-text">{totalRefereesCount}</h3>
-                    <p className="text-[10px] text-text-dim mt-1">Qualified officials registered for this tournament</p>
-                  </div>
-
-                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Total Referee Allowance Budget</span>
-                      <Scale className="w-5 h-5 text-gold" />
-                    </div>
-                    <h3 className="text-2xl font-bold mt-2 text-gold">RM {totalAllowanceAmount.toFixed(2)}</h3>
-                    <p className="text-[10px] text-text-dim mt-1">Sum of base duties + custom mileage bracket + overtime + extras</p>
-                  </div>
-
-                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Accommodations Needed</span>
-                      <Home className="w-5 h-5 text-gold" />
-                    </div>
-                    <h3 className="text-2xl font-bold mt-2 text-text">{totalAccommodationCount}</h3>
-                    <p className="text-[10px] text-text-dim mt-1">Referees requesting organizer-provided lodging</p>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Main panel */}
-            <div className="bg-surface border border-line rounded-2xl shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-line bg-surface-2/40 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                    <Scale className="w-4 h-4 text-gold" />
-                    Referee Officiating & Allowance Ledger
-                  </h3>
-                  <p className="text-xs text-text-dim mt-0.5">Calculate individual duty payouts, accommodation allocations, and banking info</p>
-                </div>
-                
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <button
-                    onClick={() => handleOpenOrganizerAddReferee()}
-                    className="bg-ink hover:bg-surface-2 text-gold border border-gold/30 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer self-stretch sm:self-auto justify-center"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Referee
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (referees.length === 0) {
-                      triggerMsg('No referee record available to export', 'error');
-                      return;
-                    }
-                    // Excel generation using xlsx
-                    const headers = [
-                      "Name", "NRIC", "Phone", "Club", "Location", "Distance(KM)", 
-                      "Kyorugi", "Poomsae", "Special Role", "Accommodation", "Bank Name", "Bank Account", 
-                      "Car Plate", "Days", "Kyorugi Days", "Poomsae Days", "Duty Explanation", "Base Duty Pay(RM)", "Travel Pay(RM)", "Overtime Pay(RM)", "Others Pay(RM)", "Total Allowance(RM)"
-                    ];
-                    const rows = referees.map(r => {
-                      const allowance = getRefereeAllowance(r, refereeFees);
-                      
-                      return [
-                        r.fullName,
-                        r.nric,
-                        r.phone,
-                        r.clubName,
-                        r.residentialLocation,
-                        r.distance,
-                        r.kyorugiStatus,
-                        r.poomsaeStatus,
-                        r.specialRole || 'None',
-                        r.accommodation,
-                        r.bankName || 'N/A',
-                        r.bankAccount || 'N/A',
-                        r.carPlate || 'N/A',
-                        allowance.days,
-                        allowance.kyorugiDays,
-                        allowance.poomsaeDays,
-                        allowance.splitExplanation,
-                        allowance.baseDutyPay,
-                        allowance.travelPay,
-                        allowance.otPay,
-                        allowance.othersPay,
-                        allowance.totalPay
-                      ];
-                    });
-                    
-                    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-                    const wb = XLSX.utils.book_new();
-                    XLSX.utils.book_append_sheet(wb, ws, "Referee Ledger");
-                    XLSX.writeFile(wb, `REFEREE_ALLOWANCE_LEDGER_${activeComp.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`);
-                    
-                    triggerMsg('Allowance ledger exported to Excel successfully!', 'ok');
-                  }}
-                  className="bg-gold hover:opacity-90 text-ink font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer self-stretch sm:self-auto justify-center"
-                >
-                  <Download className="w-4 h-4" />
-                  Export Ledger to Excel
-                </button>
-                </div>
-              </div>
-
-              {referees.length === 0 ? (
-                <div className="p-12 text-center text-xs text-text-dim space-y-2">
-                  <Scale className="w-12 h-12 text-gold/30 mx-auto" />
-                  <p className="font-semibold text-text">No Referees Registered</p>
-                  <p className="max-w-md mx-auto">No referees have registered for this tournament yet. Encourage officials to sign up through the Referee portal, or add them manually using the button above.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-surface-2 border-b border-line text-[10px] font-bold text-text-dim uppercase tracking-wider">
-                        <th className="py-3 px-4">Referee / Club</th>
-                        <th className="py-3 px-4">NRIC / Pass / Phone</th>
-                        <th className="py-3 px-4 text-center">Status (K / P)</th>
-                        <th className="py-3 px-4 text-center">Accommodation</th>
-                        <th className="py-3 px-4 text-right">Distance (Go/Ret)</th>
-                        <th className="py-3 px-4 text-center">Officiating Days</th>
-                        <th className="py-3 px-4">Bank & Car Plate</th>
-                        <th className="py-3 px-4 text-right">Payout Total</th>
-                        <th className="py-3 px-4 text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line/40">
-                      {referees.map(r => {
-                        const allowance = getRefereeAllowance(r, refereeFees);
-                        const { baseDutyPay, travelPay, otPay, othersPay, totalPay, dailyRate, days, isSplit, splitExplanation, kyorugiDays, poomsaeDays, higherStatus } = allowance;
-                        
-                        return (
-                          <tr key={r.id} className="hover:bg-surface-2/30 transition-colors">
-                             <td className="py-3 px-4">
-                               <div className="flex items-center space-x-2.5">
-                                 <div className="w-8 h-10 rounded bg-slate-950 overflow-hidden flex items-center justify-center border border-line shrink-0">
-                                   {r.photo ? (
-                                     <img src={r.photo} alt={r.fullName} className="w-full h-full object-cover" />
-                                   ) : (
-                                     <User className="w-4 h-4 text-text-dim/60" />
-                                   )}
-                                 </div>
-                                 <div>
-                                   <div className="font-bold text-text flex items-center gap-1.5">
-                                     {r.fullName}
-                                     {r.specialRole && r.specialRole !== 'None' && (
-                                       <span className="bg-gold text-ink text-[9px] px-1.5 py-0.5 rounded-md font-bold tracking-wider uppercase">
-                                         {formatSpecialRole(r.specialRole)}
-                                       </span>
-                                     )}
-                                   </div>
-                                   <div className="text-[10px] text-text-dim italic mt-0.5">{r.clubName}</div>
-                                 </div>
-                               </div>
-                             </td>
-                             <td className="py-3 px-4 font-mono text-[11px] text-text-dim">
-                              <div>{r.nric}</div>
-                              <div className="mt-0.5 text-gold font-bold">PW: {r.password || 'N/A'}</div>
-                              <div className="mt-0.5 text-text">{r.phone}</div>
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <span className="inline-block bg-gold/10 text-gold px-2 py-0.5 rounded text-[9px] font-bold">
-                                K:{r.kyorugiStatus} | P:{r.poomsaeStatus}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <div className="flex flex-col items-center gap-1.5">
-                                <select
-                                  value={r.accommodation || 'No'}
-                                  onChange={async (e) => {
-                                    const newAcc = e.target.value as 'Yes' | 'No';
-                                    const updatedRef: Referee = { ...r, accommodation: newAcc };
-                                    await saveRefereeToFirestore(updatedRef);
-                                    
-                                    const cleanIc = r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-                                    const existingAcc = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
-                                    if (existingAcc) {
-                                      await saveRefereeAccount({
-                                        ...existingAcc,
-                                        accommodation: newAcc
-                                      });
-                                    }
-                                    triggerMsg(`Updated lodging status for ${r.fullName} to ${newAcc === 'Yes' ? 'LODGING REQUIRED' : 'No Lodge'}`, 'ok');
-                                  }}
-                                  className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer focus:outline-none ${
-                                    r.accommodation === 'Yes' 
-                                      ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20' 
-                                      : 'bg-text-dim/10 text-text-dim border-line/50 hover:bg-text-dim/20 hover:text-text'
-                                  }`}
-                                >
-                                  <option value="Yes" className="bg-surface text-blue-400 font-bold">üè® LODGING REQ</option>
-                                  <option value="No" className="bg-surface text-text-dim font-bold">üè† No Lodge</option>
-                                </select>
-                                
-                                {r.accommodation === 'Yes' && (
-                                  <div className="flex flex-col items-center gap-0.5 text-[9px] text-text-dim">
-                                    {(r.hotelDaysProvided !== undefined || refereeFees.default_hotel_days_provided !== undefined) && (
-                                      <span className="bg-surface-2 text-text px-1.5 py-0.2 rounded font-mono font-medium">
-                                        üè® {r.hotelDaysProvided ?? refereeFees.default_hotel_days_provided} Day(s) Hotel
-                                      </span>
-                                    )}
-                                    {(r.hotelCheckoutDate || refereeFees.default_hotel_checkout_date) && (
-                                      <span className="text-[9px] text-gold/90 font-medium">
-                                        üîë Out: {r.hotelCheckoutDate || refereeFees.default_hotel_checkout_date}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-
-                                {((r.accommodationDetails || refereeFees.default_accommodation_details) && r.accommodation === 'Yes') && (
-                                  <span className="text-[10px] text-text-dim font-medium max-w-[120px] truncate block" title={r.accommodationDetails || refereeFees.default_accommodation_details}>
-                                    üìç {r.accommodationDetails || refereeFees.default_accommodation_details}
-                                  </span>
-                                )}
-                                
-                                {((r.accommodationMapsLink || refereeFees.default_accommodation_maps_link) && r.accommodation === 'Yes') && (
-                                  <a 
-                                    href={r.accommodationMapsLink || refereeFees.default_accommodation_maps_link} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
-                                    className="text-[9px] text-gold hover:underline flex items-center gap-0.5 font-semibold"
-                                  >
-                                    <MapPin className="w-2.5 h-2.5" />
-                                    View Map
-                                  </a>
-                                )}
-                                
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingAccReferee(r);
-                                    setEditAccStatus(r.accommodation || 'Yes');
-                                    setEditAccDetails(r.accommodationDetails || '');
-                                    setEditAccMapsLink(r.accommodationMapsLink || '');
-                                    setEditAccHotelDays(r.hotelDaysProvided !== undefined ? String(r.hotelDaysProvided) : (refereeFees.default_hotel_days_provided !== undefined ? String(refereeFees.default_hotel_days_provided) : ''));
-                                    setEditAccCheckoutDate(r.hotelCheckoutDate || refereeFees.default_hotel_checkout_date || '');
-                                  }}
-                                  className="text-[9px] text-gold hover:text-yellow-400 font-bold border border-gold/20 hover:border-gold/50 bg-gold/5 hover:bg-gold/10 px-1.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1"
-                                >
-                                  <Edit className="w-2.5 h-2.5" />
-                                  <span>Details</span>
-                                </button>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4 text-right font-mono text-text">
-                              {editingDistanceRefereeId === r.id ? (
-                                <div className="flex flex-col items-end gap-1 animate-fade-in">
-                                  <div className="flex items-center gap-1.5 justify-end">
-                                    <input
-                                      type="number"
-                                      autoFocus
-                                      value={editingDistanceValue}
-                                      onChange={(e) => setEditingDistanceValue(e.target.value)}
-                                      onKeyDown={async (e) => {
-                                        if (e.key === 'Enter') {
-                                          const parsed = parseFloat(editingDistanceValue);
-                                          if (isNaN(parsed) || parsed < 0) {
-                                            triggerMsg('Please enter a valid distance', 'error');
-                                            return;
-                                          }
-                                          await saveRefereeToFirestore({ ...r, distance: parsed });
-                                          setEditingDistanceRefereeId(null);
-                                          triggerMsg('Distance updated successfully', 'ok');
-                                        } else if (e.key === 'Escape') {
-                                          setEditingDistanceRefereeId(null);
-                                        }
-                                      }}
-                                      className="w-16 bg-slate-900 text-right border border-line text-[11px] rounded px-1.5 py-0.5 text-text focus:outline-none focus:border-gold font-bold font-mono"
-                                    />
-                                    <span className="text-[10px] text-text-dim">KM</span>
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingDistanceRefereeId(null)}
-                                      className="text-[9px] font-bold text-hong hover:underline cursor-pointer"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        const parsed = parseFloat(editingDistanceValue);
-                                        if (isNaN(parsed) || parsed < 0) {
-                                          triggerMsg('Please enter a valid distance', 'error');
-                                          return;
-                                        }
-                                        await saveRefereeToFirestore({ ...r, distance: parsed });
-                                        setEditingDistanceRefereeId(null);
-                                        triggerMsg('Distance updated successfully', 'ok');
-                                      }}
-                                      className="text-[9px] font-bold text-gold hover:underline cursor-pointer"
-                                    >
-                                      Save
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="group relative">
-                                  <div className="flex items-center justify-end gap-1">
-                                    <span className="font-bold">{r.distance} KM</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingDistanceRefereeId(r.id);
-                                        setEditingDistanceValue(r.distance?.toString() || '0');
-                                      }}
-                                      className="text-text-dim hover:text-gold opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-0.5 cursor-pointer rounded hover:bg-surface-2"
-                                      title="Edit Distance"
-                                    >
-                                      <Edit className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                  <div className="text-[10px] text-text-dim font-normal">
-                                    RM {travelPay.toFixed(2)}
-                                    {r.accommodation === 'No' && (
-                                      <span className="text-[9px] text-gold block font-semibold">(Daily Travel RM {refereeFees.km_0_50})</span>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              {isSplit ? (
-                                <div className="space-y-1.5 max-w-[145px] mx-auto bg-ink/30 border border-line/40 rounded-xl p-1.5">
-                                  <div className="flex items-center justify-between gap-1 text-[10px]">
-                                    <span className="font-semibold text-text-dim">Kyorugi:</span>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button 
-                                        type="button"
-                                        onClick={async () => {
-                                          const kDays = kyorugiDays;
-                                          const vDays = r.virtualDays || 0;
-                                          await saveRefereeToFirestore({ ...r, kyorugiDays: Math.max(0, kDays - 1), officiatingDays: Math.max(0, kDays - 1) + poomsaeDays + vDays });
-                                        }}
-                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
-                                      >
-                                        -
-                                      </button>
-                                      <span className="font-bold font-mono px-1 text-text text-[10px]">{kyorugiDays}d</span>
-                                      <button 
-                                        type="button"
-                                        onClick={async () => {
-                                          const kDays = kyorugiDays;
-                                          const vDays = r.virtualDays || 0;
-                                          await saveRefereeToFirestore({ ...r, kyorugiDays: kDays + 1, officiatingDays: kDays + 1 + poomsaeDays + vDays });
-                                        }}
-                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  </div>
-                                  
-                                  <div className="flex items-center justify-between gap-1 text-[10px]">
-                                    <span className="font-semibold text-text-dim">Poomsae:</span>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button 
-                                        type="button"
-                                        onClick={async () => {
-                                          const pDays = poomsaeDays;
-                                          const vDays = r.virtualDays || 0;
-                                          await saveRefereeToFirestore({ ...r, poomsaeDays: Math.max(0, pDays - 1), officiatingDays: kyorugiDays + Math.max(0, pDays - 1) + vDays });
-                                        }}
-                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
-                                      >
-                                        -
-                                      </button>
-                                      <span className="font-bold font-mono px-1 text-text text-[10px]">{poomsaeDays}d</span>
-                                      <button 
-                                        type="button"
-                                        onClick={async () => {
-                                          const pDays = poomsaeDays;
-                                          const vDays = r.virtualDays || 0;
-                                          await saveRefereeToFirestore({ ...r, poomsaeDays: pDays + 1, officiatingDays: kyorugiDays + pDays + 1 + vDays });
-                                        }}
-                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center justify-between gap-1 text-[10px]">
-                                    <span className="font-semibold text-text-dim">Virtual:</span>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button 
-                                        type="button"
-                                        onClick={async () => {
-                                          const vDays = r.virtualDays || 0;
-                                          await saveRefereeToFirestore({ ...r, virtualDays: Math.max(0, vDays - 1), officiatingDays: kyorugiDays + poomsaeDays + Math.max(0, vDays - 1) });
-                                        }}
-                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
-                                      >
-                                        -
-                                      </button>
-                                      <span className="font-bold font-mono px-1 text-text text-[10px]">{r.virtualDays || 0}d</span>
-                                      <button 
-                                        type="button"
-                                        onClick={async () => {
-                                          const vDays = r.virtualDays || 0;
-                                          await saveRefereeToFirestore({ ...r, virtualDays: vDays + 1, officiatingDays: kyorugiDays + poomsaeDays + vDays + 1 });
-                                        }}
-                                        className="w-4 h-4 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-[9px]"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  </div>
- 
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      await saveRefereeToFirestore({ 
-                                        ...r, 
-                                        kyorugiDays: 0, 
-                                        poomsaeDays: 0, 
-                                        virtualDays: 0,
-                                        officiatingDays: Math.max(1, kyorugiDays + poomsaeDays + (r.virtualDays || 0)) 
-                                      });
-                                    }}
-                                    className="w-full text-center text-[9px] text-hong hover:underline pt-0.5"
-                                  >
-                                    Merge Standard
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="space-y-1">
-                                  <div className="flex items-center justify-center gap-1 max-w-[90px] mx-auto">
-                                    <button 
-                                      type="button"
-                                      onClick={async () => {
-                                        if (days <= 1) return;
-                                        await saveRefereeToFirestore({ ...r, officiatingDays: days - 1 });
-                                      }}
-                                      className="w-5 h-5 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-xs"
-                                    >
-                                      -
-                                    </button>
-                                    <span className="font-bold font-mono px-2 text-text text-xs">{days}</span>
-                                    <button 
-                                      type="button"
-                                      onClick={async () => {
-                                        await saveRefereeToFirestore({ ...r, officiatingDays: days + 1 });
-                                      }}
-                                      className="w-5 h-5 bg-ink border border-line text-text hover:bg-line rounded flex items-center justify-center font-bold text-xs"
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                  
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      await saveRefereeToFirestore({
-                                        ...r,
-                                        kyorugiDays: days,
-                                        poomsaeDays: 0
-                                      });
-                                    }}
-                                    className="text-[9px] text-gold hover:underline font-semibold block mx-auto pt-0.5"
-                                  >
-                                    Split Days
-                                  </button>
-                                </div>
-                              )}
-                              
-                              <div className="flex flex-col items-center gap-1.5 mt-2">
-                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                  <input 
-                                    type="checkbox"
-                                    checked={!!r.includeOvertime}
-                                    onChange={async (e) => {
-                                      await saveRefereeToFirestore({ ...r, includeOvertime: e.target.checked });
-                                    }}
-                                    className="accent-gold rounded text-ink cursor-pointer w-3 h-3"
-                                  />
-                                  <span className="text-[10px] text-text-dim">Overtime</span>
-                                </label>
-                                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                                  <input 
-                                    type="checkbox"
-                                    checked={!!r.includeOthers}
-                                    onChange={async (e) => {
-                                      await saveRefereeToFirestore({ ...r, includeOthers: e.target.checked });
-                                    }}
-                                    className="accent-gold rounded text-ink cursor-pointer w-3 h-3"
-                                  />
-                                  <span className="text-[10px] text-text-dim">Others</span>
-                                </label>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4">
-                              {r.bankName ? (
-                                <div className="text-text-dim text-[11px]">
-                                  <span className="font-semibold text-text">{r.bankName}</span>: {r.bankAccount}
-                                </div>
-                              ) : (
-                                <span className="text-hong italic text-[10px]">No bank details</span>
-                              )}
-                              <div className="text-[10px] text-gold font-bold mt-0.5 uppercase">Plate: {r.carPlate || 'N/A'}</div>
-                            </td>
-                            <td className="py-3 px-4 text-right font-mono font-bold text-gold text-sm">
-                              RM {totalPay.toFixed(2)}
-                              <div className="text-[9px] text-text-dim font-normal leading-relaxed text-right">
-                                {isSplit ? (
-                                  <span className="block text-[8px] text-text-dim font-sans">{splitExplanation}</span>
-                                ) : (
-                                  <span>RM {dailyRate} * {days}d</span>
-                                )}
-                                <span className="block text-[9px] text-text-dim mt-0.5">
-                                  + RM {travelPay.toFixed(2)} travel {r.accommodation === 'No' ? `(RM ${refereeFees.km_0_50} daily)` : ''}
-                                </span>
-                                {r.includeOvertime && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.overtime} OT</span>}
-                                {r.includeOthers && <span className="block text-[8px] text-gold/90 font-medium">+ RM {refereeFees.others} Others</span>}
-                              </div>
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              {confirmDeleteRefereeId === r.id ? (
-                                <div className="flex items-center justify-center gap-1.5 animate-fade-in">
-                                  <button
-                                    onClick={async () => {
-                                      await deleteRefereeFromFirestore(r.id);
-                                      setConfirmDeleteRefereeId(null);
-                                      triggerMsg('Referee registration deleted', 'ok');
-                                    }}
-                                    className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-[10px] font-bold cursor-pointer"
-                                  >
-                                    Yes
-                                  </button>
-                                  <button
-                                    onClick={() => setConfirmDeleteRefereeId(null)}
-                                    className="bg-surface border border-line text-text px-2 py-1 rounded text-[10px] cursor-pointer"
-                                  >
-                                    No
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setConfirmDeleteRefereeId(r.id)}
-                                  className="text-hong hover:text-white border border-hong/20 hover:bg-hong/90 px-2.5 py-1 rounded transition text-[10px] font-bold cursor-pointer"
-                                >
-                                  Remove
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-          </div>
-        )}
-
-        {/* REFEREE DASHBOARD */}
-        {screen === 'refereeDashboard' && activeReferee && (
-          <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-surface p-6 rounded-2xl border border-line shadow-sm gap-4">
-              <div>
-                <span className="bg-gold/10 text-gold px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
-                  Official Referee Terminal
-                </span>
-                <h2 className="text-xl font-bold uppercase tracking-wider text-text mt-1.5 flex items-center gap-2">
-                  <Scale className="w-5 h-5 text-gold" />
-                  Welcome, Ref. {activeReferee.fullName}
-                </h2>
-                <p className="text-sm font-semibold text-gold mt-0.5">{activeComp?.name || 'Tournament Hub'}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setRefereeFullName(activeReferee.fullName || '');
-                    setRefereeNric(activeReferee.nric || '');
-                    setRefereePassword(activeReferee.password || '');
-                    setRefereePhone(activeReferee.phone || '');
-                    setRefereeClubName(activeReferee.clubName || '');
-                    setRefereeResidential(activeReferee.residentialLocation || '');
-                    setRefereeDistance(activeReferee.distance?.toString() || '');
-                    setRefereeBankName(activeReferee.bankName || '');
-                    setRefereeBankAccount(activeReferee.bankAccount || '');
-                    setRefereeAccommodation(activeReferee.accommodation as 'Yes' | 'No' || 'No');
-                    setRefereeKyorugiStatus(activeReferee.kyorugiStatus as any || 'TR');
-                    setRefereePoomsaeStatus(activeReferee.poomsaeStatus as any || 'TR');
-                    setRefereeCarPlate(activeReferee.carPlate || '');
-                    setRefereeSpecialRole(activeReferee.specialRole as any || 'None');
-                    setShowRefereeEditProfile(true);
-                  }}
-                  className="bg-surface hover:bg-surface-2 border border-line text-text px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
-                >
-                  <User className="w-4 h-4" />
-                  Edit Profile
-                </button>
-                <button
-                  onClick={logout}
-                  className="bg-Hong hover:opacity-90 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Logout Terminal
-                </button>
-              </div>
-            </div>
-
-            {/* Tournament Selector & Hub */}
-            <div className="bg-surface p-5 rounded-2xl border border-line shadow-sm space-y-4">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-gold" />
-                    Tournament Hub
-                  </h3>
-                  <p className="text-xs text-text-dim mt-0.5">Select a tournament to view your credentials, or join active ones with a single click using your account profile details!</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {competitions.filter(c => c.isActive !== false).map((comp) => {
-                  const isJoined = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() && r.compId === comp.id);
-                  const isSelected = comp.id === compId;
-                  
-                  return (
-                    <div 
-                      key={comp.id} 
-                      className={`p-3.5 rounded-xl border transition-all flex justify-between items-center ${
-                        isSelected 
-                          ? 'bg-gold/5 border-gold shadow-sm' 
-                          : 'bg-ink/50 border-line hover:border-text-dim/40'
-                      }`}
-                    >
-                      <div className="min-w-0 pr-2">
-                        <h4 className="text-xs font-bold text-text truncate uppercase">{comp.name}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                            isJoined 
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          }`}>
-                            {isJoined ? 'Joined' : 'Available'}
-                          </span>
-                          <span className="text-[10px] text-text-dim truncate">{formatDateRange(comp.date, comp.endDate)} | {comp.venue}</span>
-                        </div>
-                      </div>
-                      
-                      <div className="shrink-0 flex gap-2">
-                        {isJoined ? (
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                const matched = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() && r.compId === comp.id);
-                                if (matched) {
-                                  setCompId(comp.id);
-                                  setActiveReferee(matched);
-                                  triggerMsg(`Switched to ${comp.name} credentials`, 'ok');
-                                }
-                              }}
-                              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition ${
-                                isSelected 
-                                  ? 'bg-gold text-ink' 
-                                  : 'bg-surface border border-line text-text hover:bg-surface-2'
-                              }`}
-                            >
-                              {isSelected ? 'Selected' : 'Select'}
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const matched = referees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() && r.compId === comp.id);
-                                if (matched) {
-                                  try {
-                                    await deleteRefereeFromFirestore(matched.id);
-                                    triggerMsg(`Cancelled registration for ${comp.name}`, 'ok');
-                                    if (isSelected) {
-                                      setCompId(null);
-                                    }
-                                  } catch (err) {
-                                    console.error(err);
-                                    triggerMsg('Failed to cancel registration', 'error');
-                                  }
-                                }
-                              }}
-                              className="px-2 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition text-hong border border-line bg-surface hover:bg-hong/10"
-                              title="Cancel Join"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-                              if (!account) {
-                                triggerMsg("Could not find your referee account profile.", "error");
-                                return;
-                              }
-                              setJoiningComp(comp);
-                              setJoiningDistance(account.distance?.toString() || '');
-                              setJoiningAccommodation(account.accommodation || 'No');
-                              const kDays = account.kyorugiDays || 0;
-                              const pDays = account.poomsaeDays || 0;
-                              const vDays = account.virtualDays || 0;
-                              const total = kDays + pDays + vDays;
-                              setJoiningKyorugiDays(total > 0 ? kDays.toString() : '1');
-                              setJoiningPoomsaeDays(total > 0 ? pDays.toString() : '0');
-                              setJoiningVirtualDays(total > 0 ? vDays.toString() : '0');
-                            }}
-                            className="bg-gold hover:opacity-90 text-ink px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition flex items-center gap-1"
-                          >
-                            <UserPlus className="w-3.5 h-3.5" />
-                            Join
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {competitions.filter(c => c.isActive !== false).length === 0 && (
-                  <p className="text-xs text-text-dim col-span-2 text-center py-4">No active tournaments currently available.</p>
-                )}
-              </div>
-            </div>
-
-            {activeReferee.id.startsWith('TEMP_') ? (
-              <div className="bg-surface p-8 rounded-2xl border border-line shadow-sm text-center max-w-xl mx-auto space-y-4 animate-fade-in">
-                <Scale className="w-12 h-12 text-gold mx-auto animate-bounce" />
-                <h3 className="text-base font-bold uppercase tracking-wider text-text">Tournament Officiating Credentials</h3>
-                <p className="text-xs text-text-dim leading-relaxed">
-                  {activeComp ? (
-                    <>You are logged into your Referee Account, but you are not registered to officiate for <strong>{activeComp.name}</strong> yet. Click below to register instantly using your saved credentials profile!</>
-                  ) : (
-                    <>You are logged into your Referee Account. Select a tournament from the hub above to view your credentials and officiating details.</>
-                  )}
-                </p>
-                <div className="pt-2">
-                  {activeComp && (
-                    <button
-                      onClick={async () => {
-                        const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-                        if (!account) {
-                          triggerMsg("Could not find your referee account profile.", "error");
-                          return;
-                        }
-                        const newRef: Referee = {
-                          ...account,
-                          id: `${activeComp.id}_${account.nric.replace(/[^a-zA-Z0-9]/g, '')}`,
-                          compId: activeComp.id,
-                          createdAt: new Date().toISOString()
-                        };
-                        await saveRefereeToFirestore(newRef);
-                        setActiveReferee(newRef);
-                        triggerMsg(`Successfully registered for ${activeComp.name}!`, "ok");
-                      }}
-                      className="bg-gold hover:opacity-90 text-ink px-5 py-2.5 rounded-xl text-xs font-bold shadow-md hover:shadow transition inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      Join {activeComp.name} Now
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : !activeComp ? (
-              <div className="bg-surface p-8 rounded-2xl border border-line shadow-sm text-center max-w-xl mx-auto space-y-4 animate-fade-in">
-                <Scale className="w-12 h-12 text-gold/30 mx-auto" />
-                <h3 className="text-base font-bold uppercase tracking-wider text-text">Select a Tournament</h3>
-                <p className="text-xs text-text-dim leading-relaxed">
-                  Please select a tournament from the hub above to view your credentials and officiating details.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Navigation Sub-Tabs */}
-                <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-surface border border-line p-2 rounded-2xl shadow-sm">
-                  <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
-                    <button
-                      onClick={() => setRefereeTab('pass')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 cursor-pointer ${
-                        refereeTab === 'pass'
-                          ? 'bg-gold text-ink shadow'
-                          : 'bg-surface-2 text-text-dim hover:text-text hover:bg-line'
-                      }`}
-                    >
-                      <User className="w-4 h-4" />
-                      <span>My Pass & Allowance</span>
-                    </button>
-
-                    <button
-                      onClick={() => setRefereeTab('courtRoster')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition flex items-center gap-2 cursor-pointer ${
-                        refereeTab === 'courtRoster'
-                          ? 'bg-gold text-ink shadow'
-                          : 'bg-surface-2 text-text-dim hover:text-text hover:bg-line'
-                      }`}
-                    >
-                      <Layout className="w-4 h-4" />
-                      <span>Court Referee Distribution</span>
-                      {activeReferee.courtAssignment && activeReferee.courtAssignment !== 'Unassigned' && (
-                        <span className="bg-ink text-gold text-[9px] px-2 py-0.5 rounded-full font-bold ml-1 animate-pulse">
-                          {activeReferee.courtAssignment}
-                        </span>
-                      )}
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => setScreen('courtRosterDisplay')}
-                    className="bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm shrink-0"
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span>Open Live Display Board</span>
-                  </button>
-                </div>
-
-                {refereeTab === 'pass' ? (
-                  /* Main Grid */
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              
-              {/* Officiating Pass Column */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-text-dim">Your Officiating Pass</h3>
-                
-                {/* Official Card Layout */}
-                <div 
-                  id={`referee-pass-${activeReferee.id}`}
-                  className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 border-2 border-gold rounded-2xl p-5 shadow-lg text-center flex flex-col justify-between h-[445px] relative overflow-hidden"
-                >
-                  {/* Subtle decorative elements */}
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-gold/5 rounded-full blur-2xl"></div>
-                  <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-blue-500/5 rounded-full blur-xl"></div>
-                  
-                  {/* Card Header */}
-                  <div>
-                    <div className="flex justify-between items-start">
-                      <Trophy className="w-6 h-6 text-gold" />
-                      <span className="text-[9px] font-bold text-white bg-gold/20 border border-gold/30 px-2 py-0.5 rounded uppercase tracking-widest">
-                        Official
-                      </span>
-                    </div>
-                    <p className="text-[20px] leading-tight text-gold font-bold uppercase tracking-wider truncate px-2 mt-3">{activeComp.name}</p>
-                  </div>
-
-                  {/* Referee Portrait Photo */}
-                  <div className="flex justify-center my-1.5">
-                    <div className="w-20 h-25 bg-slate-950 rounded-xl border border-gold/30 flex items-center justify-center shrink-0 overflow-hidden shadow-inner relative">
-                      {activeReferee.photo ? (
-                        <img 
-                          src={activeReferee.photo} 
-                          alt={activeReferee.fullName} 
-                          className="w-full h-full object-cover" 
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="text-center p-2">
-                          <User className="w-8 h-8 text-white/30 mx-auto" />
-                          <span className="text-[8px] text-white/20 uppercase tracking-widest mt-1 block">No Photo</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Referee Info */}
-                  <div className="my-1.5">
-                    <h3 className="text-base font-bold text-white uppercase tracking-wider font-display truncate px-2">{activeReferee.fullName}</h3>
-
-                    {/* Wording "REFEREE" badge */}
-                    <div className="mt-3">
-                      <span className="text-sm font-black text-gold bg-gold/10 border border-gold/30 px-6 py-1 rounded-lg inline-block tracking-[0.2em] uppercase">
-                        REFEREE
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* QR / Footer */}
-                  <div className="flex justify-between items-end border-t border-white/10 pt-3.5 bg-transparent">
-                    <div className="text-left max-w-[70%]">
-                      <div className="text-[8px] text-white/40 uppercase font-bold tracking-widest">{formatDateRange(activeComp.date, activeComp.endDate)}</div>
-                      <div className="text-xs font-bold text-white uppercase truncate">{activeComp.venue}</div>
-                    </div>
-                    <div className="bg-white p-1 rounded-lg shrink-0">
-                      <QRCodeSVG value={`REFEREE::${activeReferee.id}`} size={44} level="M" />
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => {
-                    const el = document.getElementById(`referee-pass-${activeReferee.id}`);
-                    if (el) {
-                      triggerMsg('Generating Referee Pass PNG...', 'ok');
-                      htmlToImage.toPng(el, { pixelRatio: 3 }).then(dataUrl => {
-                        const link = document.createElement('a');
-                        link.download = `REFEREE_PASS_${activeReferee.fullName.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
-                        link.href = dataUrl;
-                        link.click();
-                      }).catch(err => {
-                        console.error('Failed to generate pass image', err);
-                        triggerMsg('Failed to export image.', 'error');
-                      });
-                    }
-                  }}
-                  className="w-full bg-surface hover:bg-surface-2 border border-line text-text font-bold py-2 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
-                >
-                  <Download className="w-4 h-4 text-gold" />
-                  Download Pass image
-                </button>
-              </div>
-
-              {/* Status and Allowance Details */}
-              <div className="md:col-span-2 space-y-6">
-                
-                {/* Section: Officiating Duty Info */}
-                <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-text flex items-center gap-2">
-                    <User className="w-4 h-4 text-gold" />
-                    Officiating Registry Information
-                  </h3>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                    <div>
-                      <span className="text-text-dim block mb-0.5">State / Club Name</span>
-                      <span className="font-semibold text-text text-sm">{activeReferee.clubName}</span>
-                    </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">NRIC Number</span>
-                      <span className="font-semibold text-text text-sm">{activeReferee.nric}</span>
-                    </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">Contact Phone</span>
-                      <span className="font-semibold text-text text-sm">{activeReferee.phone}</span>
-                    </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">Residential Location</span>
-                      <span className="font-semibold text-text text-sm">{activeReferee.residentialLocation}</span>
-                    </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">Go & Return Distance</span>
-                      <span className="font-semibold text-text text-sm">{activeReferee.distance} KM</span>
-                    </div>
-                    <div className="sm:col-span-2 border-t border-line/20 pt-3 mt-1">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                          <span className="text-text-dim block mb-0.5 text-xs">Accommodation Option</span>
-                          <span className="font-semibold text-gold text-sm">
-                            {activeReferee.accommodation === 'Yes' ? 'Arranged by Organizer' : 'Self Arranged'}
-                          </span>
-                        </div>
-                        {activeReferee.accommodation === 'Yes' && (
-                          <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider self-start sm:self-auto">
-                            LODGING REQUIRED
-                          </span>
-                        )}
-                      </div>
-                      
-                      {activeReferee.accommodation === 'Yes' && (
-                        <div className="bg-ink/30 border border-line/50 rounded-xl p-3.5 mt-2.5 space-y-3">
-                          {/* Key Hotel Dates & Duration Summary */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-surface-2/60 border border-line/30 p-2.5 rounded-lg">
-                            <div className="flex items-center gap-2">
-                              <span className="text-base">üè®</span>
-                              <div>
-                                <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block">Hotel Days Provided</span>
-                                <span className="text-text font-bold text-xs">
-                                  {(activeReferee.hotelDaysProvided !== undefined ? activeReferee.hotelDaysProvided : refereeFees.default_hotel_days_provided) !== undefined
-                                    ? `${activeReferee.hotelDaysProvided ?? refereeFees.default_hotel_days_provided} Day(s) / Night(s)`
-                                    : 'Arranged by Organizer'
-                                  }
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-base">üîë</span>
-                              <div>
-                                <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block">Check-Out Date / Day</span>
-                                <span className="text-gold font-bold text-xs">
-                                  {activeReferee.hotelCheckoutDate || refereeFees.default_hotel_checkout_date || 'Not specified'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {(activeReferee.accommodationDetails || refereeFees.default_accommodation_details) && (
-                            <div>
-                              <span className="text-[10px] uppercase font-bold text-text-dim tracking-wider block mb-1">Assigned Lodging Details</span>
-                              <p className="text-text font-medium text-xs leading-relaxed whitespace-pre-wrap">{activeReferee.accommodationDetails || refereeFees.default_accommodation_details}</p>
-                            </div>
-                          )}
-                          
-                          {(activeReferee.accommodationMapsLink || refereeFees.default_accommodation_maps_link) && (
-                            <div>
-                              <a 
-                                href={activeReferee.accommodationMapsLink || refereeFees.default_accommodation_maps_link} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="inline-flex items-center gap-1.5 bg-gold hover:bg-yellow-400 text-ink font-bold px-3 py-1.5 rounded-lg text-xs transition shadow cursor-pointer mt-1"
-                              >
-                                <MapPin className="w-3.5 h-3.5" />
-                                <span>Navigate via Google Maps</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">Bank Information</span>
-                      <span className="font-semibold text-text text-sm">{activeReferee.bankName || 'N/A'} - {activeReferee.bankAccount || 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-text-dim block mb-0.5">Car Plate / Parking Spot</span>
-                      <span className="font-semibold text-text text-sm uppercase">{activeReferee.carPlate || 'N/A'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section: Estimated Allowance Breakdown */}
-                <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-text flex items-center gap-2">
-                    <Scale className="w-4 h-4 text-gold" />
-                    Officiating Allowance Breakdown
-                  </h3>
-                  
-                  {(() => {
-                    const allowance = getRefereeAllowance(activeReferee, refereeFees);
-                    const { baseDutyPay, travelPay, otPay, othersPay, totalPay, dailyRate, days, isSplit, splitExplanation, kyorugiDays, poomsaeDays, virtualDays, kyorugiPay, poomsaePay, virtualPay, higherStatus } = allowance;
-                    
-                    return (
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center text-xs pb-2 border-b border-line/60">
-                          <div>
-                            <span className="font-semibold text-text">Highest Ref Qualification</span>
-                            <p className="text-[10px] text-text-dim">Kyorugi: {activeReferee.kyorugiStatus} | Poomsae: {activeReferee.poomsaeStatus}</p>
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                            <span className="bg-gold/10 text-gold px-2.5 py-1 rounded-lg font-bold">{higherStatus} Qualification</span>
-                            {activeReferee.specialRole && activeReferee.specialRole !== 'None' && (
-                              <span className="bg-gold text-ink px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">
-                                Appointed: {formatSpecialRole(activeReferee.specialRole)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-2 text-xs">
-                          {isSplit ? (
-                            <div className="bg-ink/20 p-3 rounded-xl border border-line/40 space-y-1.5 text-text-dim mb-3">
-                              <span className="font-bold text-text-dim text-[10px] uppercase block mb-1">Split Discipline Days:</span>
-                              {kyorugiDays > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Kyorugi Officiating ({kyorugiDays} {kyorugiDays === 1 ? 'Day' : 'Days'} as {activeReferee.kyorugiStatus})</span>
-                                  <span className="text-text font-semibold">RM {kyorugiPay.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {poomsaeDays > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Poomsae Officiating ({poomsaeDays} {poomsaeDays === 1 ? 'Day' : 'Days'} as {activeReferee.poomsaeStatus})</span>
-                                  <span className="text-text font-semibold">RM {poomsaePay.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {virtualDays > 0 && (
-                                <div className="flex justify-between">
-                                  <span>Virtual Officiating ({virtualDays} {virtualDays === 1 ? 'Day' : 'Days'} as {
-                                    activeReferee.specialRole === 'GAME_MASTER' ? 'Game Master' :
-                                    activeReferee.specialRole === 'TECHNICAL_OPERATOR' ? 'Tech Operator' :
-                                    activeReferee.specialRole === 'VIRTUAL_REFEREE' ? 'Virtual Ref' : 'Virtual'
-                                  })</span>
-                                  <span className="text-text font-semibold">RM {virtualPay.toFixed(2)}</span>
-                                </div>
-                              )}
-                              <div className="text-[10px] text-gold italic pt-1">{splitExplanation}</div>
-                            </div>
-                          ) : (
-                            <div className="flex justify-between text-text-dim">
-                              <span>Base Duty Allowance ({days} {days === 1 ? 'Day' : 'Days'})</span>
-                              <span className="text-text font-semibold">RM {baseDutyPay.toFixed(2)}</span>
-                            </div>
-                          )}
-                          {travelPay > 0 && (
-                            <div className="flex justify-between text-text-dim">
-                              <span>
-                                {activeReferee.accommodation === 'No'
-                                  ? `Daily Travel Allowance (0-50 KM rate x ${days} ${days === 1 ? 'day' : 'days'})`
-                                  : `Travel Mileage Allowance (${activeReferee.distance} KM Bracket)`
-                                }
-                              </span>
-                              <span className="text-text font-semibold">RM {travelPay.toFixed(2)}</span>
-                            </div>
-                          )}
-                          {otPay > 0 && (
-                            <div className="flex justify-between text-text-dim">
-                              <span>Overtime Supplemental Pay</span>
-                              <span className="text-text font-semibold">RM {otPay.toFixed(2)}</span>
-                            </div>
-                          )}
-                          {othersPay > 0 && (
-                            <div className="flex justify-between text-text-dim">
-                              <span>Other Supplemental Pay</span>
-                              <span className="text-text font-semibold">RM {othersPay.toFixed(2)}</span>
-                            </div>
-                          )}
-                          <div className="flex justify-between text-text-dim">
-                            <span>Accommodation Status</span>
-                            <span className="text-text font-semibold">{activeReferee.accommodation === 'Yes' ? 'Free (Provided)' : 'No expense (Own)'}</span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex justify-between items-center pt-3 border-t border-line font-bold text-sm">
-                          <span className="text-gold uppercase tracking-wider">Estimated Payout Total</span>
-                          <span className="text-xl text-gold">RM {totalPay.toFixed(2)}</span>
-                        </div>
-                        
-                        <p className="text-[10px] text-text-dim leading-relaxed italic bg-surface-2 p-3 rounded-lg border border-line mt-2">
-                          Note: This breakdown is an estimate based on standard tournament officiating rates. Final payout balances may vary if officiating days are updated by the tournament organizer.
-                        </p>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-              </div>
-            </div>
-                ) : (
-                  /* Court Referee Distribution View */
-                  <div className="space-y-6 animate-fade-in">
-                    {/* Personal Assignment Callout Card */}
-                    <div className={`p-5 rounded-2xl border transition-all ${
-                      activeReferee.courtAssignment && activeReferee.courtAssignment !== 'Unassigned'
-                        ? 'bg-gradient-to-r from-gold/10 via-amber-500/10 to-gold/10 border-gold/50 shadow-lg'
-                        : 'bg-surface border-line'
-                    }`}>
-                      {activeReferee.courtAssignment && activeReferee.courtAssignment !== 'Unassigned' ? (
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="bg-gold text-ink font-extrabold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                                YOUR DUTY ASSIGNMENT TODAY
-                              </span>
-                              <span className="text-text-dim text-xs font-mono font-bold">
-                                Match Range: {ringMatchNumbers[activeReferee.courtAssignment] || activeReferee.matchNo || 'Active Session'}
-                              </span>
-                            </div>
-                            <h3 className="text-xl font-black text-text uppercase tracking-wide">
-                              {activeReferee.courtAssignment} ‚Äî <span className="text-gold">{activeReferee.dutyRole || 'Corner Judge'}</span>
-                            </h3>
-                            <p className="text-xs text-text-dim">
-                              Officiating Panel: You are assigned as <strong>{activeReferee.dutyRole || 'Corner Judge'}</strong> on <strong>{activeReferee.courtAssignment}</strong>.
-                            </p>
-                          </div>
-
-                          {/* Panel Mates Mini Summary */}
-                          <div className="bg-ink/60 border border-line p-3 rounded-xl space-y-1 text-xs min-w-[240px]">
-                            <span className="text-[10px] text-gold font-bold uppercase tracking-wider block border-b border-line/40 pb-1">
-                              {activeReferee.courtAssignment} Panel Officials
-                            </span>
-                            {(() => {
-                              const ringRefs = referees.filter(r => r.courtAssignment === activeReferee.courtAssignment);
-                              return (
-                                <div className="space-y-1 text-[11px] pt-1">
-                                  {ringRefs.map(r => (
-                                    <div key={r.id} className={`flex justify-between items-center ${r.id === activeReferee.id ? 'font-bold text-gold' : 'text-text-dim'}`}>
-                                      <span>{r.dutyRole || 'Corner'}:</span>
-                                      <span className="truncate max-w-[130px]">{r.fullName} {r.id === activeReferee.id ? '(You)' : ''}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl">
-                          <div className="flex items-center gap-3">
-                            <Clock className="w-6 h-6 text-amber-400 shrink-0 animate-pulse" />
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-black bg-amber-500 text-ink px-2 py-0.5 rounded uppercase tracking-wider">
-                                  STANDBY STATUS
-                                </span>
-                                <h4 className="text-sm font-bold text-text uppercase">Standby in Holding Area (Unassigned)</h4>
-                              </div>
-                              <p className="text-xs text-text-dim mt-1">
-                                You are currently on standby awaiting call from the Referee-in-Charge (RIC). Please remain in the referee holding area or check the Live Display Board.
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setScreen('courtRosterDisplay')}
-                            className="bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-2 cursor-pointer shrink-0"
-                          >
-                            <Eye className="w-4 h-4" />
-                            <span>View Live Arena Board</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Search and Ring Filter Controls */}
-                    <div className="flex flex-col sm:flex-row justify-between items-center gap-3 bg-surface border border-line p-4 rounded-2xl">
-                      <div className="relative w-full sm:w-72">
-                        <Search className="w-4 h-4 text-text-dim absolute left-3 top-2.5" />
-                        <input
-                          type="text"
-                          placeholder="Find referee name, NRIC or club..."
-                          value={rosterSearchQuery}
-                          onChange={(e) => setRosterSearchQuery(e.target.value)}
-                          className="w-full bg-ink border border-line rounded-xl pl-9 pr-3 py-2 text-xs text-text focus:border-gold outline-none"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none">
-                        {['all', 'Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map((ring) => (
-                          <button
-                            key={ring}
-                            onClick={() => setRosterSelectedRing(ring)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase transition cursor-pointer whitespace-nowrap ${
-                              rosterSelectedRing === ring
-                                ? 'bg-gold text-ink'
-                                : 'bg-surface-2 text-text-dim hover:text-text border border-line'
-                            }`}
-                          >
-                            {ring === 'all' ? 'All Rings' : ring}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 4-Ring Distribution Grid */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4']
-                        .filter(ringName => rosterSelectedRing === 'all' || rosterSelectedRing === ringName)
-                        .map(ringName => {
-                          const ringRefs = referees.filter(r => r.courtAssignment === ringName);
-                          const matchRange = ringMatchNumbers[ringName];
-
-                          // Specific Roles
-                          const centerRef = ringRefs.find(r => r.dutyRole === 'Center Referee' || r.dutyRole === 'Center Ref (CR)');
-                          const corner1Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 1' || r.dutyRole === 'Corner Judge 1');
-                          const corner2Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 2' || r.dutyRole === 'Corner Judge 2');
-                          const techAssRef = ringRefs.find(r => r.dutyRole === 'Technical Assistant' || r.dutyRole === 'Technical Assistant (TA)');
-                          const reviewRef = ringRefs.find(r => r.dutyRole === 'Review Official' || r.dutyRole === 'Video Replay Official' || r.dutyRole === 'Video Replay / Review Official');
-
-                          // Other refs on this court that might not match exact role string
-                          const assignedRoleIds = new Set([centerRef?.id, corner1Ref?.id, corner2Ref?.id, techAssRef?.id, reviewRef?.id].filter(Boolean));
-                          const otherRefs = ringRefs.filter(r => !assignedRoleIds.has(r.id));
-
-                          const panelRoles = [
-                            { label: 'Center Referee (CR)', roleKey: 'CR', ref: centerRef, color: 'text-gold bg-gold/10 border-gold/30' },
-                            { label: 'Corner Judge 1', roleKey: 'CJ1', ref: corner1Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
-                            { label: 'Corner Judge 2', roleKey: 'CJ2', ref: corner2Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
-                            { label: 'Technical Assistant (TA)', roleKey: 'TA', ref: techAssRef, color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
-                            { label: 'Video Replay / Review Official', roleKey: 'VR', ref: reviewRef, color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
-                          ];
-
-                          return (
-                            <div key={ringName} className="bg-surface border border-line rounded-2xl p-5 shadow-md space-y-4 relative overflow-hidden">
-                              <div className="flex justify-between items-center border-b border-line pb-3">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center font-black text-gold text-base">
-                                    {ringName.replace('Ring ', 'R')}
-                                  </div>
-                                  <div>
-                                    <h3 className="font-extrabold text-gold text-base uppercase">{ringName}</h3>
-                                    {matchRange && (
-                                      <p className="text-[11px] font-mono font-bold text-gold/80">Match Range: {matchRange}</p>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-xs font-mono font-bold text-text-dim bg-ink/50 px-3 py-1 rounded-full border border-line">
-                                  {ringRefs.length} Assigned
-                                </span>
-                              </div>
-
-                              {/* Official 5-Person Panel List */}
-                              <div className="space-y-2 text-xs">
-                                {panelRoles.map(({ label, roleKey, ref, color }) => {
-                                  const isUser = ref && activeReferee && ref.id === activeReferee.id;
-                                  const isMatchSearch = rosterSearchQuery.trim() !== '' && ref && (
-                                    ref.fullName.toLowerCase().includes(rosterSearchQuery.toLowerCase()) ||
-                                    ref.clubName.toLowerCase().includes(rosterSearchQuery.toLowerCase()) ||
-                                    ref.nric.toLowerCase().includes(rosterSearchQuery.toLowerCase())
-                                  );
-
-                                  return (
-                                    <div
-                                      key={label}
-                                      className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
-                                        isUser
-                                          ? 'bg-gold/10 border-gold shadow-md ring-2 ring-gold/40'
-                                          : isMatchSearch
-                                          ? 'bg-emerald-500/10 border-emerald-500 ring-1 ring-emerald-500'
-                                          : ref
-                                          ? 'bg-ink/40 border-line/50 hover:border-text-dim/40'
-                                          : 'bg-surface-2/40 border-line/30'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2.5 min-w-0">
-                                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 border ${color}`}>
-                                          {roleKey}
-                                        </span>
-                                        <div>
-                                          <span className="text-[10px] text-text-dim uppercase font-bold tracking-wider block">{label}</span>
-                                          {ref ? (
-                                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                              <span className={`font-bold text-sm ${isUser ? 'text-gold' : 'text-text'}`}>
-                                                {ref.fullName}
-                                              </span>
-                                              <span className="text-[10px] font-bold text-gold/80 bg-gold/10 px-1.5 py-0.2 rounded">
-                                                {ref.kyorugiStatus}
-                                              </span>
-                                              <span className="text-[10px] text-text-dim truncate">
-                                                ({ref.clubName})
-                                              </span>
-                                              {isUser && (
-                                                <span className="text-[9px] bg-gold text-ink font-black px-1.5 py-0.2 rounded uppercase tracking-widest animate-pulse">
-                                                  YOU
-                                                </span>
-                                              )}
-                                            </div>
-                                          ) : (
-                                            <span className="text-text-dim text-xs italic">Unassigned</span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {ref && (
-                                        <div className="text-right shrink-0">
-                                          <span className="text-[10px] text-text-dim block uppercase">Match #</span>
-                                          <span className="text-xs font-mono font-bold text-gold">{ref.matchNo || matchRange || '-'}</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-
-                                {/* Extra Referees assigned to this court */}
-                                {otherRefs.length > 0 && (
-                                  <div className="pt-2 border-t border-line/30 mt-3">
-                                    <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider block mb-2">Additional Court Support:</span>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                      {otherRefs.map(r => (
-                                        <div key={r.id} className="bg-ink/30 p-2 rounded-lg border border-line/30 flex justify-between items-center text-xs">
-                                          <span className="font-semibold text-text truncate">{r.fullName} ({r.kyorugiStatus})</span>
-                                          <span className="text-[10px] text-gold font-mono">{r.dutyRole || 'Support'}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-
-                    {/* STANDBY / UNASSIGNED REFEREES HOLDING POOL */}
-                    {(() => {
-                      const unassignedRefs = referees.filter(r => !r.courtAssignment || r.courtAssignment === 'Unassigned' || !r.dutyRole || r.dutyRole === 'Unassigned');
-                      const filteredStandby = unassignedRefs.filter(r => {
-                        if (!rosterSearchQuery.trim()) return true;
-                        const q = rosterSearchQuery.toLowerCase();
-                        return r.fullName.toLowerCase().includes(q) || r.clubName.toLowerCase().includes(q) || r.nric.toLowerCase().includes(q);
-                      });
-
-                      return (
-                        <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4 mt-6">
-                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-line/50 pb-3 gap-2">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center font-bold text-amber-400">
-                                <Users className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <h3 className="font-extrabold text-text text-sm uppercase tracking-wider flex items-center gap-2">
-                                  <span>Standby Referees Holding Pool</span>
-                                  <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono px-2 py-0.5 rounded-full font-bold">
-                                    {unassignedRefs.length} Available
-                                  </span>
-                                </h3>
-                                <p className="text-[11px] text-text-dim">
-                                  Referees on standby awaiting court ring assignment from the Referee-in-Charge (RIC).
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {filteredStandby.length === 0 ? (
-                            <div className="py-6 text-center text-xs text-text-dim italic bg-ink/20 rounded-xl border border-line/30">
-                              {unassignedRefs.length === 0
-                                ? 'All registered referees are currently distributed on active ring duty panels.'
-                                : 'No standby referees matched your search filter.'}
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                              {filteredStandby.map((r) => {
-                                const isCurrentRef = activeReferee && r.id === activeReferee.id;
-                                return (
-                                  <div
-                                    key={r.id}
-                                    className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-2 ${
-                                      isCurrentRef
-                                        ? 'bg-amber-500/10 border-amber-500/60 ring-2 ring-amber-500/30'
-                                        : 'bg-ink/40 border-line/50 hover:border-amber-500/30'
-                                    }`}
-                                  >
-                                    <div className="min-w-0">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`font-bold text-xs truncate ${isCurrentRef ? 'text-amber-400' : 'text-text'}`}>
-                                          {r.fullName}
-                                        </span>
-                                        {isCurrentRef && (
-                                          <span className="text-[8px] font-black bg-amber-500 text-ink px-1 rounded uppercase">
-                                            YOU
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-text-dim">
-                                        <span className="text-gold font-bold">{r.kyorugiStatus} / {r.poomsaeStatus}</span>
-                                        <span>‚Ä¢</span>
-                                        <span className="truncate">{r.clubName}</span>
-                                      </div>
-                                    </div>
-                                    <span className="text-[9px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded shrink-0 uppercase tracking-wider">
-                                      Standby
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* REFEREE-IN-CHARGE (RIC) DASHBOARD */}
-        {screen === 'ricDashboard' && (
-          <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
-            {/* Header Banner */}
-            <div className="bg-gradient-to-r from-surface via-surface-2 to-surface border border-line rounded-3xl p-6 shadow-xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-80 h-80 bg-gold/5 rounded-full blur-3xl pointer-events-none"></div>
-              
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10">
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center shrink-0 shadow-inner">
-                    <Scale className="w-8 h-8 text-gold" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">Referee-in-Charge (RIC) Dashboard</h2>
-                      <span className="text-[10px] font-bold bg-gold text-ink px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                        RIC Management
-                      </span>
-                    </div>
-                    <p className="text-xs text-text-dim mt-1">
-                      Assign referees to courts/rings, manage officiating panels, oversee match duties, and verify conflict of interest.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Tournament Selector & Back to Pass */}
-                <div className="flex items-center gap-3 w-full lg:w-auto flex-wrap justify-end">
-                  <div className="flex items-center gap-2 bg-ink/40 p-2 rounded-xl border border-line/60">
-                    <Trophy className="w-4 h-4 text-gold shrink-0" />
-                    <select
-                      value={compId || ''}
-                      onChange={(e) => {
-                        const newId = e.target.value;
-                        const assignedCompId = activeReferee?.compId;
-                        if (assignedCompId && assignedCompId !== 'GLOBAL' && newId !== assignedCompId) {
-                          const assignedComp = competitions.find(c => c.id === assignedCompId);
-                          triggerMsg(`Access Denied: You are restricted to your Assigned Tournament Event (${assignedComp?.name || assignedCompId}).`, 'error');
-                          return;
-                        }
-                        setCompId(newId || null);
-                      }}
-                      className="bg-transparent text-xs font-bold text-text focus:outline-none cursor-pointer pr-2"
-                    >
-                      {competitions.filter(c => c.isActive !== false && (!activeReferee?.compId || activeReferee.compId === 'GLOBAL' || c.id === activeReferee.compId)).map(c => (
-                        <option key={c.id} value={c.id} className="bg-surface text-text">{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    onClick={() => setScreen('courtRosterDisplay')}
-                    className="bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span>Live Roster Board</span>
-                  </button>
-
-                  {activeReferee && (
-                    <button
-                      onClick={() => setScreen('refereeDashboard')}
-                      className="bg-surface-2 hover:bg-line border border-line text-text text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                    >
-                      <User className="w-4 h-4 text-gold" />
-                      <span>My Referee Pass</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Tournament Summary Bar */}
-              {activeComp && (
-                <div className="mt-6 pt-4 border-t border-line/50 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
-                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">Total Registered Referees</span>
-                    <span className="text-base font-bold text-gold font-mono">{referees.length}</span>
-                  </div>
-                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
-                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">International / National (IR/NR)</span>
-                    <span className="text-base font-bold text-emerald-400 font-mono">
-                      {referees.filter(r => ['IR', 'NR'].includes(r.kyorugiStatus) || ['IR', 'NR'].includes(r.poomsaeStatus)).length}
-                    </span>
-                  </div>
-                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
-                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">State / Trainee (SR/TR)</span>
-                    <span className="text-base font-bold text-blue-400 font-mono">
-                      {referees.filter(r => !['IR', 'NR'].includes(r.kyorugiStatus) && !['IR', 'NR'].includes(r.poomsaeStatus)).length}
-                    </span>
-                  </div>
-                  <div className="bg-ink/30 p-3 rounded-xl border border-line/30">
-                    <span className="text-text-dim block text-[10px] uppercase font-bold tracking-wider">Assigned Court Referees</span>
-                    <span className="text-base font-bold text-amber-400 font-mono">
-                      {referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned').length} / {referees.length}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* TAB SELECTOR */}
-            <div className="flex border-b border-line overflow-x-auto scrollbar-none gap-2">
-              <button
-                onClick={() => setRicTab('courtAssignments')}
-                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                  ricTab === 'courtAssignments'
-                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
-                    : 'border-transparent text-text-dim hover:text-text'
-                }`}
-              >
-                <Layout className="w-4 h-4" />
-                <span>Ring / Court Roster</span>
-              </button>
-
-              <button
-                onClick={() => setRicTab('refereeList')}
-                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                  ricTab === 'refereeList'
-                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
-                    : 'border-transparent text-text-dim hover:text-text'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Referee Directory & Roles ({referees.length})</span>
-              </button>
-
-              <button
-                onClick={() => setRicTab('matchScheduler')}
-                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                  ricTab === 'matchScheduler'
-                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
-                    : 'border-transparent text-text-dim hover:text-text'
-                }`}
-              >
-                <Activity className="w-4 h-4" />
-                <span>Match Duty Scheduler ({matchAssignments.length})</span>
-              </button>
-
-              <button
-                onClick={() => setRicTab('export')}
-                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                  ricTab === 'export'
-                    ? 'border-gold text-gold bg-gold/5 rounded-t-xl'
-                    : 'border-transparent text-text-dim hover:text-text'
-                }`}
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print & Export Officiating Roster</span>
-              </button>
-            </div>
-
-            {/* TAB 1: RING / COURT ROSTER */}
-            {ricTab === 'courtAssignments' && (() => {
-              // Helper to filter available referees for selection
-              const getAvailableForSlot = (slotRefId?: string) => {
-                return referees.filter(r => {
-                  if (slotRefId && r.id === slotRefId) return true;
-                  const isAssigned = r.courtAssignment && r.courtAssignment !== 'Unassigned' && r.dutyRole && r.dutyRole !== 'Unassigned';
-                  return !isAssigned;
-                });
-              };
-
-              const unassignedCount = referees.filter(r => !r.courtAssignment || r.courtAssignment === 'Unassigned' || !r.dutyRole || r.dutyRole === 'Unassigned').length;
-              const assignedCount = referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned' && r.dutyRole && r.dutyRole !== 'Unassigned').length;
-
-              return (
-                <div className="space-y-6 animate-fade-in">
-                  {/* Auto Balance Banner */}
-                  <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div>
-                      <h3 className="font-bold text-text uppercase tracking-wider text-sm flex items-center gap-2">
-                        <Sliders className="w-4 h-4 text-gold" />
-                        <span>Court Referee Panel Distribution</span>
-                      </h3>
-                      <p className="text-xs text-text-dim mt-0.5">Assign Center Referees, Corner Referees, and Ring Controllers to each competition mat/ring.</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={async () => {
-                          if (referees.length === 0) {
-                            triggerMsg('No registered referees found for this tournament.', 'error');
-                            return;
-                          }
-                          const courts = ['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'];
-                          const roles = ['Center Referee', 'Corner Referee 1', 'Corner Referee 2', 'Technical Assistant', 'Review Official'];
-                          
-                          // Sort referees: IR/NR first
-                          const sortedRefs = [...referees].sort((a, b) => {
-                            const aRank = ['IR', 'NR'].includes(a.kyorugiStatus) || ['IR', 'NR'].includes(a.poomsaeStatus) ? 2 : 1;
-                            const bRank = ['IR', 'NR'].includes(b.kyorugiStatus) || ['IR', 'NR'].includes(b.poomsaeStatus) ? 2 : 1;
-                            return bRank - aRank;
-                          });
-
-                          const updatedRefList: Referee[] = [];
-                          for (let i = 0; i < sortedRefs.length; i++) {
-                            const courtName = courts[i % courts.length];
-                            const roleName = roles[Math.floor(i / courts.length) % roles.length];
-                            const updated = {
-                              ...sortedRefs[i],
-                              courtAssignment: courtName,
-                              dutyRole: roleName
-                            };
-                            await saveRefereeToFirestore(updated);
-                            updatedRefList.push(updated);
-                          }
-                          setReferees(prev => prev.map(r => updatedRefList.find(u => u.id === r.id) || r));
-                          triggerMsg('Smart Balanced Referees evenly across Rings 1-4!', 'ok');
-                        }}
-                        className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow cursor-pointer"
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                        <span>Smart Auto-Balance Rings</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Available Pool Summary Bar */}
-                  <div className="bg-ink/40 border border-line/60 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-4 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-emerald-400" />
-                        <span className="font-bold text-text">Available Pool (Unassigned):</span>
-                        <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold text-xs">
-                          {unassignedCount} Referees
-                        </span>
-                      </div>
-                      <span className="text-text-dim hidden sm:inline">‚Ä¢</span>
-                      <div className="flex items-center gap-2">
-                        <Shield className="w-4 h-4 text-gold" />
-                        <span className="font-bold text-text">Distributed on Duty:</span>
-                        <span className="bg-gold/20 text-gold border border-gold/30 px-2.5 py-0.5 rounded-full font-mono font-bold text-xs">
-                          {assignedCount} Referees
-                        </span>
-                      </div>
-                    </div>
-
-                    {assignedCount > 0 && (
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm('Finish session for ALL rings and return all referees to the available list?')) return;
-                          const assignedRefs = referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned');
-                          for (const r of assignedRefs) {
-                            await saveRefereeToFirestore({ ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
-                          }
-                          setReferees(prev => prev.map(r => ({ ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' })));
-                          triggerMsg('Finished all ring sessions! All referees returned to available list.', 'ok');
-                        }}
-                        className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0"
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>Finish All Rings & Release Pool</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Rings Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map((ringName) => {
-                      const ringRefs = referees.filter(r => r.courtAssignment === ringName && r.dutyRole && r.dutyRole !== 'Unassigned');
-                      const centerRef = ringRefs.find(r => r.dutyRole === 'Center Referee');
-                      const corner1 = ringRefs.find(r => r.dutyRole === 'Corner Referee 1' || r.dutyRole === 'Corner Judge 1');
-                      const corner2 = ringRefs.find(r => r.dutyRole === 'Corner Referee 2' || r.dutyRole === 'Corner Judge 2');
-                      const techAssistant = ringRefs.find(r => r.dutyRole === 'Technical Assistant' || r.dutyRole === 'TA');
-                      const reviewOff = ringRefs.find(r => r.dutyRole === 'Review Official' || r.dutyRole === 'Video Replay Official' || r.dutyRole === 'Video Replay / Review Official');
-
-                      return (
-                        <div key={ringName} className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
-                          <div>
-                            <div className="flex justify-between items-center border-b border-line pb-3">
-                              <div className="flex items-center gap-2">
-                                <span className="w-3 h-3 rounded-full bg-gold"></span>
-                                <h3 className="font-bold text-text text-base uppercase tracking-wider">{ringName}</h3>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded font-mono">
-                                  {ringRefs.length} Referees
-                                </span>
-                                {ringRefs.length > 0 && (
-                                  <button
-                                    onClick={async () => {
-                                      if (!window.confirm(`Finish match session for ${ringName}? All ${ringRefs.length} assigned referee(s) will be released back to the available name list.`)) return;
-                                      const updatedRefs: Referee[] = [];
-                                      for (const ref of ringRefs) {
-                                        const updated = { ...ref, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' };
-                                        await saveRefereeToFirestore(updated);
-                                        updatedRefs.push(updated);
-                                      }
-                                      setReferees(prev => prev.map(r => {
-                                        const u = updatedRefs.find(item => item.id === r.id);
-                                        return u || r;
-                                      }));
-                                      triggerMsg(`Finished ${ringName} session! ${ringRefs.length} referee(s) returned to available list.`, 'ok');
-                                    }}
-                                    className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold px-2 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer shadow-sm"
-                                    title={`Finish ${ringName} session and release referees back to available name list`}
-                                  >
-                                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span>Finish</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Ring Level Match No / Range */}
-                            <div className="mt-3 bg-ink/60 border border-line/80 rounded-xl p-2 flex items-center justify-between gap-2">
-                              <span className="text-[10px] font-bold text-gold uppercase tracking-wider shrink-0 flex items-center gap-1">
-                                <Hash className="w-3.5 h-3.5" /> Match Range:
-                              </span>
-                              <input
-                                type="text"
-                                placeholder="e.g. M1 - M25"
-                                value={ringMatchNumbers[ringName] || ''}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setRingMatchNumbers(prev => {
-                                    const next = { ...prev, [ringName]: val };
-                                    if (compId) {
-                                      localStorage.setItem(`app:ringMatchNumbers:${compId}`, JSON.stringify(next));
-                                    }
-                                    return next;
-                                  });
-                                }}
-                                className="bg-surface text-xs font-bold text-text border border-line/50 rounded-lg px-2 py-1 focus:outline-none focus:border-gold w-28 placeholder:text-text-dim/40"
-                              />
-                            </div>
-
-                            <div className="space-y-3 mt-4">
-                              {/* Position 1: Center Referee (CR) */}
-                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
-                                <div className="flex justify-between items-center">
-                                  <label className="text-[10px] font-bold uppercase tracking-wider text-gold flex items-center gap-1">
-                                    <Shield className="w-3 h-3" /> Center Referee (1 CR)
-                                  </label>
-                                  {centerRef && (
-                                    <span className="text-[9px] bg-gold/20 text-gold px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
-                                  )}
-                                </div>
-                                <select
-                                  value={centerRef?.id || ''}
-                                  onChange={async (e) => {
-                                    const refId = e.target.value;
-                                    if (centerRef && centerRef.id !== refId) {
-                                      await saveRefereeToFirestore({ ...centerRef, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
-                                    }
-                                    if (refId) {
-                                      const targetRef = referees.find(r => r.id === refId);
-                                      if (targetRef) {
-                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Center Referee' };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (centerRef && r.id === centerRef.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
-                                        triggerMsg(`Assigned ${targetRef.fullName} as Center Referee for ${ringName}`, 'ok');
-                                      }
-                                    } else if (centerRef) {
-                                      setReferees(prev => prev.map(r => r.id === centerRef.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
-                                      triggerMsg(`Unassigned Center Referee from ${ringName}`, 'ok');
-                                    }
-                                  }}
-                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
-                                >
-                                  <option value="">-- Assign Center Ref --</option>
-                                  {getAvailableForSlot(centerRef?.id).map(r => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.fullName} ({r.kyorugiStatus}/{r.poomsaeStatus}) - {r.clubName}
-                                    </option>
-                                  ))}
-                                </select>
-                                {centerRef && (
-                                  <div className="flex items-center gap-1.5 pt-1">
-                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
-                                    <input
-                                      type="text"
-                                      placeholder="e.g. 1-15 or M101"
-                                      value={centerRef.matchNo || ''}
-                                      onChange={async (e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...centerRef, matchNo: val };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
-                                      }}
-                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Position 2: Corner Judge 1 */}
-                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
-                                <div className="flex justify-between items-center">
-                                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim flex items-center gap-1">
-                                    <User className="w-3 h-3 text-blue-400" /> Corner Judge 1
-                                  </label>
-                                  {corner1 && (
-                                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
-                                  )}
-                                </div>
-                                <select
-                                  value={corner1?.id || ''}
-                                  onChange={async (e) => {
-                                    const refId = e.target.value;
-                                    if (corner1 && corner1.id !== refId) {
-                                      await saveRefereeToFirestore({ ...corner1, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
-                                    }
-                                    if (refId) {
-                                      const targetRef = referees.find(r => r.id === refId);
-                                      if (targetRef) {
-                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Corner Referee 1' };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (corner1 && r.id === corner1.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
-                                        triggerMsg(`Assigned ${targetRef.fullName} as Corner Judge 1 for ${ringName}`, 'ok');
-                                      }
-                                    } else if (corner1) {
-                                      setReferees(prev => prev.map(r => r.id === corner1.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
-                                      triggerMsg(`Unassigned Corner Judge 1 from ${ringName}`, 'ok');
-                                    }
-                                  }}
-                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
-                                >
-                                  <option value="">-- Assign Corner Judge 1 --</option>
-                                  {getAvailableForSlot(corner1?.id).map(r => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
-                                    </option>
-                                  ))}
-                                </select>
-                                {corner1 && (
-                                  <div className="flex items-center gap-1.5 pt-1">
-                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
-                                    <input
-                                      type="text"
-                                      placeholder="e.g. 1-15 or M101"
-                                      value={corner1.matchNo || ''}
-                                      onChange={async (e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...corner1, matchNo: val };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
-                                      }}
-                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Position 3: Corner Judge 2 */}
-                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
-                                <div className="flex justify-between items-center">
-                                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim flex items-center gap-1">
-                                    <User className="w-3 h-3 text-blue-400" /> Corner Judge 2
-                                  </label>
-                                  {corner2 && (
-                                    <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
-                                  )}
-                                </div>
-                                <select
-                                  value={corner2?.id || ''}
-                                  onChange={async (e) => {
-                                    const refId = e.target.value;
-                                    if (corner2 && corner2.id !== refId) {
-                                      await saveRefereeToFirestore({ ...corner2, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
-                                    }
-                                    if (refId) {
-                                      const targetRef = referees.find(r => r.id === refId);
-                                      if (targetRef) {
-                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Corner Referee 2' };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (corner2 && r.id === corner2.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
-                                        triggerMsg(`Assigned ${targetRef.fullName} as Corner Judge 2 for ${ringName}`, 'ok');
-                                      }
-                                    } else if (corner2) {
-                                      setReferees(prev => prev.map(r => r.id === corner2.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
-                                      triggerMsg(`Unassigned Corner Judge 2 from ${ringName}`, 'ok');
-                                    }
-                                  }}
-                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
-                                >
-                                  <option value="">-- Assign Corner Judge 2 --</option>
-                                  {getAvailableForSlot(corner2?.id).map(r => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
-                                    </option>
-                                  ))}
-                                </select>
-                                {corner2 && (
-                                  <div className="flex items-center gap-1.5 pt-1">
-                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
-                                    <input
-                                      type="text"
-                                      placeholder="e.g. 1-15 or M101"
-                                      value={corner2.matchNo || ''}
-                                      onChange={async (e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...corner2, matchNo: val };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
-                                      }}
-                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Position 4: Technical Assistant */}
-                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
-                                <div className="flex justify-between items-center">
-                                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
-                                    <Cpu className="w-3 h-3" /> Technical Assistant (TA)
-                                  </label>
-                                  {techAssistant && (
-                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
-                                  )}
-                                </div>
-                                <select
-                                  value={techAssistant?.id || ''}
-                                  onChange={async (e) => {
-                                    const refId = e.target.value;
-                                    if (techAssistant && techAssistant.id !== refId) {
-                                      await saveRefereeToFirestore({ ...techAssistant, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
-                                    }
-                                    if (refId) {
-                                      const targetRef = referees.find(r => r.id === refId);
-                                      if (targetRef) {
-                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Technical Assistant' };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (techAssistant && r.id === techAssistant.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
-                                        triggerMsg(`Assigned ${targetRef.fullName} as Technical Assistant for ${ringName}`, 'ok');
-                                      }
-                                    } else if (techAssistant) {
-                                      setReferees(prev => prev.map(r => r.id === techAssistant.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
-                                      triggerMsg(`Unassigned Technical Assistant from ${ringName}`, 'ok');
-                                    }
-                                  }}
-                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
-                                >
-                                  <option value="">-- Assign Technical Assistant --</option>
-                                  {getAvailableForSlot(techAssistant?.id).map(r => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
-                                    </option>
-                                  ))}
-                                </select>
-                                {techAssistant && (
-                                  <div className="flex items-center gap-1.5 pt-1">
-                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
-                                    <input
-                                      type="text"
-                                      placeholder="e.g. 1-15 or M101"
-                                      value={techAssistant.matchNo || ''}
-                                      onChange={async (e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...techAssistant, matchNo: val };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
-                                      }}
-                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Position 5: Video Replay / Review Official */}
-                              <div className="bg-surface-2/40 border border-line/50 rounded-xl p-2.5 space-y-1.5">
-                                <div className="flex justify-between items-center">
-                                  <label className="text-[10px] font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1">
-                                    <Video className="w-3 h-3" /> Video Replay / Review Official
-                                  </label>
-                                  {reviewOff && (
-                                    <span className="text-[9px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded font-mono font-bold">Assigned</span>
-                                  )}
-                                </div>
-                                <select
-                                  value={reviewOff?.id || ''}
-                                  onChange={async (e) => {
-                                    const refId = e.target.value;
-                                    if (reviewOff && reviewOff.id !== refId) {
-                                      await saveRefereeToFirestore({ ...reviewOff, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' });
-                                    }
-                                    if (refId) {
-                                      const targetRef = referees.find(r => r.id === refId);
-                                      if (targetRef) {
-                                        const updated = { ...targetRef, courtAssignment: ringName, dutyRole: 'Review Official' };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : (reviewOff && r.id === reviewOff.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r)));
-                                        triggerMsg(`Assigned ${targetRef.fullName} as Review Official for ${ringName}`, 'ok');
-                                      }
-                                    } else if (reviewOff) {
-                                      setReferees(prev => prev.map(r => r.id === reviewOff.id ? { ...r, courtAssignment: 'Unassigned', dutyRole: 'Unassigned', matchNo: '' } : r));
-                                      triggerMsg(`Unassigned Review Official from ${ringName}`, 'ok');
-                                    }
-                                  }}
-                                  className="w-full bg-ink border border-line text-xs font-semibold rounded-lg p-1.5 text-text focus:border-gold outline-none"
-                                >
-                                  <option value="">-- Assign Review Official --</option>
-                                  {getAvailableForSlot(reviewOff?.id).map(r => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.fullName} ({r.kyorugiStatus}) - {r.clubName}
-                                    </option>
-                                  ))}
-                                </select>
-                                {reviewOff && (
-                                  <div className="flex items-center gap-1.5 pt-1">
-                                    <span className="text-[9px] font-bold text-text-dim uppercase shrink-0">Match No:</span>
-                                    <input
-                                      type="text"
-                                      placeholder="e.g. 1-15 or M101"
-                                      value={reviewOff.matchNo || ''}
-                                      onChange={async (e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...reviewOff, matchNo: val };
-                                        await saveRefereeToFirestore(updated);
-                                        setReferees(prev => prev.map(r => r.id === updated.id ? updated : r));
-                                      }}
-                                      className="w-full bg-ink border border-line/60 rounded-md px-2 py-0.5 text-[11px] font-bold text-gold focus:outline-none focus:border-gold"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Ring Quality Indicator */}
-                          <div className="pt-3 border-t border-line/40 text-[10px] text-text-dim flex justify-between items-center">
-                            <span>Qualification Mix:</span>
-                            <span className="font-bold text-gold">
-                              {ringRefs.filter(r => ['IR', 'NR'].includes(r.kyorugiStatus)).length} Senior / {ringRefs.filter(r => ['SR', 'TR'].includes(r.kyorugiStatus)).length} State
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* TAB 2: REFEREE DIRECTORY */}
-            {ricTab === 'refereeList' && (
-              <div className="space-y-6 animate-fade-in">
-                {/* Search & Filter Bar */}
-                <div className="bg-surface border border-line p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="relative w-full sm:w-72">
-                    <Search className="w-4 h-4 text-text-dim absolute left-3 top-3" />
-                    <input
-                      type="text"
-                      placeholder="Search referee name, club, or NRIC..."
-                      value={ricSearchQuery}
-                      onChange={(e) => setRicSearchQuery(e.target.value)}
-                      className="w-full bg-ink border border-line text-xs font-semibold rounded-xl py-2 pl-9 pr-3 text-text focus:outline-none focus:border-gold"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-3 w-full sm:w-auto">
-                    <select
-                      value={ricFilterQual}
-                      onChange={(e) => setRicFilterQual(e.target.value)}
-                      className="bg-ink border border-line text-xs font-bold rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold cursor-pointer"
-                    >
-                      <option value="all">All Qualifications</option>
-                      <option value="IR">IR - International</option>
-                      <option value="NR">NR - National</option>
-                      <option value="SR">SR - State</option>
-                      <option value="TR">TR - Trainee</option>
-                    </select>
-
-                    <select
-                      value={ricFilterRing}
-                      onChange={(e) => setRicFilterRing(e.target.value)}
-                      className="bg-ink border border-line text-xs font-bold rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold cursor-pointer"
-                    >
-                      <option value="all">All Rings / Courts</option>
-                      <option value="Ring 1">Ring 1</option>
-                      <option value="Ring 2">Ring 2</option>
-                      <option value="Ring 3">Ring 3</option>
-                      <option value="Ring 4">Ring 4</option>
-                      <option value="Unassigned">Unassigned Only</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Referees Directory Table */}
-                <div className="bg-surface border border-line rounded-2xl shadow-sm overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-surface-2/60 text-text-dim uppercase tracking-wider text-[10px] border-b border-line">
-                        <tr>
-                          <th className="p-4 font-bold">Referee Name & NRIC</th>
-                          <th className="p-4 font-bold">State / Club</th>
-                          <th className="p-4 font-bold">Qualifications</th>
-                          <th className="p-4 font-bold">Assigned Ring</th>
-                          <th className="p-4 font-bold">Duty Role</th>
-                          <th className="p-4 font-bold">Match No</th>
-                          <th className="p-4 font-bold">Special Role</th>
-                          <th className="p-4 font-bold text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-line/40 font-medium">
-                        {referees
-                          .filter(r => {
-                            const matchSearch = r.fullName.toLowerCase().includes(ricSearchQuery.toLowerCase()) ||
-                                              r.nric.toLowerCase().includes(ricSearchQuery.toLowerCase()) ||
-                                              r.clubName.toLowerCase().includes(ricSearchQuery.toLowerCase());
-                            const matchQual = ricFilterQual === 'all' || r.kyorugiStatus === ricFilterQual || r.poomsaeStatus === ricFilterQual;
-                            const matchRing = ricFilterRing === 'all' || 
-                              (ricFilterRing === 'Unassigned' ? (!r.courtAssignment || r.courtAssignment === 'Unassigned') : r.courtAssignment === ricFilterRing);
-                            return matchSearch && matchQual && matchRing;
-                          })
-                          .sort((a, b) => a.fullName.localeCompare(b.fullName))
-                          .map((r) => (
-                            <tr key={r.id} className="hover:bg-ink/20 transition">
-                              <td className="p-4">
-                                <div className="flex items-center space-x-3">
-                                  <div className="w-8 h-8 rounded-full bg-ink border border-line flex items-center justify-center shrink-0 font-bold text-gold">
-                                    {r.photo ? (
-                                      <img src={r.photo} alt={r.fullName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
-                                    ) : (
-                                      r.fullName.charAt(0)
-                                    )}
-                                  </div>
-                                  <div>
-                                    <span className="font-bold text-text text-sm block">{r.fullName}</span>
-                                    <span className="text-[10px] text-text-dim font-mono">{r.nric} ‚Ä¢ {r.phone}</span>
-                                  </div>
-                                </div>
-                              </td>
-
-                              <td className="p-4 font-semibold text-text">{r.clubName}</td>
-
-                              <td className="p-4">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded text-[10px] font-bold">
-                                    Kyo: {r.kyorugiStatus}
-                                  </span>
-                                  <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-bold">
-                                    Poo: {r.poomsaeStatus}
-                                  </span>
-                                </div>
-                              </td>
-
-                              <td className="p-4">
-                                <select
-                                  value={r.courtAssignment || 'Unassigned'}
-                                  onChange={async (e) => {
-                                    const updated = { ...r, courtAssignment: e.target.value };
-                                    await saveRefereeToFirestore(updated);
-                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
-                                    triggerMsg(`Updated court for ${r.fullName}`, 'ok');
-                                  }}
-                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-text focus:border-gold outline-none cursor-pointer"
-                                >
-                                  <option value="Unassigned">Unassigned</option>
-                                  <option value="Ring 1">Ring 1</option>
-                                  <option value="Ring 2">Ring 2</option>
-                                  <option value="Ring 3">Ring 3</option>
-                                  <option value="Ring 4">Ring 4</option>
-                                </select>
-                              </td>
-
-                              <td className="p-4">
-                                <select
-                                  value={r.dutyRole || 'Unassigned'}
-                                  onChange={async (e) => {
-                                    const updated = { ...r, dutyRole: e.target.value };
-                                    await saveRefereeToFirestore(updated);
-                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
-                                    triggerMsg(`Updated duty role for ${r.fullName}`, 'ok');
-                                  }}
-                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-text focus:border-gold outline-none cursor-pointer"
-                                >
-                                  <option value="Unassigned">Unassigned</option>
-                                  <option value="Center Referee">Center Referee</option>
-                                  <option value="Corner Referee 1">Corner Referee 1</option>
-                                  <option value="Corner Referee 2">Corner Referee 2</option>
-                                  <option value="Technical Assistant">Technical Assistant</option>
-                                  <option value="Review Official">Review Official</option>
-                                  <option value="Ring Inspector">Ring Inspector</option>
-                                </select>
-                              </td>
-
-                              <td className="p-4">
-                                <input
-                                  type="text"
-                                  placeholder="e.g. M1-10"
-                                  value={r.matchNo || ''}
-                                  onChange={async (e) => {
-                                    const updated = { ...r, matchNo: e.target.value };
-                                    await saveRefereeToFirestore(updated);
-                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
-                                  }}
-                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-gold focus:border-gold outline-none w-24"
-                                />
-                              </td>
-
-                              <td className="p-4">
-                                <select
-                                  value={r.specialRole || 'None'}
-                                  onChange={async (e) => {
-                                    const updated = { ...r, specialRole: e.target.value as any };
-                                    await saveRefereeToFirestore(updated);
-                                    setReferees(prev => prev.map(ref => ref.id === r.id ? updated : ref));
-                                    triggerMsg(`Updated special role for ${r.fullName}`, 'ok');
-                                  }}
-                                  className="bg-ink border border-line text-xs font-bold rounded-lg p-1.5 text-gold focus:border-gold outline-none cursor-pointer"
-                                >
-                                  <option value="None">None (Standard)</option>
-                                  <option value="RIC">RIC (Referee In-Charge)</option>
-                                  <option value="TD">TD (Technical Delegate)</option>
-                                  <option value="CSB">CSB (Supervisory Board)</option>
-                                  <option value="GAME_MASTER">Game Master</option>
-                                  <option value="TECHNICAL_OPERATOR">Technical Operator</option>
-                                  <option value="VIRTUAL_REFEREE">Virtual Referee</option>
-                                </select>
-                              </td>
-
-                              <td className="p-4 text-right">
-                                <span className="text-[10px] text-text-dim">{r.residentialLocation} ({r.distance} KM)</span>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 3: MATCH DUTY SCHEDULER */}
-            {ricTab === 'matchScheduler' && (
-              <div className="space-y-6 animate-fade-in">
-                <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="font-bold text-text uppercase tracking-wider text-sm flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-gold" />
-                      <span>Match Officiating Panel Scheduler</span>
-                    </h3>
-                    <p className="text-xs text-text-dim mt-0.5">Assign referee panels to specific match numbers and verify conflict-of-interest checks.</p>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      const newMatch: MatchAssignment = {
-                        id: `MATCH_${Date.now()}`,
-                        compId: compId || 'GLOBAL',
-                        matchNo: `M${matchAssignments.length + 101}`,
-                        court: 'Ring 1',
-                        division: 'Kyorugi Male Senior Finweight',
-                        bluePlayerName: 'Ali Bin Ahmad',
-                        blueClub: 'PERAK TKD',
-                        redPlayerName: 'Chong Wei',
-                        redClub: 'SELANGOR TKD',
-                        status: 'Scheduled'
-                      };
-                      const updated = [...matchAssignments, newMatch];
-                      saveMatchAssignments(updated);
-                      triggerMsg('Added new match slot for referee assignment.', 'ok');
-                    }}
-                    className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Create Match Slot</span>
-                  </button>
-                </div>
-
-                {/* Match Cards List */}
-                <div className="space-y-4">
-                  {matchAssignments.length === 0 ? (
-                    <div className="bg-surface p-8 rounded-2xl border border-line text-center space-y-3">
-                      <Activity className="w-10 h-10 text-gold/30 mx-auto" />
-                      <p className="text-sm font-bold text-text uppercase">No Match Schedules Created Yet</p>
-                      <p className="text-xs text-text-dim">Click "Create Match Slot" above to begin scheduling match referee panels.</p>
-                    </div>
-                  ) : (
-                    matchAssignments.map((match) => {
-                      const centerRef = referees.find(r => r.id === match.centerRefereeId);
-                      const corner1Ref = referees.find(r => r.id === match.corner1RefereeId);
-                      const corner2Ref = referees.find(r => r.id === match.corner2RefereeId);
-                      const techAssRef = referees.find(r => r.id === match.technicalAssistantId);
-                      const reviewRef = referees.find(r => r.id === match.reviewOfficialId);
-
-                      // Conflict Check: Check if any assigned referee belongs to the same club as Blue or Red player!
-                      const assignedReferees = [centerRef, corner1Ref, corner2Ref, techAssRef, reviewRef].filter(Boolean) as Referee[];
-                      const conflicts = assignedReferees.filter(r => 
-                        (match.blueClub && r.clubName.toLowerCase().includes(match.blueClub.toLowerCase())) ||
-                        (match.redClub && r.clubName.toLowerCase().includes(match.redClub.toLowerCase()))
-                      );
-
-                      return (
-                        <div key={match.id} className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
-                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-line/40 pb-3">
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono font-bold text-base text-gold bg-gold/10 px-3 py-1 rounded-lg border border-gold/20">
-                                {match.matchNo}
-                              </span>
-                              <div>
-                                <span className="font-bold text-text text-sm uppercase">{match.division}</span>
-                                <span className="text-xs text-text-dim block">{match.court}</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                              {conflicts.length > 0 ? (
-                                <span className="text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                  <AlertCircle className="w-3 h-3" />
-                                  <span>Conflict Warning: {conflicts.map(c => c.fullName).join(', ')}</span>
-                                </span>
-                              ) : (
-                                <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                  <CheckCircle className="w-3 h-3" />
-                                  <span>Clean Panel (No Conflict)</span>
-                                </span>
-                              )}
-
-                              <button
-                                onClick={() => {
-                                  const updated = matchAssignments.filter(m => m.id !== match.id);
-                                  saveMatchAssignments(updated);
-                                  triggerMsg(`Deleted match ${match.matchNo}`, 'ok');
-                                }}
-                                className="text-hong hover:text-red-400 p-1 cursor-pointer"
-                                title="Delete Match"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Match Competitors */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-ink/30 p-3 rounded-xl border border-line/30 text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full bg-blue-500 shrink-0"></span>
-                              <span className="font-bold text-blue-400">BLUE:</span>
-                              <span className="text-text font-semibold">{match.bluePlayerName}</span>
-                              <span className="text-text-dim font-mono">({match.blueClub})</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full bg-red-500 shrink-0"></span>
-                              <span className="font-bold text-red-400">RED:</span>
-                              <span className="text-text font-semibold">{match.redPlayerName}</span>
-                              <span className="text-text-dim font-mono">({match.redClub})</span>
-                            </div>
-                          </div>
-
-                          {/* Referee Panel Selectors */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
-                            <div>
-                              <label className="text-[10px] font-bold text-gold uppercase tracking-wider block mb-1">
-                                Center Ref (CR)
-                              </label>
-                              <select
-                                value={match.centerRefereeId || ''}
-                                onChange={(e) => {
-                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, centerRefereeId: e.target.value } : m);
-                                  saveMatchAssignments(updated);
-                                }}
-                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
-                              >
-                                <option value="">-- Center Ref --</option>
-                                {referees.map(r => (
-                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider block mb-1">
-                                Corner Judge 1
-                              </label>
-                              <select
-                                value={match.corner1RefereeId || ''}
-                                onChange={(e) => {
-                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, corner1RefereeId: e.target.value } : m);
-                                  saveMatchAssignments(updated);
-                                }}
-                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
-                              >
-                                <option value="">-- Corner 1 --</option>
-                                {referees.map(r => (
-                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider block mb-1">
-                                Corner Judge 2
-                              </label>
-                              <select
-                                value={match.corner2RefereeId || ''}
-                                onChange={(e) => {
-                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, corner2RefereeId: e.target.value } : m);
-                                  saveMatchAssignments(updated);
-                                }}
-                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
-                              >
-                                <option value="">-- Corner 2 --</option>
-                                {referees.map(r => (
-                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-1">
-                                Tech Assistant (TA)
-                              </label>
-                              <select
-                                value={match.technicalAssistantId || ''}
-                                onChange={(e) => {
-                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, technicalAssistantId: e.target.value } : m);
-                                  saveMatchAssignments(updated);
-                                }}
-                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
-                              >
-                                <option value="">-- Tech Assistant --</option>
-                                {referees.map(r => (
-                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block mb-1">
-                                Video Replay / Review
-                              </label>
-                              <select
-                                value={match.reviewOfficialId || ''}
-                                onChange={(e) => {
-                                  const updated = matchAssignments.map(m => m.id === match.id ? { ...m, reviewOfficialId: e.target.value } : m);
-                                  saveMatchAssignments(updated);
-                                }}
-                                className="w-full bg-ink border border-line rounded-xl p-2 text-text font-semibold focus:border-gold outline-none cursor-pointer text-xs"
-                              >
-                                <option value="">-- Review Official --</option>
-                                {referees.map(r => (
-                                  <option key={r.id} value={r.id}>{r.fullName} ({r.clubName})</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 4: PRINT & EXPORT */}
-            {ricTab === 'export' && (
-              <div className="space-y-6 animate-fade-in">
-                <div className="bg-surface border border-line p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="font-bold text-text uppercase tracking-wider text-sm flex items-center gap-2">
-                      <Printer className="w-4 h-4 text-gold" />
-                      <span>Official Ring Referee Duty Roster</span>
-                    </h3>
-                    <p className="text-xs text-text-dim mt-0.5">Export printable officiating schedule for tournament bulletin board & broadcast.</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        window.print();
-                      }}
-                      className="bg-surface-2 hover:bg-line border border-line text-text text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                    >
-                      <Printer className="w-4 h-4 text-gold" />
-                      <span>Print Roster</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        const lines = [
-                          `üèÜ *${activeComp?.name || 'TAEKWONDO CHAMPIONSHIP'} - REFEREE DUTY ROSTER*`,
-                          `üìÖ Date: ${activeComp?.date || ''} | Venue: ${activeComp?.venue || ''}`,
-                          `----------------------------------------`,
-                          ...['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map(ring => {
-                            const ringRefs = referees.filter(r => r.courtAssignment === ring);
-                            const range = ringMatchNumbers[ring] ? ` [Matches: ${ringMatchNumbers[ring]}]` : '';
-                            return `\n*${ring.toUpperCase()}*${range} (${ringRefs.length} Referees):\n` +
-                              (ringRefs.length > 0
-                                ? ringRefs.map(r => `‚Ä¢ ${r.dutyRole || 'Corner'}: ${r.fullName} (${r.kyorugiStatus})${r.matchNo ? ` [Match #${r.matchNo}]` : ''} - ${r.clubName}`).join('\n')
-                                : '‚Ä¢ None assigned');
-                          })
-                        ];
-                        navigator.clipboard.writeText(lines.join('\n'));
-                        triggerMsg('Copied WhatsApp Broadcast Roster to Clipboard!', 'ok');
-                      }}
-                      className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow"
-                    >
-                      <Copy className="w-4 h-4" />
-                      <span>Copy WhatsApp Broadcast Text</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Printable Duty Table */}
-                <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm space-y-6">
-                  <div className="text-center border-b border-line pb-4">
-                    <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">
-                      {activeComp?.name || 'TAEKWONDO CHAMPIONSHIP'}
-                    </h2>
-                    <p className="text-xs text-gold font-bold uppercase tracking-widest mt-1">Official Ring Referee Assignment Roster</p>
-                    <p className="text-[10px] text-text-dim mt-0.5">Approved by Referee-in-Charge (RIC)</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map(ringName => {
-                      const ringRefs = referees.filter(r => r.courtAssignment === ringName);
-                      return (
-                        <div key={ringName} className="border border-line rounded-xl p-4 space-y-3 bg-ink/20">
-                          <div className="flex justify-between items-center border-b border-line/40 pb-2">
-                            <div>
-                              <span className="font-bold text-gold text-sm uppercase">{ringName}</span>
-                              {ringMatchNumbers[ringName] && (
-                                <span className="text-[10px] text-gold/80 font-mono font-bold block">Match Range: {ringMatchNumbers[ringName]}</span>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-text-dim font-mono">{ringRefs.length} Assigned</span>
-                          </div>
-
-                          <table className="w-full text-left text-xs">
-                            <thead className="text-[9px] text-text-dim uppercase font-bold border-b border-line/20">
-                              <tr>
-                                <th className="py-1">Role</th>
-                                <th className="py-1">Match #</th>
-                                <th className="py-1">Referee Name</th>
-                                <th className="py-1">Rank</th>
-                                <th className="py-1">Club</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-line/20">
-                              {ringRefs.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="py-2 text-[10px] text-text-dim text-center italic">No referees assigned yet</td>
-                                </tr>
-                              ) : (
-                                ringRefs.map(r => (
-                                  <tr key={r.id}>
-                                    <td className="py-1.5 font-bold text-gold text-[10px]">{r.dutyRole || 'Corner'}</td>
-                                    <td className="py-1.5 font-mono text-gold text-[10px] font-bold">{r.matchNo || '-'}</td>
-                                    <td className="py-1.5 font-semibold text-text">{r.fullName}</td>
-                                    <td className="py-1.5 text-text-dim text-[10px]">{r.kyorugiStatus}</td>
-                                    <td className="py-1.5 text-text-dim text-[10px]">{r.clubName}</td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* STANDALONE COURT REFEREE DISTRIBUTION BOARD (LIVE TV / REFEREE DISPLAY) */}
-        {screen === 'courtRosterDisplay' && (
-          <div className="max-w-[1600px] mx-auto space-y-6 animate-fade-in p-2 sm:p-4">
-            {/* Top Control Bar */}
-            <div className="bg-surface border border-line rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-gold/10 border border-gold/40 flex items-center justify-center shrink-0 shadow-inner">
-                  <Scale className="w-8 h-8 text-gold" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-black bg-emerald-500 text-ink px-2.5 py-0.5 rounded-full uppercase tracking-widest animate-pulse">
-                      LIVE DISPLAY BOARD
-                    </span>
-                    <span className="text-[10px] font-bold text-gold bg-gold/10 border border-gold/30 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                      RIC Referee Distribution
-                    </span>
-                  </div>
-                  <h1 className="text-2xl font-black uppercase tracking-wider text-text font-sans mt-1">
-                    {activeComp?.name || 'TAEKWONDO CHAMPIONSHIP'}
-                  </h1>
-                  <p className="text-xs text-text-dim flex items-center gap-3 mt-1">
-                    <span>Venue: <strong className="text-text">{activeComp?.venue || 'Main Arena'}</strong></span>
-                    <span>‚Ä¢</span>
-                    <span>Total Referees: <strong className="text-gold">{referees.length}</strong></span>
-                    <span>‚Ä¢</span>
-                    <span>Assigned: <strong className="text-emerald-400">{referees.filter(r => r.courtAssignment && r.courtAssignment !== 'Unassigned').length}</strong></span>
-                  </p>
-                </div>
-              </div>
-
-              {/* Actions & Navigation */}
-              <div className="flex items-center gap-3 flex-wrap justify-end w-full md:w-auto">
-                {/* Search Bar */}
-                <div className="relative w-full md:w-64">
-                  <Search className="w-4 h-4 text-text-dim absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Search referee name, club..."
-                    value={rosterSearchQuery}
-                    onChange={(e) => setRosterSearchQuery(e.target.value)}
-                    className="w-full bg-ink border border-line rounded-xl pl-9 pr-3 py-2 text-xs text-text focus:border-gold outline-none"
-                  />
-                  {rosterSearchQuery && (
-                    <button onClick={() => setRosterSearchQuery('')} className="absolute right-2 top-2 text-text-dim hover:text-text text-xs">
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => window.print()}
-                  className="bg-surface-2 hover:bg-line border border-line text-text text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-4 h-4 text-gold" />
-                  <span>Print Board</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    if ((role as string) === 'ric' || user?.startsWith('RIC_')) {
-                      setScreen('ricDashboard');
-                    } else if (role === 'referee' || activeReferee) {
-                      setScreen('refereeDashboard');
-                    } else {
-                      setScreen('login');
-                    }
-                  }}
-                  className="bg-gold hover:opacity-90 text-ink text-xs font-bold px-5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Exit Board</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 4-Ring Distribution Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'].map((ringName) => {
-                const ringRefs = referees.filter(r => r.courtAssignment === ringName);
-                const matchRange = ringMatchNumbers[ringName];
-
-                const centerRef = ringRefs.find(r => r.dutyRole === 'Center Referee' || r.dutyRole === 'Center Ref (CR)');
-                const corner1Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 1' || r.dutyRole === 'Corner Judge 1');
-                const corner2Ref = ringRefs.find(r => r.dutyRole === 'Corner Referee 2' || r.dutyRole === 'Corner Judge 2');
-                const techAssRef = ringRefs.find(r => r.dutyRole === 'Technical Assistant' || r.dutyRole === 'Technical Assistant (TA)');
-                const reviewRef = ringRefs.find(r => r.dutyRole === 'Review Official' || r.dutyRole === 'Video Replay Official' || r.dutyRole === 'Video Replay / Review Official');
-
-                const panelRoles = [
-                  { label: 'Center Referee (CR)', roleKey: 'CR', ref: centerRef, color: 'text-gold bg-gold/10 border-gold/40' },
-                  { label: 'Corner Judge 1', roleKey: 'CJ1', ref: corner1Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/40' },
-                  { label: 'Corner Judge 2', roleKey: 'CJ2', ref: corner2Ref, color: 'text-blue-400 bg-blue-500/10 border-blue-500/40' },
-                  { label: 'Technical Assistant (TA)', roleKey: 'TA', ref: techAssRef, color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/40' },
-                  { label: 'Video Replay / Review Official', roleKey: 'VR', ref: reviewRef, color: 'text-purple-400 bg-purple-500/10 border-purple-500/40' },
-                ];
-
-                return (
-                  <div key={ringName} className="bg-surface border-2 border-line rounded-3xl p-6 shadow-xl space-y-4 relative overflow-hidden bg-gradient-to-b from-surface via-surface-2 to-surface">
-                    <div className="flex justify-between items-center border-b border-line/60 pb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-2xl bg-gold/10 border border-gold/40 flex items-center justify-center font-black text-gold text-xl shadow-inner">
-                          {ringName.replace('Ring ', 'R')}
-                        </div>
-                        <div>
-                          <h2 className="font-black text-gold text-xl uppercase tracking-wider">{ringName}</h2>
-                          {matchRange && (
-                            <span className="text-xs font-mono font-bold text-gold/90 bg-gold/10 border border-gold/20 px-2.5 py-0.5 rounded-md inline-block mt-0.5">
-                              Matches: {matchRange}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span className="text-xs font-mono font-bold text-text bg-ink/80 px-3.5 py-1.5 rounded-xl border border-line">
-                        {ringRefs.length} Officials Assigned
-                      </span>
-                    </div>
-
-                    {/* 5 Official Rows */}
-                    <div className="space-y-3">
-                      {panelRoles.map(({ label, roleKey, ref, color }) => {
-                        const isMatch = rosterSearchQuery.trim() !== '' && ref && (
-                          ref.fullName.toLowerCase().includes(rosterSearchQuery.toLowerCase()) ||
-                          ref.clubName.toLowerCase().includes(rosterSearchQuery.toLowerCase())
-                        );
-
-                        return (
-                          <div
-                            key={label}
-                            className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
-                              isMatch
-                                ? 'bg-gold/20 border-gold ring-2 ring-gold/60 scale-[1.01]'
-                                : ref
-                                ? 'bg-ink/50 border-line/60 hover:border-text-dim'
-                                : 'bg-surface-2/30 border-dashed border-line/40'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className={`text-xs font-black px-2.5 py-1 rounded-lg uppercase tracking-wider shrink-0 border ${color}`}>
-                                {roleKey}
-                              </span>
-                              <div className="min-w-0">
-                                <span className="text-[10px] text-text-dim uppercase font-bold tracking-widest block">{label}</span>
-                                {ref ? (
-                                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                    <span className="font-black text-base text-text tracking-wide">
-                                      {ref.fullName}
-                                    </span>
-                                    <span className="text-[10px] font-bold text-gold bg-gold/10 px-2 py-0.5 rounded border border-gold/20">
-                                      {ref.kyorugiStatus}
-                                    </span>
-                                    <span className="text-xs text-text-dim truncate">
-                                      ({ref.clubName})
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-text-dim text-xs italic font-medium">Unassigned</span>
-                                )}
-                              </div>
-                            </div>
-
-                            {ref && (
-                              <div className="text-right shrink-0">
-                                <span className="text-[9px] text-text-dim uppercase block font-bold tracking-wider">Match #</span>
-                                <span className="text-sm font-mono font-bold text-gold">{ref.matchNo || matchRange || '-'}</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* STANDBY / UNASSIGNED REFEREES HOLDING POOL BOARD */}
-            {(() => {
-              const unassignedRefs = referees.filter(r => !r.courtAssignment || r.courtAssignment === 'Unassigned' || !r.dutyRole || r.dutyRole === 'Unassigned');
-              const filteredStandby = unassignedRefs.filter(r => {
-                if (!rosterSearchQuery.trim()) return true;
-                const q = rosterSearchQuery.toLowerCase();
-                return r.fullName.toLowerCase().includes(q) || r.clubName.toLowerCase().includes(q);
-              });
-
-              return (
-                <div className="bg-surface border-2 border-line rounded-3xl p-6 shadow-xl space-y-4">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-line/60 pb-3 gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center font-bold text-amber-400">
-                        <Users className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h2 className="font-black text-text text-lg uppercase tracking-wider flex items-center gap-2">
-                          <span>Standby Referees Holding Pool</span>
-                          <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono px-2.5 py-0.5 rounded-full font-bold">
-                            {unassignedRefs.length} Available
-                          </span>
-                        </h2>
-                        <p className="text-xs text-text-dim">
-                          Referees currently awaiting ring call from the RIC. Please remain in the referee waiting area.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {filteredStandby.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-text-dim italic bg-ink/30 rounded-2xl border border-line/40">
-                      {unassignedRefs.length === 0
-                        ? 'All registered referees are currently distributed on active ring duty panels.'
-                        : 'No standby referees matched your search filter.'}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                      {filteredStandby.map((r) => (
-                        <div key={r.id} className="bg-ink/60 border border-line/60 rounded-xl p-3 flex items-center justify-between gap-2 hover:border-amber-500/40 transition">
-                          <div className="min-w-0">
-                            <span className="font-bold text-text text-sm block truncate">{r.fullName}</span>
-                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-text-dim">
-                              <span className="text-gold font-bold">{r.kyorugiStatus} / {r.poomsaeStatus}</span>
-                              <span>‚Ä¢</span>
-                              <span className="truncate">{r.clubName}</span>
-                            </div>
-                          </div>
-                          <span className="text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded shrink-0 uppercase tracking-wider">
-                            Standby
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* PARENT INDEMNITY SCREEN */}
-        {screen === 'parentIndemnity' && (
-          <ParentIndemnityForm
-            indemnityPlayer={indemnityPlayer}
-            indemnityComp={indemnityComp}
-            indemnityLoading={indemnityLoading}
-            indemnityCoach={indemnityCoach}
-            coaches={coaches}
-            triggerMsg={triggerMsg}
-            setScreen={setScreen}
-          />
-        )}
-
-        {/* PUBLIC VIEW SCREEN */}
-        {screen === 'publicView' && activeComp && (
-          <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
-            
-            {/* Header section */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-surface p-6 rounded-2xl border border-line shadow-sm gap-4">
-              <div>
-                <h2 className="text-xl font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                  <Users className="w-5 h-5 text-gold" />
-                  Public Directory
-                </h2>
-                <p className="text-sm font-semibold text-gold mt-1">{activeComp.name}</p>
-              </div>
-              <div className="text-xs text-text-dim text-right bg-ink/30 px-3.5 py-2 rounded-xl border border-line flex items-center gap-2">
-                <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse"></span>
-                <span>Live Public Bulletin (Read Only)</span>
-              </div>
-            </div>
-
-            {/* Registered Entrants section */}
-            <div className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-line/50">
-                <div className="space-y-1">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
-                  <p className="text-xs text-text-dim">Search and verify registered competitors and their live weigh-in status below.</p>
-                </div>
-                {/* Search Bar */}
-                <div className="relative w-full sm:w-72">
-                  <input 
-                    type="text" 
-                    placeholder="Search name, ID, or club..."
-                    value={publicSearchQuery}
-                    onChange={(e) => setPublicSearchQuery(e.target.value)}
-                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text pl-9 focus:outline-none focus:border-gold transition"
-                  />
-                  <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-3 top-2.5" />
-                  {publicSearchQuery && (
-                    <button 
-                      onClick={() => setPublicSearchQuery('')}
-                      className="text-text-dim hover:text-text absolute right-3 top-2 text-xs font-bold"
-                    >
-                      √ó
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {publicFilteredPlayers.length === 0 ? (
-                <div className="text-center py-12 text-text-dim border border-line border-dashed rounded-xl">
-                  {players.length === 0 ? "No competitors registered for this tournament yet." : "No competitors matched your search query."}
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-line">
-                  <table className="w-full text-left text-sm border-collapse">
-                    <thead>
-                      <tr className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-text-dim">
-                        <th className="p-4 font-semibold">ID</th>
-                        <th className="p-4 font-semibold">Athlete Name</th>
-                        <th className="p-4 font-semibold">Club/Team</th>
-                        <th className="p-4 font-semibold">Division Category</th>
-                        <th className="p-4 font-semibold">Weight Division</th>
-                        <th className="p-4 font-semibold">Weigh-In Scale status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line/30 text-xs">
-                      {publicFilteredPlayers.map(p => (
-                        <tr key={p.id} className="hover:bg-surface-2/30 transition">
-                          <td className="p-4 font-mono text-gold font-bold">{p.id}</td>
-                          <td className="p-4 font-bold text-text">
-                            <div>{p.name}</div>
-                            {(p.schoolName || p.race) && (
-                              <div className="text-[10px] text-gold/80 font-mono mt-0.5 font-normal">
-                                {p.schoolName && `School: ${p.schoolName} ${p.schoolCode ? `(${p.schoolCode})` : ''}`}
-                                {p.schoolName && p.race && ' ¬∑ '}
-                                {p.race && `Race: ${p.race}`}
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-4 text-text">{p.club}</td>
-                          <td className="p-4 text-text-dim">{p.ageGroup} ¬∑ {p.gender}</td>
-                          <td className="p-4 text-text-dim">{p.weightClass}</td>
-                          <td className="p-4">
-                            <div className="flex flex-col gap-1 items-start">
-                              {renderBadge(p.weighIn?.result)}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-          </div>
-        )}
-
-      </main>
-
-      {/* COACH ATHLETE INDEMNITY DASHBOARD MODAL */}
-      {showIndemnityDashboardModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-line bg-gradient-to-b from-surface-2/50 to-transparent flex justify-between items-center shrink-0">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold">
-                  <Shield className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display flex items-center gap-2">
-                    <span>Athlete Indemnity Dashboard</span>
-                  </h2>
-                  <p className="text-xs text-text-dim">Generate parent links, track real-time authorization status, and review signed consent certificates.</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowIndemnityDashboardModal(false)}
-                className="text-text-dim hover:text-text p-1.5 hover:bg-surface-2 rounded-xl border border-transparent hover:border-line transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto flex-grow space-y-6">
-              {(() => {
-                const coachAthletesForIndemnity = players.filter(p => p.coachUsername === user);
-                const totalCount = coachAthletesForIndemnity.length;
-                const completedCount = coachAthletesForIndemnity.filter(p => p.indemnityStatus === 'Completed').length;
-                const pendingCount = totalCount - completedCount;
-
-                const filteredIndemnityAthletes = coachAthletesForIndemnity.filter(p => {
-                  const matchesSearch = p.name.toLowerCase().includes(indemnitySearchQuery.toLowerCase()) || 
-                                        (p.id && p.id.toLowerCase().includes(indemnitySearchQuery.toLowerCase()));
-                  const matchesStatus = indemnityFilterStatus === 'All' || 
-                                        (indemnityFilterStatus === 'Completed' && p.indemnityStatus === 'Completed') ||
-                                        (indemnityFilterStatus === 'Pending' && p.indemnityStatus !== 'Completed');
-                  return matchesSearch && matchesStatus;
-                });
-
-                return (
-                  <>
-                    {/* Stats Bar */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="bg-surface-2 p-4 rounded-2xl border border-line flex items-center justify-between">
-                        <div>
-                          <span className="block text-[10px] text-text-dim font-bold uppercase tracking-wider">Total Team Roster</span>
-                          <span className="text-2xl font-black text-text mt-0.5 block">{totalCount} Athletes</span>
-                        </div>
-                        <Users className="w-8 h-8 text-text-dim/40" />
-                      </div>
-                      
-                      <div className="bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20 flex items-center justify-between">
-                        <div>
-                          <span className="block text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Consent Secured</span>
-                          <span className="text-2xl font-black text-emerald-400 mt-0.5 block">{completedCount} Forms</span>
-                        </div>
-                        <CheckCircle className="w-8 h-8 text-emerald-400/30" />
-                      </div>
-
-                      <div className="bg-amber-950/20 p-4 rounded-2xl border border-amber-500/20 flex items-center justify-between">
-                        <div>
-                          <span className="block text-[10px] text-amber-400 font-bold uppercase tracking-wider">Awaiting Parent Signing</span>
-                          <span className="text-2xl font-black text-amber-400 mt-0.5 block">{pendingCount} Pending</span>
-                        </div>
-                        <AlertCircle className="w-8 h-8 text-amber-400/30" />
-                      </div>
-                    </div>
-
-                    {/* Tournament-wide Shared Indemnity Link Card */}
-                    <div className="bg-gradient-to-r from-gold/10 via-gold/5 to-transparent p-5 rounded-2xl border border-gold/20 space-y-3.5">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gold/15 border border-gold/30 flex items-center justify-center text-gold shrink-0 mt-0.5">
-                          <ExternalLink className="w-5 h-5" />
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-bold text-text uppercase tracking-wider">Club-Wide Shared Parental Consent Link</h4>
-                          <p className="text-xs text-text-dim leading-relaxed">
-                            Instead of copying individual links for each athlete, you can share this **single link** to your club's WhatsApp or Telegram group. Parents will click it, search and select their child from your registered club roster, and fill up the indemnity waiver instantly. Parents will not see players from other clubs.
-                          </p>
-                        </div>
-                      </div>
-
-                      {(() => {
-                        const sharedUrl = window.location.origin + window.location.pathname + '?indemnityComp=' + (compId || '') + '&coach=' + (user || '');
-                        const waShareText = encodeURIComponent(`Dear Parents/Guardians, please click this official link to select your child and fill up the required Parental Consent & Indemnity Form for the ${activeComp?.name || 'upcoming tournament'}: ${sharedUrl}`);
-                        return (
-                          <div className="flex flex-col sm:flex-row items-center gap-3 bg-ink/50 p-2.5 rounded-xl border border-line">
-                            <input 
-                              type="text" 
-                              readOnly 
-                              value={sharedUrl} 
-                              className="w-full bg-transparent text-xs text-text border-none focus:outline-none focus:ring-0 select-all px-2 font-mono"
-                            />
-                            <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(sharedUrl);
-                                  triggerMsg('Tournament-wide indemnity link copied to clipboard!', 'ok');
-                                }}
-                                className="w-full sm:w-auto bg-gold text-ink hover:bg-gold/90 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <Copy className="w-4 h-4" />
-                                <span>Copy Link</span>
-                              </button>
-                              <button
-                                onClick={() => window.open(`https://api.whatsapp.com/send?text=${waShareText}`, '_blank')}
-                                className="w-full sm:w-auto bg-emerald-650 hover:opacity-95 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wide transition flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <Share2 className="w-4 h-4" />
-                                <span>WhatsApp</span>
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* Filter and Search controls */}
-                    <div className="flex flex-col md:flex-row gap-3 justify-between items-center bg-surface-2 p-4 rounded-2xl border border-line">
-                      <div className="flex gap-1.5 bg-ink/40 p-1 rounded-xl border border-line shrink-0 w-full md:w-auto">
-                        {(['All', 'Completed', 'Pending'] as const).map((st) => (
-                          <button
-                            key={st}
-                            onClick={() => setIndemnityFilterStatus(st)}
-                            className={`flex-grow md:flex-none px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition cursor-pointer ${
-                              indemnityFilterStatus === st 
-                                ? 'bg-gold text-ink' 
-                                : 'text-text-dim hover:text-text'
-                            }`}
-                          >
-                            {st}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="relative w-full md:w-72">
-                        <input 
-                          type="text"
-                          value={indemnitySearchQuery}
-                          onChange={(e) => setIndemnitySearchQuery(e.target.value)}
-                          placeholder="Search athlete by name..."
-                          className="w-full bg-ink border border-line text-xs rounded-xl py-2 pl-8 pr-4 text-text focus:outline-none focus:border-gold"
-                        />
-                        <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-2.5 top-2.5" />
-                      </div>
-                    </div>
-
-                    {/* Table */}
-                    <div className="border border-line rounded-2xl overflow-hidden bg-surface-2">
-                      {filteredIndemnityAthletes.length === 0 ? (
-                        <div className="p-12 text-center text-text-dim space-y-2">
-                          <Shield className="w-10 h-10 text-text-dim/40 mx-auto" />
-                          <p className="text-sm font-bold">No matching athlete records found.</p>
-                          <p className="text-xs">Adjust filters or add new athletes to your roster list.</p>
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="border-b border-line bg-ink/30 text-text-dim font-semibold font-mono uppercase tracking-wider">
-                                <th className="p-4">Competitor</th>
-                                <th className="p-4">Division / Event</th>
-                                <th className="p-4">Status</th>
-                                <th className="p-4 text-right">Indemnity Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-line/30">
-                              {filteredIndemnityAthletes.map(p => {
-                                const parentUrl = window.location.origin + window.location.pathname + '?indemnity=' + p.id;
-                                const waText = encodeURIComponent(`Dear Parent/Guardian, please review and sign the required Parental Consent & Indemnity Form for ${p.name} participating in the ${activeComp?.name || 'Tournament'}: ${parentUrl}`);
-                                return (
-                                  <tr key={p.id} className="hover:bg-ink/10 transition">
-                                    <td className="p-4">
-                                      <div className="font-bold text-text text-sm">{p.name}</div>
-                                      <div className="text-[10px] text-text-dim font-mono">ID: {p.id}</div>
-                                    </td>
-                                    <td className="p-4">
-                                      <div className="font-medium text-text">{p.event}</div>
-                                      <div className="text-[10px] text-gold font-mono">{p.weightClass}</div>
-                                    </td>
-                                    <td className="p-4">
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
-                                        p.indemnityStatus === 'Completed'
-                                          ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20'
-                                          : 'bg-amber-950/50 text-amber-400 border border-amber-500/20'
-                                      }`}>
-                                        {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
-                                      </span>
-                                    </td>
-                                    <td className="p-4 text-right">
-                                      <div className="flex items-center justify-end gap-2">
-                                        {p.indemnityStatus === 'Completed' ? (
-                                          <button
-                                            onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
-                                            className="bg-emerald-950/40 text-emerald-400 hover:bg-emerald-900/40 border border-emerald-900/40 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-wide uppercase transition cursor-pointer flex items-center gap-1"
-                                          >
-                                            <Eye className="w-3.5 h-3.5" />
-                                            <span>View Certificate</span>
-                                          </button>
-                                        ) : (
-                                          <>
-                                            <button
-                                              onClick={() => {
-                                                navigator.clipboard.writeText(parentUrl);
-                                                triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
-                                              }}
-                                              className="bg-ink hover:bg-surface border border-line text-text font-bold px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-wide transition cursor-pointer flex items-center gap-1"
-                                              title="Copy direct form URL to clipboard"
-                                            >
-                                              <Copy className="w-3.5 h-3.5" />
-                                              <span>Copy Link</span>
-                                            </button>
-                                            <button
-                                              onClick={() => window.open(`https://api.whatsapp.com/send?text=${waText}`, '_blank')}
-                                              className="bg-emerald-650 hover:opacity-90 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-wide transition cursor-pointer flex items-center gap-1"
-                                              title="Send link instantly via WhatsApp"
-                                            >
-                                              <Share2 className="w-3.5 h-3.5" />
-                                              <span>WhatsApp</span>
-                                            </button>
-                                          </>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-line bg-surface-2 text-right shrink-0 flex justify-between items-center text-[10px] text-text-dim">
-              <span className="italic">Protip: You can text or email parents directly with the copied links.</span>
-              <button 
-                onClick={() => setShowIndemnityDashboardModal(false)}
-                className="bg-ink hover:bg-surface border border-line font-bold text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
-              >
-                Close Dashboard
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* INDIVIDUAL COMPLETED INDEMNITY CERTIFICATE VIEWER MODAL */}
-      {showViewIndemnityModal && selectedIndemnityPlayer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/90 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-line bg-gradient-to-b from-surface-2/50 to-transparent flex justify-between items-center shrink-0 print:hidden">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-950/40 border border-emerald-900/40 flex items-center justify-center text-emerald-400">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">
-                    Consent & Indemnity Form
-                  </h2>
-                  <p className="text-xs text-emerald-400 font-mono">Status: Digitally Signed & Certified</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => { setShowViewIndemnityModal(false); setSelectedIndemnityPlayer(null); }}
-                className="text-text-dim hover:text-text p-1.5 hover:bg-surface-2 rounded-xl border border-transparent hover:border-line transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Body - Printable Consent Certificate */}
-            <div className="p-8 overflow-y-auto flex-grow space-y-6 bg-white text-slate-900 font-sans printable-indemnity-canvas">
-              
-              {/* Certificate Header */}
-              <div className="text-center border-b-2 border-slate-200 pb-4 space-y-1">
-                <div className="font-extrabold text-xl uppercase tracking-wider text-slate-900">Official Liability Waiver & Indemnity Form</div>
-                <div className="text-xs font-bold text-emerald-600 tracking-widest uppercase flex items-center justify-center gap-1">
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Secure Digital Consent Certification</span>
-                </div>
-              </div>
-
-              {/* Tournament & Competitor Meta */}
-              <div className="grid grid-cols-2 gap-4 text-xs border-b border-slate-100 pb-4">
-                <div className="space-y-1.5">
-                  <div className="text-slate-500 uppercase tracking-wider text-[10px] font-bold">Championship Event Details</div>
-                  <div className="font-extrabold text-slate-800 text-sm">{activeComp?.name || 'Taekwondo Tournament'}</div>
-                  <div className="text-slate-600 font-medium">{activeComp?.venue} ¬∑ {activeComp?.date}</div>
-                </div>
-                <div className="space-y-1.5 border-l border-slate-200 pl-4 font-mono">
-                  <div className="text-slate-500 uppercase tracking-wider text-[10px] font-bold font-sans">Verification Fingerprint</div>
-                  <div><span className="text-slate-400">Athlete ID:</span> <span className="font-bold text-slate-800">{selectedIndemnityPlayer.id}</span></div>
-                  <div><span className="text-slate-400">Division:</span> <span className="font-bold text-slate-800">{selectedIndemnityPlayer.event}</span></div>
-                  <div><span className="text-slate-400">Class:</span> <span className="font-bold text-slate-800">{selectedIndemnityPlayer.weightClass}</span></div>
-                </div>
-              </div>
-
-              {/* Roster & Participant Info */}
-              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-xs">
-                <div className="font-bold text-slate-700 border-b border-slate-200 pb-1">COMPETITOR (CHILD) PARAMETERS</div>
-                <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-                  <div><span className="text-slate-500">Full Name:</span> <strong className="text-slate-900 uppercase block">{selectedIndemnityPlayer.name}</strong></div>
-                  <div><span className="text-slate-500">NRIC No:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.ic}</strong></div>
-                  <div><span className="text-slate-500">School Affiliation:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.schoolName || 'N/A'} {selectedIndemnityPlayer.schoolCode ? `(${selectedIndemnityPlayer.schoolCode})` : ''}</strong></div>
-                  <div><span className="text-slate-500">Represented Club:</span> <strong className="text-slate-900 uppercase block">{selectedIndemnityPlayer.club}</strong></div>
-                </div>
-              </div>
-
-              {/* Guardian Info */}
-              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100 text-xs">
-                <div className="font-bold text-slate-700 border-b border-slate-200 pb-1">PARENT / GUARDIAN CONFIRMATION</div>
-                <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-                  <div><span className="text-slate-500">Guardian Full Name:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentName}</strong></div>
-                  <div><span className="text-slate-500">Guardian NRIC:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentIc}</strong></div>
-                  <div><span className="text-slate-500">Relationship to Athlete:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityRelationship}</strong></div>
-                  <div><span className="text-slate-500">Contact Number:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentPhone}</strong></div>
-                  {selectedIndemnityPlayer.indemnityParentEmail && (
-                    <div className="col-span-2"><span className="text-slate-500">Email Address:</span> <strong className="text-slate-900 block">{selectedIndemnityPlayer.indemnityParentEmail}</strong></div>
-                  )}
-                </div>
-              </div>
-
-              {/* Waiver Clause Summary */}
-              <div className="text-[10px] text-slate-500 leading-relaxed space-y-1 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div className="font-bold text-slate-700">INDEMNITY RELEASE SUMMARY</div>
-                <p>
-                  I, the undersigned parent/guardian, hereby declare that I gave absolute permission for my child to compete in this tournament. I voluntarily assume all physical risks of Taekwondo full-contact competition, exempt the tournament management and coaches from any legal liabilities, and verify that the competitor is medically sound and fully fit to participate.
-                </p>
-              </div>
-
-              {/* Signature display block */}
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
-                <div className="text-xs space-y-1 font-mono text-slate-500">
-                  <div className="font-bold text-slate-700 font-sans">SECURITY DETAILS</div>
-                  <div>Signed Date: <strong className="text-slate-800">{selectedIndemnityPlayer.indemnitySignedDate}</strong></div>
-                  <div>IP Address: <strong className="text-slate-800">{selectedIndemnityPlayer.indemnitySignedIp || 'Client-device'}</strong></div>
-                  <div className="text-[10px] text-slate-400 mt-2">Verified via Cloud Record</div>
-                </div>
-                <div className="space-y-1.5 flex flex-col items-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Guardian Signature</span>
-                  <div className="border border-slate-200 rounded-lg p-2 bg-slate-100 w-full h-24 flex items-center justify-center overflow-hidden">
-                    {selectedIndemnityPlayer.indemnitySignature ? (
-                      <img 
-                        src={selectedIndemnityPlayer.indemnitySignature} 
-                        alt="Parent Signature" 
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    ) : (
-                      <span className="text-[10px] text-slate-400 italic">No signature image found</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-line bg-surface-2 flex justify-between items-center shrink-0 print:hidden">
-              <button
-                onClick={() => {
-                  const printContents = document.querySelector('.printable-indemnity-canvas')?.innerHTML;
-                  const originalContents = document.body.innerHTML;
-                  if (printContents) {
-                    const win = window.open('', '_blank');
-                    if (win) {
-                      win.document.write(`
-                        <html>
-                          <head>
-                            <title>Indemnity Certificate - ${selectedIndemnityPlayer.name}</title>
-                            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-                          </head>
-                          <body class="bg-white p-8">
-                            <div class="max-w-2xl mx-auto border-2 border-slate-300 rounded-3xl p-6 shadow-md bg-white text-slate-900 font-sans">
-                              ${printContents}
-                            </div>
-                            <script>
-                              window.onload = function() {
-                                window.print();
-                                setTimeout(function() { window.close(); }, 500);
-                              };
-                            </script>
-                          </body>
-                        </html>
-                      `);
-                      win.document.close();
-                    }
-                  }
-                }}
-                className="bg-gold text-ink font-bold hover:bg-gold/90 px-4 py-2 rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print Consent Certificate</span>
-              </button>
-              
-              <button 
-                onClick={() => { setShowViewIndemnityModal(false); setSelectedIndemnityPlayer(null); }}
-                className="bg-ink hover:bg-surface border border-line font-bold text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
-              >
-                Close Certificate
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ATHLETE DATABASE EXPLORER MODAL */}
-      {showAthleteDbModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-5xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-line bg-gradient-to-b from-surface-2/50 to-transparent flex justify-between items-center shrink-0">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold">
-                  <Database className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display flex items-center gap-2">
-                    <span>Athlete Database Explorer & Search Engine</span>
-                    <span className="text-[10px] bg-gold/15 text-gold px-2 py-0.5 rounded-full border border-gold/20 normal-case font-mono">
-                      {Object.keys(masterAthletes).length} Saved
-                    </span>
-                  </h2>
-                  <p className="text-xs text-text-dim">Search, browse, inspect, and manage the complete roster of saved registered competitors in local storage.</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => {
-                  setShowAthleteDbModal(false);
-                  setDbSearchQuery('');
-                }}
-                className="text-text-dim hover:text-text bg-surface-2 hover:bg-line border border-line px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-
-            {/* Modal Search Bar */}
-            <div className="p-6 border-b border-line bg-surface-2/30 flex flex-col sm:flex-row gap-4 items-center shrink-0">
-              <div className="relative flex-1 w-full">
-                <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-text-dim" />
-                <input 
-                  type="text" 
-                  value={dbSearchQuery}
-                  onChange={(e) => setDbSearchQuery(e.target.value)}
-                  placeholder="Search saved database by name, IC number, club/affiliated team..." 
-                  className="w-full bg-ink border border-line rounded-xl pl-10 pr-4 py-3 text-sm text-text outline-none focus:border-gold transition shadow-inner"
-                />
-                {dbSearchQuery && (
-                  <button 
-                    onClick={() => setDbSearchQuery('')}
-                    className="absolute right-3.5 top-2.5 text-text-dim hover:text-text font-bold text-lg px-2 py-1"
-                  >
-                    √ó
-                  </button>
-                )}
-              </div>
-              
-              <div className="text-xs text-text-dim whitespace-nowrap bg-surface-2 border border-line px-3 py-2 rounded-xl">
-                Filtering: <span className="font-bold text-text">
-                  {(() => {
-                    const q = dbSearchQuery.toLowerCase();
-                    return Object.values(masterAthletes).filter((ma: any) => 
-                      !dbSearchQuery ||
-                      ma.name?.toLowerCase().includes(q) ||
-                      ma.ic?.toLowerCase().includes(q) ||
-                      ma.club?.toLowerCase().includes(q)
-                    ).length;
-                  })()}
-                </span> matching profiles
-              </div>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-8">
-              {(() => {
-                const q = dbSearchQuery.toLowerCase();
-                const filtered = Object.values(masterAthletes).filter((ma: any) => 
-                  !dbSearchQuery ||
-                  ma.name?.toLowerCase().includes(q) ||
-                  ma.ic?.toLowerCase().includes(q) ||
-                  ma.club?.toLowerCase().includes(q)
-                );
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="text-center py-16 space-y-3">
-                      <Database className="w-16 h-16 text-text-dim/30 mx-auto" />
-                      <h3 className="text-sm font-bold text-text uppercase tracking-wider">No matching profiles found</h3>
-                      <p className="text-xs text-text-dim max-w-md mx-auto">
-                        Adjust your query or register new athletes to automatically persist their records in the secure offline local database.
-                      </p>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filtered.map((ma: any) => (
-                      <div 
-                        key={ma.id}
-                        className="bg-ink/20 border border-line/70 hover:border-gold/30 rounded-2xl p-5 flex flex-col justify-between transition hover:-translate-y-0.5 duration-200 group relative overflow-hidden"
-                      >
-                        <div className="flex items-start space-x-4 mb-4">
-                          <div className="w-16 h-20 bg-ink rounded-xl overflow-hidden flex items-center justify-center border border-line shrink-0 shadow-inner">
-                            {ma.photo ? (
-                              <img src={ma.photo} alt={ma.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              <User className="w-6 h-6 text-text-dim/40" />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-bold text-text text-sm truncate uppercase tracking-wide group-hover:text-gold transition-colors">{ma.name}</h4>
-                            <p className="text-xs text-text-dim mt-1">IC: <span className="font-mono text-text">{ma.ic || 'N/A'}</span></p>
-                            <p className="text-xs text-text-dim mt-0.5">Club: <span className="font-semibold text-text">{ma.club || 'N/A'}</span></p>
-                            <p className="text-[10px] text-text-dim/80 mt-1">
-                              DOB: <span className="text-text-dim">{ma.dob || 'N/A'}</span> ¬∑ Gender: <span className="text-text-dim">{ma.gender || 'N/A'}</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="pt-3 border-t border-line/40 flex justify-between items-center bg-surface-2/10">
-                          <span className="text-[10px] font-mono text-text-dim font-bold uppercase tracking-wider">ID: {ma.id}</span>
-                          {confirmDeleteAthleteId === ma.id ? (
-                            <div className="flex items-center space-x-1">
-                              <button 
-                                onClick={() => {
-                                  const updated = { ...masterAthletes };
-                                  delete updated[ma.id];
-                                  saveMasterAthletesToStorage(updated);
-                                  setConfirmDeleteAthleteId(null);
-                                  triggerMsg('Athlete profile removed from database successfully!', 'ok');
-                                }}
-                                className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-bold shadow-sm cursor-pointer"
-                              >
-                                Confirm
-                              </button>
-                              <button 
-                                onClick={() => setConfirmDeleteAthleteId(null)}
-                                className="bg-surface border border-line text-text hover:bg-line px-2.5 py-1.5 rounded-lg text-[10px] cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button 
-                              onClick={() => setConfirmDeleteAthleteId(ma.id)}
-                              className="text-[10px] text-hong hover:text-white border border-hong/20 hover:bg-hong/90 px-2.5 py-1.5 rounded-lg transition font-bold cursor-pointer"
-                            >
-                              Delete Profile
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-line bg-surface-2 text-center text-xs text-text-dim shrink-0">
-              Note: Persistent profile records are stored securely in your web browser's local sandbox to comply with data privacy policies.
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* THEME STATION MODAL */}
-      {showThemeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col md:flex-row">
-            
-            {/* LEFT PANEL: SELECTOR */}
-            <div className="p-6 md:p-8 flex-1 flex flex-col justify-between overflow-y-auto border-b md:border-b-0 md:border-r border-line bg-surface">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Palette className="w-5 h-5 text-gold animate-pulse" />
-                    <h2 className="text-xl font-bold uppercase tracking-wider text-text font-display">Theme & Layout Station</h2>
-                  </div>
-                  <button 
-                    onClick={() => setShowThemeModal(false)}
-                    className="text-text-dim hover:text-text text-xs font-bold bg-surface-2 hover:bg-line px-3.5 py-2 rounded-xl border border-line transition cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-
-                <div>
-                  <p className="text-xs text-text-dim leading-relaxed">
-                    Personalize your tournament portal. Calibrate dynamic accent presets, page widths, spacing density, and any custom background tone instantly.
-                  </p>
-                </div>
-
-                {/* SECTION 1: THEME ACCENTS */}
-                <div className="space-y-2.5">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-text flex items-center space-x-1.5">
-                    <Trophy className="w-3.5 h-3.5 text-gold" />
-                    <span>Theme Accents</span>
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      {
-                        id: 'emerald',
-                        name: 'Emerald Dojang',
-                        desc: 'Traditional jade & premium gold accents',
-                        defaultBg: '#FFFFFF',
-                        colors: ['#FFFFFF', '#D1E2D9', '#9C7700']
-                      },
-                      {
-                        id: 'midnight',
-                        name: 'Midnight Arena',
-                        desc: 'Tech-blue & ice accents',
-                        defaultBg: '#FFFFFF',
-                        colors: ['#FFFFFF', '#E2E8F0', '#A06400']
-                      },
-                      {
-                        id: 'crimson',
-                        name: 'Crimson Fury',
-                        desc: 'Bold crimson & stark minimalist accents',
-                        defaultBg: '#FFFFFF',
-                        colors: ['#FFFFFF', '#FED7D7', '#9C7700']
-                      },
-                      {
-                        id: 'zen',
-                        name: 'Zen Paper',
-                        desc: 'Traditional warm paper tatami & sumi-ink',
-                        defaultBg: '#FAF8F5',
-                        colors: ['#FAF8F5', '#F4EFE6', '#9E7D0A']
-                      }
-                    ].map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => {
-                          setTheme(t.id as any);
-                          setCustomBgColor(t.defaultBg);
-                        }}
-                        className={`text-left p-3 rounded-xl border transition duration-200 flex flex-col justify-between cursor-pointer ${
-                          theme === t.id 
-                            ? 'bg-surface-2 border-gold ring-1 ring-gold shadow-md' 
-                            : 'bg-ink/40 border-line hover:border-text-dim hover:bg-surface-2/30'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between w-full">
-                          <span className="text-[11px] font-bold text-text uppercase tracking-wider">{t.name}</span>
-                          <div className="flex space-x-0.5">
-                            {t.colors.map((c, idx) => (
-                              <span key={idx} className="w-2 h-2 rounded-full border border-line/50" style={{ backgroundColor: c }} />
-                            ))}
-                          </div>
-                        </div>
-                        <p className="text-[9px] text-text-dim mt-1 font-medium leading-tight">{t.desc}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* SECTION 2: BACKGROUND COLOR CUSTOMIZER */}
-                <div className="space-y-3 pt-2 border-t border-line">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-text flex items-center space-x-1.5">
-                    <Sun className="w-3.5 h-3.5 text-gold" />
-                    <span>Choose Background Tone</span>
-                  </h3>
-                  
-                  {/* Preset Background Chips */}
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { name: 'Pure White', value: '#FFFFFF' },
-                      { name: 'Paper Tatami', value: '#FAF8F5' },
-                      { name: 'Warm Cream', value: '#F6F2EB' },
-                      { name: 'Ice Mist', value: '#F4F6F9' },
-                      { name: 'Soft Mint', value: '#EFF7F4' },
-                      { name: 'Shadow Slate', value: '#12161A' },
-                      { name: 'Carbon Black', value: '#1E222B' }
-                    ].map((chip) => (
-                      <button
-                        key={chip.value}
-                        onClick={() => setCustomBgColor(chip.value)}
-                        className={`px-2.5 py-1.5 text-[10px] font-bold rounded-lg border transition cursor-pointer flex items-center space-x-1.5 ${
-                          customBgColor.toLowerCase() === chip.value.toLowerCase()
-                            ? 'bg-gold/10 border-gold text-gold shadow-sm'
-                            : 'bg-surface-2 border-line text-text-dim hover:text-text hover:bg-line'
-                        }`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded-full border border-line/50" style={{ backgroundColor: chip.value }} />
-                        <span>{chip.name}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* HTML Color Picker input styled elegantly */}
-                  <div className="flex items-center space-x-4 bg-surface-2/50 border border-line rounded-xl p-2.5">
-                    <div className="relative w-8 h-8 rounded-lg border border-line overflow-hidden cursor-pointer shadow-sm flex items-center justify-center bg-surface-2 hover:bg-line transition shrink-0">
-                      <input 
-                        type="color" 
-                        value={customBgColor} 
-                        onChange={(e) => setCustomBgColor(e.target.value)}
-                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                      />
-                      <Palette className="w-4 h-4 text-gold pointer-events-none" />
-                    </div>
-                    <div className="flex-grow">
-                      <span className="text-[10px] font-bold text-text block uppercase tracking-wider">Custom Shade Mixer</span>
-                      <span className="font-mono text-[9px] text-text-dim block uppercase">{customBgColor}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* SECTION 3: LAYOUT STRUCTURE */}
-                <div className="space-y-4 pt-2 border-t border-line">
-                  {/* LAYOUT SPACING */}
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-text mb-2 flex items-center space-x-1.5">
-                      <Sliders className="w-3.5 h-3.5 text-gold" />
-                      <span>Spacing Density</span>
-                    </h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => setLayoutDensity('bento')}
-                        className={`px-3 py-2 text-xs font-bold rounded-xl border transition cursor-pointer flex flex-col items-center justify-center space-y-1 ${
-                          layoutDensity === 'bento'
-                            ? 'bg-gold/10 border-gold text-gold shadow-sm'
-                            : 'bg-surface-2 border-line text-text-dim hover:text-text hover:bg-line'
-                        }`}
-                      >
-                        <span className="uppercase text-[10px] tracking-wider">Spacious Bento</span>
-                        <span className="text-[9px] font-normal opacity-75">Traditional grid layout</span>
-                      </button>
-                      <button
-                        onClick={() => setLayoutDensity('compact')}
-                        className={`px-3 py-2 text-xs font-bold rounded-xl border transition cursor-pointer flex flex-col items-center justify-center space-y-1 ${
-                          layoutDensity === 'compact'
-                            ? 'bg-gold/10 border-gold text-gold shadow-sm'
-                            : 'bg-surface-2 border-line text-text-dim hover:text-text hover:bg-line'
-                        }`}
-                      >
-                        <span className="uppercase text-[10px] tracking-wider">Tactical Compact</span>
-                        <span className="text-[9px] font-normal opacity-75">High-density data lists</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* LAYOUT WIDTH */}
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-text mb-2 flex items-center space-x-1.5">
-                      <Layout className="w-3.5 h-3.5 text-gold" />
-                      <span>Sizing & Margins</span>
-                    </h3>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        onClick={() => setLayoutWidth('standard')}
-                        className={`px-2 py-2 text-xs font-bold rounded-xl border transition cursor-pointer flex flex-col items-center justify-center space-y-1 ${
-                          layoutWidth === 'standard'
-                            ? 'bg-gold/10 border-gold text-gold shadow-sm'
-                            : 'bg-surface-2 border-line text-text-dim hover:text-text hover:bg-line'
-                        }`}
-                      >
-                        <span className="uppercase text-[9px] tracking-wider">Standard</span>
-                        <span className="text-[8px] font-normal opacity-75">1280px Grid</span>
-                      </button>
-                      <button
-                        onClick={() => setLayoutWidth('widescreen')}
-                        className={`px-2 py-2 text-xs font-bold rounded-xl border transition cursor-pointer flex flex-col items-center justify-center space-y-1 ${
-                          layoutWidth === 'widescreen'
-                            ? 'bg-gold/10 border-gold text-gold shadow-sm'
-                            : 'bg-surface-2 border-line text-text-dim hover:text-text hover:bg-line'
-                        }`}
-                      >
-                        <span className="uppercase text-[9px] tracking-wider">Widescreen</span>
-                        <span className="text-[8px] font-normal opacity-75">1500px Board</span>
-                      </button>
-                      <button
-                        onClick={() => setLayoutWidth('fluid')}
-                        className={`px-2 py-2 text-xs font-bold rounded-xl border transition cursor-pointer flex flex-col items-center justify-center space-y-1 ${
-                          layoutWidth === 'fluid'
-                            ? 'bg-gold/10 border-gold text-gold shadow-sm'
-                            : 'bg-surface-2 border-line text-text-dim hover:text-text hover:bg-line'
-                        }`}
-                      >
-                        <span className="uppercase text-[9px] tracking-wider">Fluid</span>
-                        <span className="text-[8px] font-normal opacity-75">100% Edge</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-line text-center">
-                <button
-                  onClick={() => setShowThemeModal(false)}
-                  className="w-full bg-gold hover:opacity-90 text-ink font-bold text-xs uppercase tracking-wider py-3.5 px-4 rounded-xl shadow-md transition duration-200 cursor-pointer"
-                >
-                  Apply Personalization
-                </button>
-              </div>
-            </div>
-
-            {/* RIGHT PANEL: IMMERSIVE PREVIEW DECK */}
-            <div className="bg-ink p-6 md:p-8 flex-1 flex flex-col justify-center items-center space-y-6 overflow-y-auto">
-              <div className="text-center">
-                <span className="text-[10px] uppercase tracking-widest font-bold text-gold bg-surface px-3 py-1 rounded-full border border-line">Immersive Live Preview</span>
-                <p className="text-xs text-text-dim mt-2 max-w-xs mx-auto">Click any preset on the left to watch all components and the background repaint instantly in real-time!</p>
-              </div>
-
-              {/* MOCK PLAYER BADGE / ID CARD */}
-              <div className="bg-surface border-2 border-line rounded-2xl p-4 w-full max-w-[280px] shadow-lg relative overflow-hidden transition-all duration-300">
-                {/* Red & Blue ribbon bars */}
-                <div className="absolute top-0 left-0 right-0 h-1.5 flex">
-                  <div className="bg-hong flex-1"></div>
-                  <div className="bg-chong flex-1"></div>
-                </div>
-
-                <div className="flex justify-between items-start mt-2">
-                  <span className="text-[8px] font-mono font-bold text-gold tracking-wider bg-ink px-1.5 py-0.5 rounded border border-line">ID: TMR-PRE-099</span>
-                  <Trophy className="w-4 h-4 text-gold" />
-                </div>
-
-                <div className="flex flex-col items-center mt-3 text-center">
-                  {/* Photo Frame */}
-                  <div className="w-16 h-16 rounded-full border-2 border-line bg-ink overflow-hidden flex items-center justify-center shadow-inner">
-                    <User className="w-8 h-8 text-text-dim" />
-                  </div>
-                  
-                  <h3 className="text-xs font-bold uppercase text-text mt-3 tracking-wide">HAZIM LUQMAN</h3>
-                  <p className="text-[9px] font-semibold text-gold uppercase tracking-wider">Smart Ma Taekwondo</p>
-                  
-                  <div className="w-full h-[1px] bg-line my-2"></div>
-                  
-                  <div className="grid grid-cols-2 gap-1 w-full text-[9px] text-text-dim">
-                    <div className="text-left">
-                      <span>Division:</span>
-                      <p className="font-bold text-text uppercase leading-tight">Junior Male</p>
-                    </div>
-                    <div className="text-right">
-                      <span>Class:</span>
-                      <p className="font-bold text-text uppercase leading-tight">Fly -48kg</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 p-1.5 bg-ink rounded-lg border border-line w-full flex justify-between items-center">
-                    <div className="flex items-center space-x-1.5">
-                      <QrCode className="w-5 h-5 text-text" />
-                      <div className="text-left leading-none">
-                        <span className="text-[7px] text-text-dim block">SCAN STATUS</span>
-                        <span className="text-[9px] font-bold text-good">WEIGH-IN PASS</span>
-                      </div>
-                    </div>
-                    <CheckCircle className="w-3.5 h-3.5 text-good" />
-                  </div>
-                </div>
-              </div>
-
-              {/* MOCK LIVE SYSTEM COMPONENTS */}
-              <div className="w-full max-w-[280px] space-y-2 text-xs">
-                {/* Weigh-in log bar */}
-                <div className="bg-surface border border-line p-2.5 rounded-xl flex items-center justify-between shadow-sm">
-                  <div className="flex items-center space-x-2">
-                    <Scale className="w-3.5 h-3.5 text-gold" />
-                    <div>
-                      <span className="text-[9px] text-text-dim block">LIVE SCALE READING</span>
-                      <span className="font-mono font-bold text-text">47.65 KG</span>
-                    </div>
-                  </div>
-                  <span className="bg-good/15 text-good border border-good/30 text-[9px] uppercase font-bold px-2 py-0.5 rounded-md">
-                    Pass
-                  </span>
-                </div>
-
-                {/* Input form style preview */}
-                <div className="bg-surface border border-line p-2.5 rounded-xl space-y-1.5 shadow-sm">
-                  <label className="text-[9px] font-bold uppercase tracking-wider text-text-dim block">Scale Access Code</label>
-                  <div className="flex space-x-1.5">
-                    <input 
-                      type="text" 
-                      readOnly 
-                      value="weighin123" 
-                      className="flex-1 bg-ink border border-line rounded-lg text-[10px] py-1 px-2 text-text outline-none focus:border-gold"
-                    />
-                    <button className="bg-gold text-ink font-bold text-[9px] uppercase px-2.5 py-1 rounded-lg">
-                      Log
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* FOOTER METADATA */}
-      <footer className="border-t border-line bg-surface py-6 text-center text-xs text-text-dim mt-12 print:hidden">
-        <p className="max-w-2xl mx-auto px-4 leading-relaxed">
-          &copy; 2026 MY-TKD REGS Tournament Systems. All tournament structures, digital logs, weigh-in matrices, and athlete portrait records are persistently stored locally to protect confidentiality.
-        </p>
-      </footer>
-
-      {/* COACH EDIT PROFILE MODAL */}
-      {showCoachEditProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
-              <h2 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                <User className="w-5 h-5 text-gold" />
-                Edit Coach Profile
-              </h2>
-              <button 
-                onClick={() => setShowCoachEditProfile(false)}
-                className="text-text-dim hover:text-text transition p-2 hover:bg-surface border border-transparent hover:border-line rounded-full"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                <div className="col-span-full">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Username (Cannot be changed)</label>
-                  <input type="text" value={user || ''} disabled className="w-full bg-ink/50 border border-line text-sm rounded-xl py-2 px-3 text-text-dim cursor-not-allowed" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Coach Name *</label>
-                  <input type="text" value={coachEditName} onChange={(e) => setCoachEditName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Club Name *</label>
-                  <input type="text" value={coachEditClub} onChange={(e) => setCoachEditClub(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number</label>
-                  <input type="tel" value={coachEditPhone} onChange={(e) => setCoachEditPhone(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Email Address</label>
-                  <input type="email" value={coachEditEmail} onChange={(e) => setCoachEditEmail(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div className="col-span-full">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Access Password * (Edit to change)</label>
-                  <input type="text" value={coachEditPassword} onChange={(e) => setCoachEditPassword(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 border-t border-line bg-surface-2 flex justify-end gap-3">
-              <button 
-                onClick={() => setShowCoachEditProfile(false)}
-                className="px-6 py-2.5 rounded-xl font-bold text-sm text-text-dim border border-line hover:text-text transition"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={() => {
-                  if (!coachEditName.trim() || !coachEditClub.trim() || !coachEditPassword.trim()) {
-                    triggerMsg('Name, Club, and Password are required.', 'error');
-                    return;
-                  }
-                  const updated = {
-                    ...coaches,
-                    [user || '']: {
-                      ...coaches[user || ''],
-                      name: coachEditName.trim(),
-                      club: coachEditClub.trim(),
-                      phone: coachEditPhone.trim() || undefined,
-                      email: coachEditEmail.trim() || undefined,
-                      password: coachEditPassword.trim()
-                    }
-                  };
-                  saveCoachesToStorage(updated);
-                  setShowCoachEditProfile(false);
-                  triggerMsg('Coach profile updated successfully!', 'ok');
-                }}
-                className="bg-gold hover:bg-yellow-400 text-ink px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" />
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* REFEREE EDIT PROFILE MODAL */}
-      {showRefereeEditProfile && activeReferee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Header */}
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
-              <h2 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                <User className="w-5 h-5 text-gold" />
-                Edit Profile
-              </h2>
-              <button 
-                onClick={() => setShowRefereeEditProfile(false)}
-                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-6 overflow-y-auto space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Full Name *</label>
-                  <input type="text" value={refereeFullName} onChange={(e) => setRefereeFullName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">NRIC Number (Cannot be changed)</label>
-                  <input type="text" value={refereeNric} disabled className="w-full bg-ink/50 border border-line text-sm rounded-xl py-2 px-3 text-text-dim cursor-not-allowed" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Password</label>
-                  <input type="text" value={refereePassword} onChange={(e) => setRefereePassword(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number *</label>
-                  <input type="tel" value={refereePhone} onChange={(e) => setRefereePhone(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">State / Club Name *</label>
-                  <input type="text" value={refereeClubName} onChange={(e) => setRefereeClubName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Residential Location *</label>
-                  <input type="text" value={refereeResidential} onChange={(e) => setRefereeResidential(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) *</label>
-                  <input type="number" value={refereeDistance} onChange={(e) => setRefereeDistance(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name *</label>
-                  <input type="text" value={refereeBankName} onChange={(e) => setRefereeBankName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number *</label>
-                  <input type="text" value={refereeBankAccount} onChange={(e) => setRefereeBankAccount(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Kyorugi Referee Status *</label>
-                  <select value={refereeKyorugiStatus} onChange={(e) => setRefereeKyorugiStatus(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                    <option value="TR">Trainee Referee (TR)</option>
-                    <option value="SR">State Referee (SR)</option>
-                    <option value="NR">National Referee (NR)</option>
-                    <option value="IR">International Referee (IR)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Poomsae Referee Status *</label>
-                  <select value={refereePoomsaeStatus} onChange={(e) => setRefereePoomsaeStatus(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                    <option value="TR">Trainee Referee (TR)</option>
-                    <option value="SR">State Referee (SR)</option>
-                    <option value="NR">National Referee (NR)</option>
-                    <option value="IR">International Referee (IR)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Accommodation Required? *</label>
-                  <select value={refereeAccommodation} onChange={(e) => setRefereeAccommodation(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                    <option value="No">No - I will arrange my own</option>
-                    <option value="Yes">Yes - Organizer to arrange</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Car Plate Number</label>
-                  <input type="text" value={refereeCarPlate} onChange={(e) => setRefereeCarPlate(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold uppercase" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Special Appointed Role</label>
-                  <select value={refereeSpecialRole} onChange={(e) => setRefereeSpecialRole(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                    <option value="None">None (Standard Referee)</option>
-                    <option value="TD">Technical Delegate (TD)</option>
-                    <option value="CSB">Supervisory Board (CSB)</option>
-                    <option value="RIC">Referee In-Charge (RIC)</option>
-                    <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
-                    <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
-                    <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="p-6 border-t border-line bg-surface-2 flex justify-end gap-3">
-              <button 
-                onClick={() => setShowRefereeEditProfile(false)}
-                className="px-6 py-2.5 rounded-xl text-text font-bold text-sm hover:bg-surface border border-line transition"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={async () => {
-                  if (!refereeFullName || !refereePhone || !refereeClubName || !refereeResidential || refereeDistance.toString().trim() === '' || !refereeBankName.trim() || !refereeBankAccount.trim()) {
-                    triggerMsg('Please fill in all required fields.', 'error');
-                    return;
-                  }
-                  
-                  const distVal = parseFloat(refereeDistance as string);
-                  if (isNaN(distVal) || distVal < 0) {
-                    triggerMsg('Please enter a valid number for Distance to Venue.', 'error');
-                    return;
-                  }
-                  
-                  const updatedRefInfo = {
-                    fullName: refereeFullName,
-                    password: refereePassword || undefined,
-                    phone: refereePhone,
-                    clubName: refereeClubName,
-                    residentialLocation: refereeResidential,
-                    distance: distVal,
-                    bankName: refereeBankName,
-                    bankAccount: refereeBankAccount,
-                    accommodation: refereeAccommodation,
-                    kyorugiStatus: refereeKyorugiStatus,
-                    poomsaeStatus: refereePoomsaeStatus,
-                    carPlate: refereeCarPlate,
-                    specialRole: refereeSpecialRole,
-                  };
-
-                  const cleanIc = activeReferee.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-
-                  try {
-                    // Update global refereeAccount
-                    const existingAcc = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
-                    if (existingAcc) {
-                      await saveRefereeAccount({
-                        ...existingAcc,
-                        ...updatedRefInfo
-                      });
-                    }
-                    
-                    // Update all active tournament registrations
-                    const matchingTournaments = referees.filter(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
-                    for (const tRef of matchingTournaments) {
-                      await saveRefereeToFirestore({
-                        ...tRef,
-                        ...updatedRefInfo
-                      });
-                    }
-                    
-                    triggerMsg('Profile updated successfully!', 'ok');
-                    setShowRefereeEditProfile(false);
-                  } catch (err) {
-                    console.error(err);
-                    triggerMsg('Failed to update profile', 'error');
-                  }
-                }}
-                className="bg-gold hover:bg-yellow-400 text-ink px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" />
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ORGANIZER ADD REFEREE MODAL */}
-      {showOrganizerAddReferee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Header */}
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
-              <h2 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                <User className="w-5 h-5 text-gold" />
-                Add Referee to Tournament
-              </h2>
-              <button 
-                onClick={() => setShowOrganizerAddReferee(false)}
-                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-line bg-surface-2/20">
-              <button
-                type="button"
-                onClick={() => setAddRefereeModalTab('existing')}
-                className={`flex-1 py-3 px-4 text-center text-sm font-semibold border-b-2 transition ${
-                  addRefereeModalTab === 'existing'
-                    ? 'border-gold text-gold bg-gold/5'
-                    : 'border-transparent text-text-dim hover:text-text hover:bg-surface-2/10'
-                }`}
-              >
-                Select Registered Referee
-              </button>
-              <button
-                type="button"
-                onClick={() => setAddRefereeModalTab('new')}
-                className={`flex-1 py-3 px-4 text-center text-sm font-semibold border-b-2 transition ${
-                  addRefereeModalTab === 'new'
-                    ? 'border-gold text-gold bg-gold/5'
-                    : 'border-transparent text-text-dim hover:text-text hover:bg-surface-2/10'
-                }`}
-              >
-                Create New Referee Profile
-              </button>
-            </div>
-
-            {/* Content */}
-            {addRefereeModalTab === 'existing' ? (
-              <div className="p-6 overflow-y-auto space-y-6 flex-1 flex flex-col min-h-0">
-                <div className="space-y-4">
-                  <div className="relative">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-dim" />
-                    <input
-                      type="text"
-                      placeholder="Search registered referees by name, NRIC, or club..."
-                      value={searchRegisteredQuery}
-                      onChange={(e) => setSearchRegisteredQuery(e.target.value)}
-                      className="w-full bg-ink border border-line text-sm rounded-xl py-2.5 pl-10 pr-4 text-text focus:outline-none focus:border-gold placeholder:text-text-dim/60"
-                    />
-                  </div>
-
-                  <div className="border border-line rounded-2xl overflow-hidden bg-ink/30 flex flex-col max-h-[220px]">
-                    <div className="p-3 bg-surface border-b border-line text-[10px] font-bold uppercase tracking-wider text-text-dim flex justify-between items-center shrink-0">
-                      <span>Name & NRIC</span>
-                      <span>Club & Qualifications</span>
-                    </div>
-                    <div className="overflow-y-auto divide-y divide-line flex-1">
-                      {(() => {
-                        const availableRegisteredReferees = refereeAccounts.filter(acc => {
-                          const cleanAccNric = acc.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-                          const isAlreadyInComp = referees.some(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanAccNric);
-                          if (isAlreadyInComp) return false;
-                          
-                          if (searchRegisteredQuery.trim()) {
-                            const q = searchRegisteredQuery.toLowerCase();
-                            return (
-                              acc.fullName.toLowerCase().includes(q) ||
-                              acc.nric.toLowerCase().includes(q) ||
-                              (acc.clubName && acc.clubName.toLowerCase().includes(q))
-                            );
-                          }
-                          return true;
-                        });
-
-                        if (availableRegisteredReferees.length === 0) {
-                          return (
-                            <div className="p-8 text-center text-sm text-text-dim">
-                              No registered referees found matching your search.
-                            </div>
-                          );
-                        }
-
-                        const allAvailableSelected = availableRegisteredReferees.length > 0 && availableRegisteredReferees.every(acc => selectedExistingRefereeNrics.includes(acc.nric));
-
-                        return (
-                          <>
-                            <div className="p-2.5 bg-surface-2/30 border-b border-line flex items-center justify-between text-xs">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (allAvailableSelected) {
-                                    setSelectedExistingRefereeNrics([]);
-                                  } else {
-                                    setSelectedExistingRefereeNrics(availableRegisteredReferees.map(a => a.nric));
-                                  }
-                                }}
-                                className="text-gold hover:underline font-bold text-xs flex items-center gap-2 cursor-pointer"
-                              >
-                                <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                                  allAvailableSelected ? 'border-gold bg-gold text-ink' : 'border-line bg-surface'
-                                }`}>
-                                  {allAvailableSelected && <Check className="w-3 h-3 font-bold" />}
-                                </div>
-                                {allAvailableSelected ? 'Deselect All' : `Select All (${availableRegisteredReferees.length})`}
-                              </button>
-                              {selectedExistingRefereeNrics.length > 0 && (
-                                <span className="text-text-dim font-medium">
-                                  {selectedExistingRefereeNrics.length} referee(s) selected
-                                </span>
-                              )}
-                            </div>
-                            {availableRegisteredReferees.map((acc) => {
-                              const isSelected = selectedExistingRefereeNrics.includes(acc.nric);
-                              return (
-                                <button
-                                  key={acc.nric}
-                                  type="button"
-                                  onClick={() => {
-                                    if (isSelected) {
-                                      setSelectedExistingRefereeNrics(prev => prev.filter(n => n !== acc.nric));
-                                    } else {
-                                      setSelectedExistingRefereeNrics(prev => [...prev, acc.nric]);
-                                      if (acc.specialRole) setRefereeSpecialRole(acc.specialRole);
-                                    }
-                                  }}
-                                  className={`w-full text-left p-3.5 flex items-center justify-between text-sm transition cursor-pointer ${
-                                    isSelected 
-                                      ? 'bg-gold/10 hover:bg-gold/15 border-l-4 border-gold' 
-                                      : 'hover:bg-surface-2/40 border-l-4 border-transparent'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${
-                                      isSelected ? 'border-gold bg-gold text-ink' : 'border-line'
-                                    }`}>
-                                      {isSelected && <Check className="w-3.5 h-3.5 font-bold" />}
-                                    </div>
-                                    <div>
-                                      <div className="font-bold text-text text-sm">{acc.fullName}</div>
-                                      <div className="text-xs text-text-dim font-mono">{acc.nric}</div>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs font-semibold text-text">{acc.clubName || 'N/A'}</div>
-                                    <div className="flex gap-1.5 mt-1 justify-end">
-                                      <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
-                                        Kyorugi: {acc.kyorugiStatus}
-                                      </span>
-                                      <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface border border-line text-text-dim">
-                                        Poomsae: {acc.poomsaeStatus}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </div>
-
-                {selectedExistingRefereeNrics.length === 1 && (() => {
-                  const singleNric = selectedExistingRefereeNrics[0];
-                  const acc = refereeAccounts.find(a => a.nric === singleNric);
-                  if (!acc) return null;
-                  return (
-                    <div className="border border-line rounded-2xl p-5 bg-surface-2/20 space-y-4 animate-fade-in text-sm">
-                      <h4 className="text-xs font-bold text-gold uppercase tracking-wider">
-                        Referee Selection Profile Details
-                      </h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-3 gap-x-4 text-xs">
-                        <div>
-                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Phone</span>
-                          <span className="font-semibold text-text">{acc.phone || 'N/A'}</span>
-                        </div>
-                        <div>
-                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Residential Location</span>
-                          <span className="font-semibold text-text">{acc.residentialLocation || 'N/A'}</span>
-                        </div>
-                        <div>
-                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Distance to Venue</span>
-                          <span className="font-semibold text-text">{acc.distance !== undefined ? `${acc.distance} KM` : 'N/A'}</span>
-                        </div>
-                        <div>
-                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Bank Information</span>
-                          <span className="font-semibold text-text">
-                            {acc.bankName ? `${acc.bankName} - ${acc.bankAccount || 'No Acct'}` : 'N/A'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Car Plate</span>
-                          <span className="font-semibold text-text uppercase">{acc.carPlate || 'N/A'}</span>
-                        </div>
-                        <div>
-                          <span className="text-text-dim uppercase tracking-wider block mb-0.5">Accommodation Preference</span>
-                          <span className="font-semibold text-text">{acc.accommodation || 'No'}</span>
-                        </div>
-                      </div>
-
-                      <div className="pt-3 border-t border-line/60">
-                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">
-                          Assign Special Appointed Role for This Tournament
-                        </label>
-                        <select 
-                          value={refereeSpecialRole} 
-                          onChange={(e) => setRefereeSpecialRole(e.target.value as any)} 
-                          className="w-full sm:max-w-xs bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                        >
-                          <option value="None">None (Standard Referee)</option>
-                          <option value="TD">Technical Delegate (TD)</option>
-                          <option value="CSB">Supervisory Board (CSB)</option>
-                          <option value="RIC">Referee In-Charge (RIC)</option>
-                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
-                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
-                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {selectedExistingRefereeNrics.length > 1 && (() => {
-                  const selectedAccs = refereeAccounts.filter(a => selectedExistingRefereeNrics.includes(a.nric));
-                  return (
-                    <div className="border border-line rounded-2xl p-5 bg-surface-2/20 space-y-4 animate-fade-in text-sm">
-                      <div className="flex justify-between items-center">
-                        <h4 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-2">
-                          <span>{selectedExistingRefereeNrics.length} Referees Selected</span>
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedExistingRefereeNrics([])}
-                          className="text-xs text-text-dim hover:text-text underline cursor-pointer"
-                        >
-                          Clear Selection
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 max-h-[100px] overflow-y-auto p-1">
-                        {selectedAccs.map(acc => (
-                          <span key={acc.nric} className="text-xs bg-surface border border-line px-2.5 py-1 rounded-lg text-text flex items-center gap-1.5">
-                            <span className="font-semibold">{acc.fullName}</span>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedExistingRefereeNrics(prev => prev.filter(n => n !== acc.nric))}
-                              className="text-text-dim hover:text-hong font-bold cursor-pointer"
-                            >
-                              √ó
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-
-                      <div className="pt-3 border-t border-line/60">
-                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">
-                          Assign Special Appointed Role for Selected Referees
-                        </label>
-                        <select 
-                          value={refereeSpecialRole} 
-                          onChange={(e) => setRefereeSpecialRole(e.target.value as any)} 
-                          className="w-full sm:max-w-xs bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                        >
-                          <option value="None">None (Standard Referee)</option>
-                          <option value="TD">Technical Delegate (TD)</option>
-                          <option value="CSB">Supervisory Board (CSB)</option>
-                          <option value="RIC">Referee In-Charge (RIC)</option>
-                          <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
-                          <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
-                          <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            ) : (
-              <div className="p-6 overflow-y-auto space-y-6 flex-1 min-h-0">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Full Name *</label>
-                    <input type="text" value={refereeFullName} onChange={(e) => setRefereeFullName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">NRIC Number *</label>
-                    <input type="text" value={refereeNric} onChange={(e) => setRefereeNric(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number *</label>
-                    <input type="tel" value={refereePhone} onChange={(e) => setRefereePhone(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">State / Club Name *</label>
-                    <input type="text" value={refereeClubName} onChange={(e) => setRefereeClubName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Residential Location *</label>
-                    <input type="text" value={refereeResidential} onChange={(e) => setRefereeResidential(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) *</label>
-                    <input type="number" value={refereeDistance} onChange={(e) => setRefereeDistance(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name *</label>
-                    <input type="text" value={refereeBankName} onChange={(e) => setRefereeBankName(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number *</label>
-                    <input type="text" value={refereeBankAccount} onChange={(e) => setRefereeBankAccount(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Kyorugi Referee Status *</label>
-                    <select value={refereeKyorugiStatus} onChange={(e) => setRefereeKyorugiStatus(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                      <option value="TR">Trainee Referee (TR)</option>
-                      <option value="SR">State Referee (SR)</option>
-                      <option value="NR">National Referee (NR)</option>
-                      <option value="IR">International Referee (IR)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Poomsae Referee Status *</label>
-                    <select value={refereePoomsaeStatus} onChange={(e) => setRefereePoomsaeStatus(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                      <option value="TR">Trainee Referee (TR)</option>
-                      <option value="SR">State Referee (SR)</option>
-                      <option value="NR">National Referee (NR)</option>
-                      <option value="IR">International Referee (IR)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Accommodation Required? *</label>
-                    <select value={refereeAccommodation} onChange={(e) => setRefereeAccommodation(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                      <option value="No">No - I will arrange my own</option>
-                      <option value="Yes">Yes - Organizer to arrange</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Car Plate Number</label>
-                    <input type="text" value={refereeCarPlate} onChange={(e) => setRefereeCarPlate(e.target.value)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold uppercase" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Special Appointed Role</label>
-                    <select value={refereeSpecialRole} onChange={(e) => setRefereeSpecialRole(e.target.value as any)} className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition">
-                      <option value="None">None (Standard Referee)</option>
-                      <option value="TD">Technical Delegate (TD)</option>
-                      <option value="CSB">Supervisory Board (CSB)</option>
-                      <option value="RIC">Referee In-Charge (RIC)</option>
-                      <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
-                      <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
-                      <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            {/* Footer Actions */}
-            <div className="p-6 border-t border-line flex justify-end gap-3 bg-surface-2/30 shrink-0">
-              <button 
-                onClick={() => setShowOrganizerAddReferee(false)}
-                className="text-text-dim border border-line px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-surface-2 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              {addRefereeModalTab === 'existing' ? (
-                <button 
-                  onClick={handleOrganizerAddExistingReferee}
-                  disabled={selectedExistingRefereeNrics.length === 0}
-                  className={`px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2 ${
-                    selectedExistingRefereeNrics.length > 0
-                      ? 'bg-gold hover:bg-yellow-400 text-ink cursor-pointer'
-                      : 'bg-gold/40 text-ink/50 cursor-not-allowed'
-                  }`}
-                >
-                  <Plus className="w-4 h-4" />
-                  {selectedExistingRefereeNrics.length > 1
-                    ? `Add ${selectedExistingRefereeNrics.length} Referees`
-                    : 'Add Referee'}
-                </button>
-              ) : (
-                <button 
-                  onClick={handleOrganizerSaveNewReferee}
-                  className="bg-gold hover:bg-yellow-400 text-ink px-6 py-2.5 rounded-xl font-bold text-sm transition shadow flex items-center gap-2 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Referee
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BATCH PRINT & EXPORT PORTAL MODAL */}
-      {showPrintAllCardsModal && activeComp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-5xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-line bg-gradient-to-b from-surface-2/50 to-transparent flex justify-between items-center shrink-0">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold">
-                  <Printer className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold uppercase tracking-wider text-text font-display">Print & Export ID Cards Station</h2>
-                  <p className="text-xs text-text-dim">Batch print entry passes with cut-borders or export high-resolution individual PNGs.</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowPrintAllCardsModal(false)}
-                className="text-text-dim hover:text-text bg-surface-2 hover:bg-line border border-line px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 flex flex-col lg:flex-row gap-6">
-              
-              {/* Left Panel: Controls */}
-              <div className="w-full lg:w-[320px] shrink-0 space-y-5">
-                <div className="space-y-4 bg-ink/30 border border-line p-4 rounded-2xl">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-gold">Filter Entrants</h3>
-                  
-                  {/* Search bar */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-text-dim">Search Athlete</label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-dim" />
-                      <input 
-                        type="text" 
-                        value={printSearch}
-                        onChange={(e) => setPrintSearch(e.target.value)}
-                        placeholder="Name, ID, or Club..." 
-                        className="w-full bg-ink border border-line rounded-xl pl-9 pr-3 py-2 text-xs text-text outline-none focus:border-gold"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Club Filter */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-text-dim">Club Represented</label>
-                    <select 
-                      value={printFilterClub}
-                      onChange={(e) => setPrintFilterClub(e.target.value)}
-                      className="w-full bg-ink border border-line rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-gold"
-                    >
-                      <option value="all">All Clubs ({Array.from(new Set(players.map(p => p.club).filter(Boolean))).length})</option>
-                      {Array.from(new Set(players.map(p => p.club).filter(Boolean))).sort().map(club => (
-                        <option key={club} value={club}>{club}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Division / Bracket Filter */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-text-dim">Age Division / Bracket</label>
-                    <select 
-                      value={printFilterBracket}
-                      onChange={(e) => setPrintFilterBracket(e.target.value)}
-                      className="w-full bg-ink border border-line rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-gold"
-                    >
-                      <option value="all">All Brackets ({Array.from(new Set(players.map(p => p.ageGroup).filter(Boolean))).length})</option>
-                      {Array.from(new Set(players.map(p => p.ageGroup).filter(Boolean))).sort().map(bracket => (
-                        <option key={bracket} value={bracket}>{bracket}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Exclusion Counter & Reset */}
-                  {excludedPlayerIds.size > 0 && (
-                    <div className="flex items-center justify-between text-xs bg-red-500/10 border border-red-500/20 rounded-xl p-2.5 animate-fade-in text-red-400">
-                      <span>{excludedPlayerIds.size} cards manually excluded</span>
-                      <button 
-                        onClick={() => setExcludedPlayerIds(new Set())}
-                        className="underline hover:text-red-300 font-bold"
-                      >
-                        Reset
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Print Stats */}
-                <div className="bg-surface-2 border border-line rounded-2xl p-4 space-y-2 text-xs text-text-dim">
-                  <div className="flex justify-between">
-                    <span>Matched Entrants:</span>
-                    <span className="font-bold text-text">
-                      {players.filter(p => {
-                        if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                        if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                        if (printSearch.trim() !== '') {
-                          const q = printSearch.toLowerCase();
-                          return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                        }
-                        return true;
-                      }).length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Excluded:</span>
-                    <span className="font-bold text-text">{excludedPlayerIds.size}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-line/50 pt-2 font-semibold">
-                    <span>Selected to Print:</span>
-                    <span className="text-gold font-bold">
-                      {players.filter(p => {
-                        if (excludedPlayerIds.has(p.id)) return false;
-                        if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                        if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                        if (printSearch.trim() !== '') {
-                          const q = printSearch.toLowerCase();
-                          return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                        }
-                        return true;
-                      }).length}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Primary Actions */}
-                <div className="space-y-3">
-                  <button 
-                    onClick={() => {
-                      const selectedToPrint = players.filter(p => {
-                        if (excludedPlayerIds.has(p.id)) return false;
-                        if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                        if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                        if (printSearch.trim() !== '') {
-                          const q = printSearch.toLowerCase();
-                          return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                        }
-                        return true;
-                      });
-                      if (selectedToPrint.length === 0) {
-                        triggerMsg('No ID cards selected for printing.', 'error');
-                        return;
-                      }
-                      window.print();
-                    }}
-                    className="w-full bg-gold hover:opacity-90 text-ink font-bold py-3.5 px-4 rounded-xl shadow-md transition duration-200 cursor-pointer flex items-center justify-center gap-2 text-xs uppercase tracking-wider"
-                  >
-                    <Printer className="w-4 h-4" />
-                    <span>Launch System Print</span>
-                  </button>
-
-                  <button 
-                    onClick={() => {
-                      const selectedToPrint = players.filter(p => {
-                        if (excludedPlayerIds.has(p.id)) return false;
-                        if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                        if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                        if (printSearch.trim() !== '') {
-                          const q = printSearch.toLowerCase();
-                          return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                        }
-                        return true;
-                      });
-                      downloadAllSelectedCards(selectedToPrint);
-                    }}
-                    disabled={isDownloadingAll || players.filter(p => {
-                      if (excludedPlayerIds.has(p.id)) return false;
-                      if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                      if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                      if (printSearch.trim() !== '') {
-                        const q = printSearch.toLowerCase();
-                        return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                      }
-                      return true;
-                    }).length === 0}
-                    className="w-full bg-ink border border-line text-text hover:bg-line font-bold py-3 px-4 rounded-xl transition duration-200 cursor-pointer flex items-center justify-center gap-2 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Batch Export PNGs</span>
-                  </button>
-
-                  {isDownloadingAll && (
-                    <div className="space-y-1.5 animate-fade-in bg-ink/40 p-3 rounded-xl border border-line">
-                      <div className="flex justify-between text-[10px] text-text-dim">
-                        <span>Generating high-res files...</span>
-                        <span className="font-bold">{downloadProgress} / {downloadTotal}</span>
-                      </div>
-                      <div className="w-full bg-ink rounded-full h-1.5 overflow-hidden">
-                        <div 
-                          className="bg-gold h-full transition-all duration-150" 
-                          style={{ width: `${(downloadProgress / downloadTotal) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Calibration Tips */}
-                <div className="bg-gold/5 border border-gold/15 rounded-2xl p-4 text-[11px] leading-relaxed text-text-dim space-y-2">
-                  <p className="font-bold text-gold flex items-center gap-1">
-                    <Sliders className="w-3.5 h-3.5" />
-                    Printer Calibration Tips:
-                  </p>
-                  <ul className="list-disc pl-4 space-y-1 text-text-dim/90">
-                    <li>Enable <strong>"Background graphics"</strong> to print background colors and assets.</li>
-                    <li>Turn <strong>OFF</strong> browser <strong>"Headers and footers"</strong> to avoid margin noise.</li>
-                    <li>Choose <strong>"Save as PDF"</strong> to compile all passes into a single vector-grade printable file.</li>
-                    <li>The layout automatically aligns <strong>2 columns</strong> cleanly with scissors lines.</li>
-                  </ul>
-                </div>
-              </div>
-
-              {/* Right Panel: Scrollable live list & Preview */}
-              <div className="flex-1 bg-ink/20 border border-line rounded-3xl p-4 flex flex-col space-y-3">
-                <div className="flex justify-between items-center text-xs text-text-dim px-2">
-                  <span className="font-bold uppercase tracking-wider">Live Preview Canvas</span>
-                  <span className="text-[10px] italic">Hover on card to exclude it from batch</span>
-                </div>
-
-                {players.filter(p => {
-                  if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                  if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                  if (printSearch.trim() !== '') {
-                    const q = printSearch.toLowerCase();
-                    return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                  }
-                  return true;
-                }).length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-text-dim space-y-2 bg-ink/40 border border-dashed border-line rounded-2xl">
-                    <Users className="w-10 h-10 text-text-dim/30 mx-auto" />
-                    <p className="text-sm font-semibold">No entrants match your search filter.</p>
-                    <p className="text-xs">Adjust your dropdown or search parameters above.</p>
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto max-h-[55vh] p-2 bg-ink rounded-2xl border border-line">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 justify-items-center py-4">
-                      {players.filter(p => {
-                        if (printFilterClub !== 'all' && p.club !== printFilterClub) return false;
-                        if (printFilterBracket !== 'all' && p.ageGroup !== printFilterBracket) return false;
-                        if (printSearch.trim() !== '') {
-                          const q = printSearch.toLowerCase();
-                          return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || (p.club && p.club.toLowerCase().includes(q));
-                        }
-                        return true;
-                      }).map((p) => {
-                        const isExcluded = excludedPlayerIds.has(p.id);
-                        const belt = beltColorFor(p.ageGroup || '');
-                        const fields = getIdCardFields(activeComp);
-                        
-                        const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
-                          const map: Record<string, string> = {
-                            'xs': '9px',
-                            'sm': '11px',
-                            'base': '13px',
-                            'lg': '15px',
-                            'xl': '18px',
-                            '2xl': '22px',
-                            '3xl': '26px'
-                          };
-                          return map[size] || defaultVal;
-                        };
-
-                        return (
-                          <div 
-                            key={`preview-card-wrap-${p.id}`}
-                            className={`relative group transition-all duration-200 ${isExcluded ? 'opacity-40 scale-95 saturate-50' : 'hover:scale-[1.01]'}`}
-                          >
-                            {/* Card Exclusion Action Shield */}
-                            <div className="absolute inset-0 z-30 bg-black/60 rounded-3xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const updated = new Set(excludedPlayerIds);
-                                  if (isExcluded) {
-                                    updated.delete(p.id);
-                                  } else {
-                                    updated.add(p.id);
-                                  }
-                                  setExcludedPlayerIds(updated);
-                                }}
-                                className="bg-ink/90 border border-line text-xs font-bold py-2 px-4 rounded-xl shadow-lg flex items-center gap-1.5 hover:bg-gold hover:text-ink transition cursor-pointer"
-                              >
-                                {isExcluded ? <CheckCircle className="w-4 h-4 text-good" /> : <Trash2 className="w-4 h-4 text-hong" />}
-                                <span>{isExcluded ? 'Include in Batch' : 'Exclude from Print'}</span>
-                              </button>
-                            </div>
-
-                            {/* Actual ID Card Layout */}
-                            <div className="w-[300px] h-[420px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden shadow-2xl relative flex flex-col justify-between">
-                              {activeComp.idCardBgUrl && (
-                                <>
-                                  <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
-                                  <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
-                                </>
-                              )}
-                              
-                              <div className="relative z-10 h-full flex-1 flex flex-col justify-between py-2.5">
-                                {fields.filter(f => f.visible).map(field => {
-                                  if (field.id === 'header') {
-                                    return (
-                                      <div key="header" className={`h-8 bg-gradient-to-r from-hong via-hong to-chong flex ${
-                                        field.align === 'left' ? 'justify-start gap-2' :
-                                        field.align === 'right' ? 'justify-end gap-2' :
-                                        field.align === 'center' ? 'justify-center gap-2' :
-                                        'justify-between'
-                                      } items-center px-3 shrink-0 shadow-sm w-full`}>
-                                        <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                                        
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'belt') {
-                                    return (
-                                      <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }} />
-                                    );
-                                  }
-                                  if (field.id === 'photo') {
-                                    return (
-                                      <div key="photo" className={`px-4 py-1 shrink-0 flex ${
-                                        field.align === 'left' ? 'justify-start' :
-                                        field.align === 'right' ? 'justify-end' :
-                                        'justify-center'
-                                      }`}>
-                                        <div className="w-14 h-18 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                                          <User className="w-5 h-5 text-text-dim/40" />
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'name') {
-                                    return (
-                                      <div key="name" className={`px-4 py-1 shrink-0 ${
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }`}>
-                                        <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2 text-text" style={{ fontSize: getFontSizePx(field.fontSize, '13px'), color: field.color || '#ffffff' }}>{p.name}</h3>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'club') {
-                                    return (
-                                      <div key="club" className={`px-4 py-1 shrink-0 ${
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }`}>
-                                        <p className="uppercase tracking-widest text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'athleteId') {
-                                    if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
-                                    return (
-                                      <div key="athleteId" className={`px-4 py-1 shrink-0 ${
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }`}>
-                                        <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'metadata') {
-                                    if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
-                                      return (
-                                        <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
-                                          <span 
-                                            className="font-display font-bold tracking-widest uppercase text-white" 
-                                            style={{ 
-                                              fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
-                                              color: field.color || '#ffffff' 
-                                            }}
-                                          >
-                                            {p.event}
-                                          </span>
-                                        </div>
-                                      );
-                                    }
-    return (
-                                      <div key="metadata" className={`px-4 py-1 shrink-0 grid grid-cols-2 gap-1.5 text-[9px] border-t border-line/30 pt-2 ${
-                                        field.align === 'left' ? 'text-left' :
-                                        field.align === 'right' ? 'text-right' :
-                                        'text-center'
-                                      }`}>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
-                                          <span className="font-medium line-clamp-1 text-text" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
-                                        </div>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
-                                          <span className="font-medium text-text" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.gender}</span>
-                                        </div>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Weight</span>
-                                          <span className="font-medium line-clamp-1 text-text" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
-                                        </div>
-                                        <div>
-                                          <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
-                                          <span className="font-medium text-text" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{p.dob}</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  if (field.id === 'qrcode') {
-                                    const containerClass = 
-                                      field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
-                                      field.align === 'center' ? 'flex flex-col items-center justify-center gap-1 text-center' :
-                                      'flex items-center justify-between';
-                                    
-                                    const textAlignmentClass = 
-                                      field.align === 'right' ? 'text-left min-w-0' :
-                                      field.align === 'center' ? 'text-center min-w-0' :
-                                      'text-right min-w-0';
-
-                                    return (
-                                      <div key="qrcode" className={`px-4 py-1 shrink-0 ${containerClass} border-t border-dashed border-line/30 pt-2`}>
-                                        <div className="bg-white p-1 rounded-lg inline-block shadow-md shrink-0">
-                                          <QRCodeSVG 
-                                            value={`${activeComp.id}::${p.id}`} 
-                                            size={40} 
-                                            level="M" 
-                                            includeMargin={false}
-                                          />
-                                        </div>
-                                        <div className={textAlignmentClass}>
-                                          {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
-                                        <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                                          <p className="mt-0.5 leading-normal text-[5.5px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '5.5px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* PRINT-ONLY AREA FOR ID CARDS */}
-      {activeComp && (
-        <div className="hidden print:block bg-white text-black min-h-screen p-0 m-0 w-full" id="printable-cards-container">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-8 justify-items-center p-4">
-            {players.filter(p => !excludedPlayerIds.has(p.id) && 
-              (printFilterClub === 'all' || p.club === printFilterClub) &&
-              (printFilterBracket === 'all' || p.ageGroup === printFilterBracket) &&
-              (printSearch.trim() === '' || 
-                p.name.toLowerCase().includes(printSearch.toLowerCase()) || 
-                p.id.toLowerCase().includes(printSearch.toLowerCase()) ||
-                (p.club && p.club.toLowerCase().includes(printSearch.toLowerCase())))
-            ).map((p) => {
-              const belt = beltColorFor(p.ageGroup || '');
-              const fields = getIdCardFields(activeComp);
-              
-              const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
-                const map: Record<string, string> = {
-                  'xs': '9px',
-                  'sm': '11px',
-                  'base': '13px',
-                  'lg': '15px',
-                  'xl': '18px',
-                  '2xl': '22px',
-                  '3xl': '26px'
-                };
-                return map[size] || defaultVal;
-              };
-
-              return (
-                <div 
-                  key={`print-card-${p.id}`}
-                  className="w-[336px] h-[480px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border-2 border-dashed border-gray-400 rounded-3xl overflow-hidden relative flex flex-col justify-between break-inside-avoid page-break-inside-avoid"
-                >
-                  {activeComp.idCardBgUrl && (
-                    <>
-                      <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
-                      <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
-                    </>
-                  )}
-                  
-                  <div className="relative z-10 h-full flex-1 flex flex-col justify-between py-2.5">
-                    {fields.filter(f => f.visible).map(field => {
-                      if (field.id === 'header') {
-                        return (
-                          <div key="header" className={`h-8 bg-gradient-to-r from-hong via-hong to-chong flex ${
-                            field.align === 'left' ? 'justify-start gap-2' :
-                            field.align === 'right' ? 'justify-end gap-2' :
-                            field.align === 'center' ? 'justify-center gap-2' :
-                            'justify-between'
-                          } items-center px-3 shrink-0 shadow-sm w-full`}>
-                            <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                            
-                          </div>
-                        );
-                      }
-                      if (field.id === 'belt') {
-                        return (
-                          <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }} />
-                        );
-                      }
-                      if (field.id === 'photo') {
-                        return (
-                          <div key="photo" className={`px-4 py-1 shrink-0 flex ${
-                            field.align === 'left' ? 'justify-start' :
-                            field.align === 'right' ? 'justify-end' :
-                            'justify-center'
-                          }`}>
-                            <div className="w-16 h-20 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                              <User className="w-5 h-5 text-text-dim/40" />
-                            </div>
-                          </div>
-                        );
-                      }
-                      if (field.id === 'name') {
-                        return (
-                          <div key="name" className={`px-4 py-1 shrink-0 ${
-                            field.align === 'left' ? 'text-left' :
-                            field.align === 'right' ? 'text-right' :
-                            'text-center'
-                          }`}>
-                            <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '14px'), color: field.color || '#ffffff' }}>{p.name}</h3>
-                          </div>
-                        );
-                      }
-                      if (field.id === 'club') {
-                        return (
-                          <div key="club" className={`px-4 py-1 shrink-0 ${
-                            field.align === 'left' ? 'text-left' :
-                            field.align === 'right' ? 'text-right' :
-                            'text-center'
-                          }`}>
-                            <p className="uppercase tracking-widest text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
-                          </div>
-                        );
-                      }
-                      if (field.id === 'athleteId') {
-                        if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
-                        return (
-                          <div key="athleteId" className={`px-4 py-1 shrink-0 ${
-                            field.align === 'left' ? 'text-left' :
-                            field.align === 'right' ? 'text-right' :
-                            'text-center'
-                          }`}>
-                            <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold text-gold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
-                          </div>
-                        );
-                      }
-                      if (field.id === 'metadata') {
-                        if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
-                          return (
-                            <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
-                              <span 
-                                className="font-display font-bold tracking-widest uppercase text-white" 
-                                style={{ 
-                                  fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
-                                  color: field.color || '#ffffff' 
-                                }}
-                              >
-                                {p.event}
-                              </span>
-                            </div>
-                          );
-                        }
-    return (
-                          <div key="metadata" className={`px-4 py-1 shrink-0 grid grid-cols-2 gap-2 text-[10px] border-t border-line/30 pt-2.5 ${
-                            field.align === 'left' ? 'text-left' :
-                            field.align === 'right' ? 'text-right' :
-                            'text-center'
-                          }`}>
-                            <div>
-                              <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
-                              <span className="font-medium line-clamp-1 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
-                            </div>
-                            <div>
-                              <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
-                              <span className="font-medium text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.gender}</span>
-                            </div>
-                            <div>
-                              <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">Weight</span>
-                              <span className="font-medium line-clamp-1 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
-                            </div>
-                            <div>
-                              <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
-                              <span className="font-medium text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.dob}</span>
-                            </div>
-                          </div>
-                        );
-                      }
-                      if (field.id === 'qrcode') {
-                        const containerClass = 
-                          field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
-                          field.align === 'center' ? 'flex flex-col items-center justify-center gap-1 text-center' :
-                          'flex items-center justify-between';
-                        
-                        const textAlignmentClass = 
-                          field.align === 'right' ? 'text-left min-w-0' :
-                          field.align === 'center' ? 'text-center min-w-0' :
-                          'text-right min-w-0';
-
-                        return (
-                          <div key="qrcode" className={`px-4 py-1 shrink-0 ${containerClass} border-t border-dashed border-line/30 pt-2`}>
-                            <div className="bg-white p-1 rounded-lg inline-block shadow-md shrink-0">
-                              <QRCodeSVG 
-                                value={`${activeComp.id}::${p.id}`} 
-                                size={44} 
-                                level="M" 
-                                includeMargin={false}
-                              />
-                            </div>
-                            <div className={textAlignmentClass}>
-                              {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
-                                        <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                              <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Off-screen elements for batch image snapshots */}
-      {activeComp && (
-        <div className="absolute left-[-9999px] top-[-9999px] pointer-events-none print:hidden" aria-hidden="true">
-          {[...players, ...staffPasses].map(p => {
-            const belt = beltColorFor(p.ageGroup || '');
-            const fields = getIdCardFields(activeComp);
-            
-            const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
-              const map: Record<string, string> = {
-                'xs': '9px',
-                'sm': '11px',
-                'base': '13px',
-                'lg': '15px',
-                'xl': '18px',
-                '2xl': '22px',
-                '3xl': '26px'
-              };
-              return map[size] || defaultVal;
-            };
-
-            return (
-              <div 
-                key={`batch-wrapper-${p.id}`}
-                id={p.id.startsWith('STAFF-') ? `staff-card-${p.id}` : `batch-card-${p.id}`}
-                className="w-[336px] h-[480px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden relative flex flex-col justify-between"
-              >
-                {activeComp.idCardBgUrl && (
-                  <>
-                    <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
-                    <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
-                  </>
-                )}
-                <div className="relative z-10 h-full flex-1 flex flex-col justify-between py-2.5">
-                  {fields.filter(f => f.visible).map(field => {
-                    if (field.id === 'header') {
-                      return (
-                        <div key="header" className={`h-8 bg-gradient-to-r from-hong via-hong to-chong flex ${
-                          field.align === 'left' ? 'justify-start gap-2' :
-                          field.align === 'right' ? 'justify-end gap-2' :
-                          field.align === 'center' ? 'justify-center gap-2' :
-                          'justify-between'
-                        } items-center px-3 shrink-0 shadow-sm w-full`}>
-                          <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate text-white" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
-                          
-                        </div>
-                      );
-                    }
-                    if (field.id === 'belt') {
-                      return (
-                        <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }} />
-                      );
-                    }
-                    if (field.id === 'photo') {
-                      return (
-                        <div key="photo" className={`px-4 py-1 shrink-0 flex ${
-                          field.align === 'left' ? 'justify-start' :
-                          field.align === 'right' ? 'justify-end' :
-                          'justify-center'
-                        }`}>
-                          <div className="w-16 h-20 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                            <User className="w-5 h-5 text-text-dim/40" />
-                          </div>
-                        </div>
-                      );
-                    }
-                    if (field.id === 'name') {
-                      return (
-                        <div key="name" className={`px-4 py-1 shrink-0 ${
-                          field.align === 'left' ? 'text-left' :
-                          field.align === 'right' ? 'text-right' :
-                          'text-center'
-                        }`}>
-                          <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '14px'), color: field.color || '#ffffff' }}>{p.name}</h3>
-                        </div>
-                      );
-                    }
-                    if (field.id === 'club') {
-                      return (
-                        <div key="club" className={`px-4 py-1 shrink-0 ${
-                          field.align === 'left' ? 'text-left' :
-                          field.align === 'right' ? 'text-right' :
-                          'text-center'
-                        }`}>
-                          <p className="uppercase tracking-widest text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
-                        </div>
-                      );
-                    }
-                    if (field.id === 'athleteId') {
-                      if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
-                      return (
-                        <div key="athleteId" className={`px-4 py-1 shrink-0 ${
-                          field.align === 'left' ? 'text-left' :
-                          field.align === 'right' ? 'text-right' :
-                          'text-center'
-                        }`}>
-                          <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold text-gold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
-                        </div>
-                      );
-                    }
-                    if (field.id === 'metadata') {
-                      if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
-                        return (
-                          <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
-                            <span 
-                              className="font-display font-bold tracking-widest uppercase text-white" 
-                              style={{ 
-                                fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
-                                color: field.color || '#ffffff' 
-                              }}
-                            >
-                              {p.event}
-                            </span>
-                          </div>
-                        );
-                      }
-    return (
-                        <div key="metadata" className={`px-4 py-1 shrink-0 grid grid-cols-2 gap-2 text-[10px] border-t border-line/30 pt-2.5 ${
-                          field.align === 'left' ? 'text-left' :
-                          field.align === 'right' ? 'text-right' :
-                          'text-center'
-                        }`}>
-                          <div>
-                            <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
-                            <span className="font-medium line-clamp-1 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
-                          </div>
-                          <div>
-                            <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
-                            <span className="font-medium text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.gender}</span>
-                          </div>
-                          <div>
-                            <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">Weight</span>
-                            <span className="font-medium line-clamp-1 text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
-                          </div>
-                          <div>
-                            <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
-                            <span className="font-medium text-white" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.dob}</span>
-                          </div>
-                        </div>
-                      );
-                    }
-                    if (field.id === 'qrcode') {
-                      const containerClass = 
-                        field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
-                        field.align === 'center' ? 'flex flex-col items-center justify-center gap-1 text-center' :
-                        'flex items-center justify-between';
-                      
-                      const textAlignmentClass = 
-                        field.align === 'right' ? 'text-left min-w-0' :
-                        field.align === 'center' ? 'text-center min-w-0' :
-                        'text-right min-w-0';
-
-                      return (
-                        <div key="qrcode" className={`px-4 py-1 shrink-0 ${containerClass} border-t border-dashed border-line/30 pt-2`}>
-                          <div className="bg-white p-1 rounded-lg inline-block shadow-md shrink-0">
-                            <QRCodeSVG 
-                              value={`${activeComp.id}::${p.id}`} 
-                              size={44} 
-                              level="M" 
-                              includeMargin={false}
-                            />
-                          </div>
-                          <div className={textAlignmentClass}>
-                            {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
-                                        <p className="font-display font-bold uppercase tracking-wider text-[7px]" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
-                            <p className="mt-0.5 leading-normal text-[6px] text-text-dim" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* PAYMENT RECEIPT MODAL */}
-      {selectedClubReceipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/85 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col p-6 space-y-4">
-            <div className="flex justify-between items-center pb-3 border-b border-line">
-              <div>
-                <h3 className="text-sm font-bold text-text uppercase tracking-wider">{selectedClubReceipt.clubName} Payment Receipt</h3>
-                <p className="text-[10px] text-text-dim uppercase tracking-wider">Uploaded at {selectedClubReceipt.uploadedAt}</p>
-              </div>
-              <button 
-                onClick={() => setSelectedClubReceipt(null)}
-                className="text-text-dim hover:text-text bg-line/20 hover:bg-line/40 p-1.5 rounded-full transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            
-            <div className="flex-1 bg-ink/40 rounded-2xl p-2 border border-line/50 flex items-center justify-center min-h-[300px] max-h-[500px] overflow-y-auto">
-              <img 
-                src={selectedClubReceipt.receiptUrl} 
-                alt="Payment Receipt" 
-                className="max-w-full max-h-[480px] object-contain rounded-lg"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <a 
-                href={selectedClubReceipt.receiptUrl} 
-                download={`Receipt-${selectedClubReceipt.clubName.replace(/\s+/g, '-')}.png`}
-                className="bg-gold text-ink hover:opacity-90 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download File</span>
-              </a>
-              <button 
-                onClick={() => setSelectedClubReceipt(null)}
-                className="bg-ink text-text-dim border border-line hover:text-text px-4 py-2 rounded-xl text-xs transition cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT TOURNAMENT MODAL */}
-      {showEditCompModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col">
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
-              <h2 className="text-base font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                <Edit className="w-5 h-5 text-gold" />
-                Edit Tournament Details
-              </h2>
-              <button 
-                onClick={() => setShowEditCompModal(false)}
-                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Championship Title *</label>
-                <input 
-                  type="text" 
-                  value={editCompName} 
-                  onChange={(e) => setEditCompName(e.target.value)}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Venue *</label>
-                <input 
-                  type="text" 
-                  value={editCompVenue} 
-                  onChange={(e) => setEditCompVenue(e.target.value)}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Start Date *</label>
-                  <input 
-                    type="date" 
-                    value={editCompDate} 
-                    onChange={(e) => setEditCompDate(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">End Date *</label>
-                  <input 
-                    type="date" 
-                    value={editCompEndDate} 
-                    onChange={(e) => setEditCompEndDate(e.target.value)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Registration Close Date *</label>
-                <input 
-                  type="date" 
-                  value={editCompRegistrationCloseDate} 
-                  onChange={(e) => setEditCompRegistrationCloseDate(e.target.value)}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Coach / Team Auth Passcode *</label>
-                <input 
-                  type="text" 
-                  value={editCompPasscode} 
-                  onChange={(e) => setEditCompPasscode(e.target.value)}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold" 
-                />
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-end gap-3">
-              <button 
-                onClick={() => setShowEditCompModal(false)}
-                className="px-4 py-2 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={async () => {
-                  if (!editCompName.trim() || !editCompVenue.trim() || !editCompDate.trim() || !editCompEndDate.trim() || !editCompPasscode.trim()) {
-                    triggerMsg('Please fill in all required fields.', 'error');
-                    return;
-                  }
-                  const updated = competitions.map(c => 
-                    c.id === compId ? { 
-                      ...c, 
-                      name: editCompName.trim(),
-                      venue: editCompVenue.trim(),
-                      date: editCompDate,
-                      endDate: editCompEndDate,
-                      registrationCloseDate: editCompRegistrationCloseDate || undefined,
-                      staffCode: editCompPasscode.trim()
-                    } : c
-                  );
-                  await saveCompsToStorage(updated);
-                  setShowEditCompModal(false);
-                  triggerMsg('Tournament updated successfully.', 'ok');
-                }}
-                className="px-4 py-2 rounded-xl bg-gold hover:bg-yellow-400 text-ink font-bold text-xs transition"
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* REFEREE ACCOMMODATION DETAILS MODAL */}
-      {editingAccReferee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col">
-            {/* Header */}
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2">
-              <h2 className="text-base font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-gold" />
-                Accommodation Settings
-              </h2>
-              <button 
-                onClick={() => setEditingAccReferee(null)}
-                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-6 space-y-4">
-              <div className="space-y-1">
-                <p className="text-xs font-bold text-text-dim">REFEREE NAME</p>
-                <p className="text-sm font-semibold text-text">{editingAccReferee.fullName}</p>
-                <p className="text-[10px] text-text-dim font-mono">{editingAccReferee.nric}</p>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Lodging Status / Preference</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditAccStatus('Yes')}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      editAccStatus === 'Yes'
-                        ? 'bg-blue-500/20 border-blue-500 text-blue-400 shadow-sm'
-                        : 'bg-ink border-line text-text-dim hover:text-text'
-                    }`}
-                  >
-                    üè® Lodging Required ('Yes')
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditAccStatus('No')}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      editAccStatus === 'No'
-                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-sm'
-                        : 'bg-ink border-line text-text-dim hover:text-text'
-                    }`}
-                  >
-                    üè† No Lodge / Self-Arranged ('No')
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Hotel Provided (Days)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={editAccHotelDays}
-                    onChange={(e) => setEditAccHotelDays(e.target.value)}
-                    placeholder={refereeFees.default_hotel_days_provided !== undefined ? `Default: ${refereeFees.default_hotel_days_provided}` : "e.g. 2"}
-                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                  <p className="text-[9px] text-text-dim">Number of days hotel is provided.</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Check-Out Date / Day</label>
-                  <input
-                    type="text"
-                    value={editAccCheckoutDate}
-                    onChange={(e) => setEditAccCheckoutDate(e.target.value)}
-                    placeholder={refereeFees.default_hotel_checkout_date ? `Default: ${refereeFees.default_hotel_checkout_date}` : "e.g. 15 Oct (12:00 PM)"}
-                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                  <p className="text-[9px] text-text-dim">Day/time referee needs to check out.</p>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Accommodation Details (Override)</label>
-                <textarea
-                  rows={3}
-                  value={editAccDetails}
-                  onChange={(e) => setEditAccDetails(e.target.value)}
-                  placeholder="e.g. Hotel Grand Chancellor, Room 402. Check-in on 12th Oct 2 PM."
-                  className="w-full bg-ink border border-line text-xs rounded-xl p-3 text-text focus:outline-none focus:border-gold resize-none"
-                />
-                <p className="text-[10px] text-text-dim">Leave blank to use default global lodging details.</p>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">Google Maps Link</label>
-                <input
-                  type="url"
-                  value={editAccMapsLink}
-                  onChange={(e) => setEditAccMapsLink(e.target.value)}
-                  placeholder="https://maps.app.goo.gl/... or https://google.com/maps/..."
-                  className="w-full bg-ink border border-line text-xs rounded-xl py-2.5 px-3 text-text focus:outline-none focus:border-gold"
-                />
-                <p className="text-[10px] text-text-dim">Paste the Google Maps link so the referee can easily locate the hotel.</p>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-end gap-3">
-              <button 
-                type="button"
-                onClick={() => setEditingAccReferee(null)}
-                className="px-4 py-2 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition"
-              >
-                Cancel
-              </button>
-              <button 
-                type="button"
-                onClick={async () => {
-                  try {
-                    const parsedHotelDays = editAccHotelDays.trim() !== '' ? Number(editAccHotelDays) : undefined;
-                    const parsedCheckout = editAccCheckoutDate.trim() || undefined;
-
-                    const updatedReferee: Referee = {
-                      ...editingAccReferee,
-                      accommodation: editAccStatus,
-                      accommodationDetails: editAccDetails.trim(),
-                      accommodationMapsLink: editAccMapsLink.trim(),
-                      hotelDaysProvided: parsedHotelDays,
-                      hotelCheckoutDate: parsedCheckout,
-                    };
-                    await saveRefereeToFirestore(updatedReferee);
-                    
-                    // Also update in global refereeAccounts if they exist
-                    const cleanIc = editingAccReferee.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-                    const existingAcc = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
-                    if (existingAcc) {
-                      await saveRefereeAccount({
-                        ...existingAcc,
-                        accommodation: editAccStatus,
-                        accommodationDetails: editAccDetails.trim(),
-                        accommodationMapsLink: editAccMapsLink.trim(),
-                        hotelDaysProvided: parsedHotelDays,
-                        hotelCheckoutDate: parsedCheckout,
-                      });
-                    }
-                    
-                    triggerMsg('Accommodation details updated successfully!', 'ok');
-                    setEditingAccReferee(null);
-                  } catch (err) {
-                    console.error("Failed to update accommodation details:", err);
-                    triggerMsg('Failed to save changes.', 'error');
-                  }
-                }}
-                className="bg-gold hover:bg-yellow-400 text-ink px-4 py-2 rounded-xl font-bold text-xs transition shadow flex items-center gap-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                Save Accommodation
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* COACH EXCEL REGISTRATION MODAL */}
-      {showCoachExcelModal && activeComp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden overflow-y-auto">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-scale-up">
-            {/* Header */}
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="bg-gold/10 p-2 rounded-xl border border-gold/20">
-                  <Upload className="w-5 h-5 text-gold" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-text uppercase tracking-wider">
-                    Excel Competitor Roster Import
-                  </h2>
-                  <p className="text-[11px] text-text-dim">Batch-register competitors for <span className="text-gold font-bold">{activeComp.name}</span></p>
-                </div>
-              </div>
-              <button 
-                onClick={() => {
-                  setShowCoachExcelModal(false);
-                  setExcelParsedPlayers([]);
-                  setExcelValidationErrors([]);
-                }}
-                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Scrollable Content */}
-            <div className="p-6 overflow-y-auto space-y-6">
-              
-              {/* Step 1: Template Download */}
-              <div className="bg-surface-2 border border-line p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5 font-sans">
-                    <Download className="w-4 h-4 text-gold" />
-                    1. Use the Dynamic Excel Template
-                  </h4>
-                  <p className="text-[11px] text-text-dim leading-relaxed">
-                    Download our dynamically generated Excel file pre-filled with this tournament's actual Events, Age Divisions, and Weight Classes. Giving this to coaches guarantees error-free registration!
-                  </p>
-                </div>
-                <button
-                  onClick={handleDownloadExcelTemplate}
-                  className="w-full sm:w-auto bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Template (.xlsx)</span>
-                </button>
-              </div>
-
-              {/* Step 2: File Upload Box */}
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider font-sans">2. Upload Completed Excel File</label>
-                <div className="border-2 border-dashed border-line/60 hover:border-gold/50 rounded-2xl p-6 transition text-center relative group">
-                  <input
-                    type="file"
-                    accept=".xlsx, .xls"
-                    onChange={handleCoachExcelUpload}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                  <div className="space-y-2 pointer-events-none">
-                    <div className="w-10 h-10 bg-ink/60 rounded-full flex items-center justify-center mx-auto group-hover:scale-110 transition border border-line">
-                      <FileText className="w-5 h-5 text-gold" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-text uppercase tracking-wider">Click or drag Excel file here to upload</p>
-                      <p className="text-[10px] text-text-dim mt-1">Supports standard .xlsx or .xls spreadsheets containing roster lists</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Step 3: Excel Format Reference / Instructions */}
-              {excelParsedPlayers.length === 0 && (
-                <div className="bg-ink/20 border border-line/40 p-4 rounded-2xl space-y-3 animate-fade-in">
-                  <h4 className="text-xs font-bold text-text uppercase tracking-widest text-gold font-sans flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                    Excel Column Headers (All Fields are Strictly Required)
-                  </h4>
-                  <p className="text-[11px] text-text-dim leading-relaxed font-sans">
-                    To build or customize your own spreadsheet, ensure the first sheet contains the following headers and that every single column is fully filled. Missing or invalid values will cause the row to be flagged and skipped.
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
-                    <div className="space-y-1.5">
-                      <p className="font-semibold text-text border-b border-line/40 pb-1 uppercase tracking-wider text-gold/90 font-sans">Identity & Core Info</p>
-                      <ul className="list-disc pl-4 space-y-1 text-text-dim">
-                        <li><strong className="text-text font-sans">Full Name *</strong>: Full name of the competitor.</li>
-                        <li><strong className="text-text font-sans">Gender *</strong>: "Male" or "Female" (or 'L'/'P' in Malay).</li>
-                        <li><strong className="text-text font-sans">NRIC or Passport *</strong>: NRIC number or Passport for automatic verification.</li>
-                        <li><strong className="text-text font-sans">Date of Birth *</strong>: Athlete's birth date (YYYY-MM-DD).</li>
-                        <li><strong className="text-text font-sans">Race *</strong>: Malay, Chinese, Indian, or Lain-lain.</li>
-                      </ul>
-                    </div>
-                    <div className="space-y-1.5">
-                      <p className="font-semibold text-text border-b border-line/40 pb-1 uppercase tracking-wider text-gold/90 font-sans">Category & Club Info</p>
-                      <ul className="list-disc pl-4 space-y-1 text-text-dim">
-                        <li><strong className="text-text font-sans">Event *</strong>: Tournament option, must match: <span className="text-text font-mono font-bold text-[10px]">{activeComp.events.join(', ')}</span>.</li>
-                        <li><strong className="text-text font-sans">Age Group *</strong>: Tournament Age division.</li>
-                        <li><strong className="text-text font-sans">Weight Class *</strong>: Athlete's weight category.</li>
-                        <li><strong className="text-text font-sans">School Name *</strong>: School affiliated with the athlete.</li>
-                        <li><strong className="text-text font-sans">School Code *</strong>: Official school code (e.g., BBA0012).</li>
-                        <li><strong className="text-text font-sans">Affiliated Club / State</strong> <span className="text-xs text-text-dim">(Optional)</span>: Dojang, club, or state team (defaults to coach's club if left blank).</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Parsing Warnings / Errors Box */}
-              {excelValidationErrors.length > 0 && (
-                <div className="bg-red-950/20 border border-red-500/30 p-4 rounded-2xl space-y-1.5 text-xs animate-fade-in">
-                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-red-400 font-sans">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>Row Validation Errors ({excelValidationErrors.length})</span>
-                  </div>
-                  <p className="text-[10px] text-red-200/70 mb-2 font-sans">The following rows contain missing or invalid required fields. These rows have been skipped. Please correct them in your spreadsheet and upload again.</p>
-                  <div className="max-h-40 overflow-y-auto divide-y divide-red-500/10 space-y-1 text-[11px]">
-                    {excelValidationErrors.map((err, i) => (
-                      <div key={i} className="py-1 text-red-200">
-                        <span className="font-mono font-bold bg-red-500/20 px-1.5 py-0.5 rounded mr-1">Row {err.rowNum}</span> 
-                        <strong className="text-text font-sans">{err.name}</strong>: {err.error}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Roster Preview */}
-              {excelParsedPlayers.length > 0 && (
-                <div className="space-y-3 animate-fade-in">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-xs font-bold text-text uppercase tracking-widest font-sans">
-                      Roster Upload Preview ({excelParsedPlayers.length} athletes parsed)
-                    </h4>
-                    <span className="text-[10px] uppercase font-bold tracking-widest bg-gold/10 text-gold border border-gold/20 px-2 py-0.5 rounded">
-                      Ready to Save
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto border border-line rounded-2xl">
-                    <table className="w-full text-left border-collapse text-[11px]">
-                      <thead>
-                        <tr className="border-b border-line bg-ink/40 text-text-dim font-semibold uppercase tracking-wider">
-                          <th className="p-3">#</th>
-                          <th className="p-3">Full Name</th>
-                          <th className="p-3">Gender</th>
-                          <th className="p-3">NRIC / DOB</th>
-                          <th className="p-3">Event</th>
-                          <th className="p-3">Age Group</th>
-                          <th className="p-3">Weight Class</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-line/40">
-                        {excelParsedPlayers.map((p, idx) => (
-                          <tr key={idx} className="hover:bg-surface-2/30">
-                            <td className="p-3 font-mono text-gold font-bold">{idx + 1}</td>
-                            <td className="p-3 font-bold text-text font-sans">{p.name}</td>
-                            <td className="p-3">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.gender === 'Female' ? 'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
-                                {p.gender}
-                              </span>
-                            </td>
-                            <td className="p-3 text-text-dim font-sans">
-                              <div>{p.ic || <span className="italic text-text-dim/40 font-mono">No IC</span>}</div>
-                              <div className="text-[10px] font-mono">{p.dob || <span className="italic text-text-dim/40">No DOB</span>}</div>
-                            </td>
-                            <td className="p-3 text-gold font-medium font-sans">{p.event}</td>
-                            <td className="p-3 text-text font-sans">{p.ageGroup}</td>
-                            <td className="p-3 text-text font-semibold font-sans">{p.weightClass}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-between gap-3 shrink-0">
-              <button
-                onClick={handleDownloadExcelTemplate}
-                className="px-4 py-2.5 rounded-xl text-gold border border-gold/20 hover:bg-gold/5 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer font-sans"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Get Template</span>
-              </button>
-              
-              <div className="flex gap-3">
-                <button 
-                  type="button"
-                  onClick={() => {
-                    setShowCoachExcelModal(false);
-                    setExcelParsedPlayers([]);
-                    setExcelValidationErrors([]);
-                  }}
-                  className="px-4 py-2.5 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition cursor-pointer font-sans"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="button"
-                  disabled={excelParsedPlayers.length === 0 || excelImporting}
-                  onClick={handleConfirmCoachExcelImport}
-                  className={`bg-gold hover:bg-yellow-400 text-ink px-5 py-2.5 rounded-xl font-bold text-xs transition shadow flex items-center gap-1.5 font-sans ${excelParsedPlayers.length === 0 || excelImporting ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-                >
-                  {excelImporting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Importing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>Confirm Import ({excelParsedPlayers.length})</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* REFEREE TOURNAMENT JOIN CONFIRM MODAL */}
-      {joiningComp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm animate-fade-in print:hidden">
-          <div className="bg-surface border border-line rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-scale-up">
-            {/* Header */}
-            <div className="p-6 border-b border-line flex justify-between items-center bg-gradient-to-r from-surface to-surface-2 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="bg-gold/10 p-2 rounded-xl border border-gold/20">
-                  <MapPin className="w-5 h-5 text-gold" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-text uppercase tracking-wider">
-                    Confirm Tournament Distance
-                  </h2>
-                  <p className="text-[10px] text-text-dim">Championships are held at different locations each time</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setJoiningComp(null)}
-                className="text-text-dim hover:text-white transition p-2 hover:bg-surface-2 rounded-xl"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-6 space-y-4 overflow-y-auto">
-              <div className="bg-ink/30 border border-line p-4 rounded-2xl space-y-3">
-                <div>
-                  <span className="text-[10px] text-text-dim uppercase font-semibold tracking-wider block">Tournament Venue</span>
-                  <span className="text-xs font-bold text-gold flex items-center gap-1.5 mt-0.5">
-                    <Calendar className="w-3.5 h-3.5" />
-                    {joiningComp.name} ({joiningComp.venue})
-                  </span>
-                </div>
-
-                {(() => {
-                  const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-                  if (!account) return null;
-                  return (
-                    <div>
-                      <span className="text-[10px] text-text-dim uppercase font-semibold tracking-wider block">Your Residential Location</span>
-                      <span className="text-xs font-medium text-text mt-0.5 block">
-                        {account.residentialLocation || "Not provided"}
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">
-                  Distance to Venue (Go & Return in KM) *
-                </label>
-                <input
-                  type="number"
-                  placeholder="e.g. 150"
-                  value={joiningDistance}
-                  onChange={(e) => setJoiningDistance(e.target.value)}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold font-mono font-bold"
-                  autoFocus
-                />
-                <p className="text-[10px] text-text-dim leading-relaxed">
-                  Please calculate and provide your actual <strong>round-trip (Go & Return)</strong> mileage distance based on Google Maps / Waze between your residence and this specific tournament venue.
-                </p>
-              </div>
-
-              <div className="space-y-3 pt-3 border-t border-line/50">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">
-                  Events & Officiating Days *
-                </label>
-                <div className="space-y-2">
-                  {/* Kyorugi */}
-                  <div className="flex items-center justify-between bg-ink/20 p-3 rounded-2xl border border-line/30">
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        id="join-kyorugi"
-                        checked={parseInt(joiningKyorugiDays) > 0}
-                        onChange={(e) => setJoiningKyorugiDays(e.target.checked ? '1' : '0')}
-                        className="w-4 h-4 rounded text-gold focus:ring-gold border-line bg-ink accent-gold"
-                      />
-                      <label htmlFor="join-kyorugi" className="text-xs font-bold text-text cursor-pointer select-none">
-                        ü•ã Kyorugi (Sparring)
-                      </label>
-                    </div>
-                    {parseInt(joiningKyorugiDays) > 0 && (
-                      <div className="flex items-center gap-1.5 bg-ink border border-line/80 rounded-xl px-2 py-1">
-                        <button 
-                          type="button"
-                          onClick={() => setJoiningKyorugiDays(Math.max(1, parseInt(joiningKyorugiDays) - 1).toString())}
-                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
-                        >
-                          -
-                        </button>
-                        <span className="text-xs font-bold font-mono px-1 w-6 text-center">{joiningKyorugiDays}d</span>
-                        <button 
-                          type="button"
-                          onClick={() => setJoiningKyorugiDays((parseInt(joiningKyorugiDays) + 1).toString())}
-                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
-                        >
-                          +
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Poomsae */}
-                  <div className="flex items-center justify-between bg-ink/20 p-3 rounded-2xl border border-line/30">
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        id="join-poomsae"
-                        checked={parseInt(joiningPoomsaeDays) > 0}
-                        onChange={(e) => setJoiningPoomsaeDays(e.target.checked ? '1' : '0')}
-                        className="w-4 h-4 rounded text-gold focus:ring-gold border-line bg-ink accent-gold"
-                      />
-                      <label htmlFor="join-poomsae" className="text-xs font-bold text-text cursor-pointer select-none">
-                        ‚òØÔ∏è Poomsae (Forms)
-                      </label>
-                    </div>
-                    {parseInt(joiningPoomsaeDays) > 0 && (
-                      <div className="flex items-center gap-1.5 bg-ink border border-line/80 rounded-xl px-2 py-1">
-                        <button 
-                          type="button"
-                          onClick={() => setJoiningPoomsaeDays(Math.max(1, parseInt(joiningPoomsaeDays) - 1).toString())}
-                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
-                        >
-                          -
-                        </button>
-                        <span className="text-xs font-bold font-mono px-1 w-6 text-center">{joiningPoomsaeDays}d</span>
-                        <button 
-                          type="button"
-                          onClick={() => setJoiningPoomsaeDays((parseInt(joiningPoomsaeDays) + 1).toString())}
-                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
-                        >
-                          +
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Virtual Taekwondo */}
-                  <div className="flex items-center justify-between bg-ink/20 p-3 rounded-2xl border border-line/30">
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        id="join-virtual"
-                        checked={parseInt(joiningVirtualDays) > 0}
-                        onChange={(e) => setJoiningVirtualDays(e.target.checked ? '1' : '0')}
-                        className="w-4 h-4 rounded text-gold focus:ring-gold border-line bg-ink accent-gold"
-                      />
-                      <label htmlFor="join-virtual" className="text-xs font-bold text-text cursor-pointer select-none">
-                        üéÆ Virtual Taekwondo (VR)
-                      </label>
-                    </div>
-                    {parseInt(joiningVirtualDays) > 0 && (
-                      <div className="flex items-center gap-1.5 bg-ink border border-line/80 rounded-xl px-2 py-1">
-                        <button 
-                          type="button"
-                          onClick={() => setJoiningVirtualDays(Math.max(1, parseInt(joiningVirtualDays) - 1).toString())}
-                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
-                        >
-                          -
-                        </button>
-                        <span className="text-xs font-bold font-mono px-1 w-6 text-center">{joiningVirtualDays}d</span>
-                        <button 
-                          type="button"
-                          onClick={() => setJoiningVirtualDays((parseInt(joiningVirtualDays) + 1).toString())}
-                          className="w-5 h-5 bg-surface hover:bg-line text-text rounded flex items-center justify-center text-xs font-bold font-mono"
-                        >
-                          +
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <p className="text-[10px] text-text-dim leading-relaxed">
-                  Please select at least one officiating event and specify the number of days you are officiating.
-                </p>
-              </div>
-
-              <div className="space-y-2 pt-2 border-t border-line/50">
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-wider">
-                  Accommodation Option *
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setJoiningAccommodation('Yes')}
-                    className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      joiningAccommodation === 'Yes'
-                        ? 'border-gold bg-gold/10 text-gold'
-                        : 'border-line bg-ink/30 text-text hover:bg-ink/50'
-                    }`}
-                  >
-                    üè® Lodging Required
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setJoiningAccommodation('No')}
-                    className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      joiningAccommodation === 'No'
-                        ? 'border-gold bg-gold/10 text-gold'
-                        : 'border-line bg-ink/30 text-text hover:bg-ink/50'
-                    }`}
-                  >
-                    üöó No Lodge (Daily Travel Pay)
-                  </button>
-                </div>
-                <p className="text-[10px] text-text-dim leading-relaxed">
-                  {joiningAccommodation === 'No' 
-                    ? `If you choose NOT to stay in organizer lodging, you will be paid a daily travel allowance of RM ${refereeFees.km_0_50}.`
-                    : "Requests organizer-provided hotel/lodging. Travel mileage allowance will be computed based on your actual travel distance bracket."
-                  }
-                </p>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-line bg-surface-2/50 flex justify-end gap-3">
-              <button 
-                type="button"
-                onClick={() => setJoiningComp(null)}
-                className="px-4 py-2 rounded-xl text-text-dim hover:text-text font-bold text-xs hover:bg-surface border border-line transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button 
-                type="button"
-                onClick={async () => {
-                  const parsed = parseFloat(joiningDistance);
-                  if (isNaN(parsed) || parsed < 0) {
-                    triggerMsg("Please enter a valid round-trip distance.", "error");
-                    return;
-                  }
-
-                  const kDaysNum = parseInt(joiningKyorugiDays) || 0;
-                  const pDaysNum = parseInt(joiningPoomsaeDays) || 0;
-                  const vDaysNum = parseInt(joiningVirtualDays) || 0;
-                  const totalOfficiatingDays = kDaysNum + pDaysNum + vDaysNum;
-
-                  if (totalOfficiatingDays <= 0) {
-                    triggerMsg("Please select at least one event and enter officiating days.", "error");
-                    return;
-                  }
-
-                  const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === user?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
-                  if (!account) {
-                    triggerMsg("Could not find your referee account profile.", "error");
-                    return;
-                  }
-
-                  try {
-                    const newRef: Referee = {
-                      ...account,
-                      distance: parsed,
-                      accommodation: joiningAccommodation,
-                      kyorugiDays: kDaysNum,
-                      poomsaeDays: pDaysNum,
-                      virtualDays: vDaysNum,
-                      officiatingDays: totalOfficiatingDays,
-                      id: `${joiningComp.id}_${account.nric.replace(/[^a-zA-Z0-9]/g, '')}`,
-                      compId: joiningComp.id,
-                      createdAt: new Date().toISOString()
-                    };
-                    await saveRefereeToFirestore(newRef);
-                    setCompId(joiningComp.id);
-                    setActiveReferee(newRef);
-                    setJoiningComp(null);
-                    triggerMsg(`Successfully joined ${joiningComp.name}!`, "ok");
-                  } catch (err) {
-                    console.error("Failed to join tournament:", err);
-                    triggerMsg("Failed to join tournament.", "error");
-                  }
-                }}
-                className="bg-gold hover:bg-yellow-400 text-ink px-4 py-2 rounded-xl font-bold text-xs transition shadow flex items-center gap-1.5 cursor-pointer"
-              >
-                <Check className="w-3.5 h-3.5" />
-                Confirm & Join Tournament
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
+                      xúÏ}›V„Hö‡˝>Eùõò.llYôLB»,¶¯k ´∫7O-»ñ∞’)KnI\4è∞gŒúù≥∑≥ósΩ◊˚4˚Û˚}!)$EÑB∆‰O5:ß*±
+Ö"æˇ_B	¸›–ú≈Voﬁ5ú%≤πEÓ˛—\NÀ∂bÎ<¥¸Ë 	[ëÔ¬Á∆bÏ‹∆+cœr˝≈erÂ:û›rÌ•™3ósuÂÙ„mœnõlí≈QpÌ,VM—üÑ°„«ÁV8p‚Vﬂ≥¢Ë¿ç‚ñe€ç≈`lı›x⁄\k/j◊rØ˘ëm“ûooëjM°ÉØ4◊e_;°Ò∫∆°sÎ⁄uÆ¨â7*èGª∑°Îö8mˆómEC«N?œ^Å˜Éœ=˛iù˛L|€±õﬁ ?çaÇáÓ¿Åc];s;öØ„≠ÇÒg?”œ∫ÑÙ?äâÁ7pÏ}D˜5H(K≈úÓid3>.Lˇ›ÊfFï*ˆîê°Â€ûsvcçﬂ·=Q6´1m”ù∞ˆ¯ÈâY#gsa7W·yao¿ümŸpö”fßµNzAh;!ˇß„Æç-<XõOÜpî·ú–Õ–çùïuíù àÇ∞9≠±˙±{Ìl_ı‡î	ùŒç›¿oZûGÏIh—ùıˆÇrÈ[öózmª◊‚õ]yŒ-˘Î$ä›´i≥Áƒ7é„XÈ(jˆ·úpA7õb>Ò~æW∑tØFÆﬂºi∂+ÊÑYﬂáÓ¯g'å›æÂâ”ﬂ¿9·?≈&˝üÌé r{C>¡c»JÂÉ`uæ¯ :Á«Ng|˚+π
+¸∏ŸÃ G&„±ˆ≠»¡£ÈBLºqm¸4Ò˚VÏêëuØ¯¶Xÿ∫cPÍ√‰˜ØWi˚πZ1§∞ÊªK∂Ëó∏Êl}¬Í≈ïÆ?„ã∫v#∑Á9‰°®D$∞…ˇ‘≥Ï≈˚À˚™,œı3˚ìŒ¥ÎxNTKág¯“U√∑•.`Á ±ÂÙ¡‡Mg–∆_ö7°5ÆÓ 9Û$≈s}'!……»eÕ°k€@Y ÷+ü	OÌM‚8+«O«∞*6\Md≤Àv#ŒÑ2◊æ%õ@ﬂ€˙„fW‡Ôxnˇ∞W ]•?Ñ˜£îæsˇöåóL&i5ê¬·Ä?Y›F"Í≠∂≥Ô∆Åãﬁ§å;j˙Ï4C¶WàΩïÆﬁvB˛ﬂˇ˙?’á≥¬∂˚Î:F+[û„‚!iíŒ‹Œ‘n¸ﬂ¡©˛ﬂπùj5q√ÎnÂèd€s˛eã3 ¨˝8…W™vÚÓ„‚–±ÄíPÅpƒ˛Å	ˇÌ{ì˛k≈C$’˚T¬9±Ö2 ˛˝∑∞ÿŒ‚Ø-◊á±¿@ô¯í]£z"∫VÉMΩ∂º	36øÖÔJ˛˛wí>èe≤‰4ûsS6√Ë¶På\2EÖA)˚í¬)›ÂÙ©À «LFßÎ#VD,ZÄ°÷ëˆD…x⁄lO…Äû WAmìoc`Õæ‚≥!fò`zÏ∆¨àæ&ŸÛ®˘`≈Î`å‚)?»<üÖ≠∂ØWÿè3ÃìH¢;û)tCX“i›â@B°@\5†¢6~F$4dDâ:(]@jJœ‹ﬂ‰1A’w|æπ`Î◊äØ)∆‚€|]ìªLŒ±Ñ∑—¬÷üœÍ Xiäh¥∞uv¯†)z†ø,lÓ>ho §Á˝É¶∏ı`74EÁË˛˘As¨‚´µÊ»Ëï…‡mœBkëh&ïX1fö>«àÑ®‰ x'Ç*ªB∫6◊OÃM"ÚˆÈÙÜ∑‰®ΩS"rpÇçø‰†Ùª¸uJπQH˘√ΩPN…è¢Düé∞⁄ñ”oSIÊªk€ÔV0e™¶ëtªï“¯Ay+úÌê˛?±g]M<OÇmÜãÂ%v‹lìèœ76ö7NÔì7È)4£+Ó©F=v¬_7t£~M(*•±©˘«Ë≈*MDÏRä^¶v¢Q‡y≥î`ãÒ Ä– ÉÎKmB_¥ôÿ¶¯NT[®åáU üâbd¶◊QÜ•JÏy0xü®}Àı@ÎÃÑ∞*$≠u@!ª	}î»ô›.gk‰f‡≈ûUYŒ	…ÊNˆMf˘CBˇ¨$Êm˙°€ŒÃŸ¯π@d0ÌÜ`^$‘W”O‚ÃÙò∫bÊ˚K˝û◊∑[Ó:Eämª⁄^Y≠ÿW¿øˆgÖG„^
+fäô‰∏#,à∂ÜSTïêWOF˛9	ùë;ë·€Ê;◊v˛…2rÄ≤∏vùõí=¢(\xÉ |M§6Õ¢IxeıS¢	ìLæ7_2yÑZa
+πq7Átò6_ 7∞l‡5—à¿Ä˛ß)âÉqÛEI˙(.ÛFdhÕ^é•≠∑…∏á°|'r>r©–>3‹áyÓ¬-n˚Æ°üÏ~„Ãçú∑ô"IﬁZˆ¿YRwS{%q~P´[‚hÏPUßÀƒºéN†√W€[Ë&œ	:T…ûOÌtÚU…·róÏlüÓí˜ß€'?ÓÔêì”Ωü˜˜~!;«GÁ€˚G{ß[òR¥ÂÁÀΩ5´kË≠]q2sÛcg•”Z˚µ"W^∂K¢6º!´∏s!»  Õ8hˆBr£Ê«?t∫›NgÁWÄJ¯–ﬁÓ¨v⁄∞ﬂY±”ºA ‰m	›1·N0˚Ÿ±B˚Ì‡CË©lØÂî¶∏;V/t∞q˝»A?Áo,ΩèÔIˇ``®4i˛ÓéÙ @tüˆG÷¿Ÿ óì–k<S,Ô~Èí‹ﬂ´D.”’Ù<x( ï#˜>8æ›Mºÿ{SÖ«Ôµ‰[	--Ôr£°Ù¸s∑π3
+É˛ß…¯ƒ≥¶∞Iõ
+ó∂k#g9ˇ±˘ÚÂ´WãÀ“1(ﬂ¡®√?nnÔíÌ√˝”ä¡(œ¡‡ü>llìÉá'N…ÓÈˆ˚„£3≈‘é∑LÉp2pÅVå≠c	ñ7¿Åæá≥√=ˇ<Ò]VùıfÁ’¯pxÉÌÉ=≈òŸ û2¸Ä7êııO≈p;¿óÏ∂;Ìf{≠ŸÈ*ÜQ´6î	˜2f No«U<AıËû„≈ıá6Ωˇâ¨¨ê∑åÏ'õ~êùM9ï;h§Ljÿ>≈ﬁê·çTPN
+Û$¶∞ì[ò∑¡_∞!∑(d1—–ÆBˇÙü[è˛”ÂˇÆ¬øÀ…k¸lyÄÁ>í?‘Q0l#`Â‘Èë|ÕÓXÊwn)É–E¬RAïRú.°/ C:m›˙v8™´Øéc÷tc`pÃ∫1]6®€—ZÂÉ÷aê\§ìKz°OB˜Û#‰Ø®ÙeÁ"ª&í|ÀÁëõáïºÒ∑f‰q∆ )Î∏YQÊÉ&@"XU⁄vÓ2‡o]πí∆’U"á/µ‡ùôZ•π¬#©⁄¨è)“nHnc>9”Õ6ÁBN}6_b‘Oû°s~> IÆ]ã˝ﬂ˜Èt˜*56—ÌEﬂàπ∑@3Iˆ;¬–ƒ¶∫J›	©˜#7#PÏÃ«›n‚ÑygBıúãX“´}˜y°ÑP4A%A÷g‚]uÙJI¶bØÌFc`™öP—mhõŸsì0 ADJ\§Å¬PãbÙããgÁ€Ôﬁ5fø«≠Ñﬂ≤Õ•ø¡Oo»Â≥;‡‘ë≥Ô«ç°o‰ù*Àåà.-ìN{â|OVÔ«∑ó†—ö›CÕQâ’(µMe•˚˚-Q¨3éhír-·™ÏDö>µñ^&»¢ÁKpFë4,©ÂõkYöDXﬁa{M≈ÿ◊áÌÅÚ'ON©HF®·ïÈÉ¥¡–æ&C 	pÊLüWŒd∞3Èæ‹%˚~_àﬂXKÙ≈tkÙÄ£ìæ≈´|÷,»°:∫‘»ÖÅUgó!mØ¶óäÈ§î›t∂ÒÆ≤º·e»Æ≤]•≥≤EÁE‚J‚a%Vu_bËIhøBw}ø2ÜUXÌáÊÃ-˝ÎÂx”—m”öƒÅAà)üŸÃjn<∞"ËYˆåWk®{·ëëÊÅ»BOÄG˝<QË\¸£!û–[j â!hW$êƒÖS≥l>¯Xp4a§L67ªR§B†∫ì°0ê  √’Ø∞©ÎÎ	∞’◊cˆXÑkÖY-"‰ë3r–gÅ⁄
+	6qx2†Eh †›0õEÇô .ﬁ?ìr¡!ﬁâµÍû–cﬁËQ‘=]üíÔû†I1Ûå…‰¢4‰ oì¯ìSæÒËƒc8:Åú?˜ÿÅG¿ß4H‚Q—…Œk`ë®m&/∞P‘™Ú:Uµƒú$™Â|Y´m2éqÆ»∆“2`√¡§Æï% %[!“∫Û¶êo|ê§Ü’•€Õ.ù6⁄]ñÎ<µJ‹2ûJõ–(^¶gj¯∏E=G¶3õSÉZQ%EHh¬C˙A‘ˇáFÓ®Ÿ•VÃÆõ£¡ùÓ√Mﬂó´c®GRƒ0l Ÿº¿#»k‚/⁄™pâDÆ§Lpk«äùANÎ ß :<rlåÑT≠Œ,\ˆUM+a75xmÏ˙:ŒË=µUŒÔÑ˝Pòø˚˜{$\1≥¸haÎÍ∑ˇV—Gà:¯˝◊¬÷ÓÒ€o}Ï†˜8áÒÂ¥û¶e¢∞à	¯l&Ñ6…¶â§ß·˙ôõ>nöXèXmºôt†Û¸öe&©Ú¢†aÙ¯≈ d˛ä‚Dxû..M≥ùœ©§r]Rˇ‚·õ.laΩI¡0ΩQ:íø"V?ªÀC˘}Iåf•mdBı¨n¶§‡
+&ófëúÖÖyàLΩë¬≥˛t∫X~ˆÛ{sΩåß]"#Ô76û1 Â}ΩàÌÊ›j∑∆-êos·∞ÜˆÃ3M≠p‡˙õwWñ¶mö'’‘cØ"Tï—‘R@°˝n6„ŒÛÁã∂¬ä°åﬂFìûáqΩØ÷€¿•¶ªºµèïÍ¥HäGΩŸ‰'j‰„úòÈ˜h7=‡¢qøÊVÃ≤‡å≠íÁ–*ãñIÿÛ„pJN`ùÜˇÚ´çbz<Y
+W8≤<AVõÂ]^9,ñ	Øn±A⁄≠óÎ¯jg}ê◊‚ÄÿÓ¿ç-œõ`Ò¿…› çåŒ'
+|ﬂÒZ4˜ÖªZã¶íØP,3ˆi‹/5¥â[V.Tûß£ôO2ìlmäîûÎÀâ4ΩadÛ`Ã≥RßÓ6o=`ó≤‡MUï¨∂*QDM3öµı≥M ìxÀ˚	BÚùHô≠2V-!üvô`*∆≥ﬁ:∂îØ”ºòà‹∏ûG0é£ı-œAÃÚmëß-?∂s˙≤MynD´≠’÷»-È∂:›ıÖ%x”¿''ªÔ óGc◊£’ŸÃ@zòòJ∆ [ƒ∞ò˘Äõ1D˝µ√Cƒâ’ÆÈC«<}»güñ„ œ	P“`√O¡8q⁄®Uﬁí2í™3ºî_àE+ÓÇp`˘≤·π’cƒv‰Í
+I®-Lä¿W0°và7ÿ>2ìÍK. ≥pV/ßœy¡¸üî†ì|¥w@ÜkÂö≠’ 5{!À ´L”eã…–*¯A8’ ì∏{®—Z
+Ù4∫ÈƒõD˘'å«ZÀêW“¥m€dîÆ`DŒ (Sï d9DJˆä[ól˜ölücU’J^{VœÒ™Èïi¢›;ÑOúËı
+ùY˙Luùñ{å”…3èπnê¢>IŒ@Jπ˛ëüâ∑5år˚)ï¬8·ÊÇ”‚í4yÎ˙dª7ëØQíYU	Ç≤ì€Ê* ∑›DÎøçÿ≠_Eô™Ù◊/3ß∞ìrée/t`£)§SÑúr∏¿€Ã‡‚+9dEv`æ& N`ıá[Ù}aî¬çÁé5"áñq∏∞%~™5Õ©sÂÑéÕ˛®uÛœ˚' ˛Ïü‘∫âË¬˝ß÷çáéçrÃ¬ˇ£ˆÕª’“›®.êıï"Ë1ìsò¿∂BvºIÔÛêw|“hå∑ÕJﬁœ-Á”M‡€Ä:àïúË◊L jPyeÒèBERÓi|ó„ªjÀ}∫ á—†±x* ì∑,ö∑€¬*mN°∫66SLµ‘DÕbﬂ^“ﬁŒl◊æsC·eÉTd#≥|‰Kf"xv∑ÇwÀnK≠88£	õgË4ö/ñÓ/U	éli™_Y>sna˛à†;∞ç%Â¥4∑9á1f7∫}LV˝ íâèV∂ï#“f›†>Ú•yæ∂r O∏Œ1p≥˜2Øô©F50üN≠]uË¿)€€∞  ÇGNè{ˇÏ89qÌCˆAÈBìäzÂPY◊ŒY¶=ûl!º[É√˘ÿjµır9Ö‡_HTxUËV¢ù ë"f3’få^Ä'ƒ-£®|íﬂ.∏í“QjaUní¢µØ∏YIl∆¡0ÉV$ØBÒü¥˛{∑]*´ïP^•Õµ¥P£{œﬂZ•ﬁ…ﬂÃ\VÊ=⁄Í®Ò/Î™Òij&zªÜÕèkmVò˝™<⁄Ø^ÃV˝ÂKh¸3©˚	ÿÑ°ÊÏö~·„ùÄÔIuiZ3úºë∏•eKçúÕ(è¥ñ¡D∆\MÏ°´E{hŸ)Y´ KÿÊó•º1UÅí≤iSãÖ≠£ –ù_∆tÁ2Í§∞”Kfƒ⁄ûâÚ
+Õg@P®EÌjq@,€fºä?£%ùZz∆Kd√‡J∆¡ëΩ!Ü[ÊlÖ´¨ÀÖöJ0Ñÿ≤AŒ”T:†π©t`17µêâ®§&ke2ZìñR¿t_uGÄ™⁄uFB,ªå%EvUrfqáy•Üà™$ÎÇ=\íù\“Â&´Ω+≤:?M,Õ’%,:˛Äsau2◊Áﬁ!¸ó+9UÚû€6;èfûwÄó
+<ñá∞1‘-–Ïtä‹VUCPSÌ<⁄“ï43—‰êVö”ùI=C≥xmòøÜ#O‚,÷?z∏fÔü2µ¨}
+ug≥j±¸Å4ÀpK¸ ºg≠Êkã*)ÂY•Ü‹√hvÿñÅzdõã˙÷ˇXXœà&Z‡ˇ§·‰ÎÌºh*â&4•∫¸e"BK8Ò"HëúQPπÇΩB‰∞h’?`$ËX1Åñ>¶¶<s}ê÷n–¿¸≈òÅ¯Ä⁄Ã¶h“zúù¡ƒS'^∆°ËËFé‰∆$`d≠ô,k‡=À„N6Á=dlYÙ‹™÷s 7p∆8w‰bΩ<|‚"mpb¸kÜfœrûà>Ω`Tﬁ"£¿∂ºÂtYÿœ¬,∫T€·&oäÙ^H	åÁÈiTÂ˙ˆq-ta‘Xû!{◊D¿ uÓö˜‡·=«nÙOa«√
+XAÇœ¡F_º¿€Èæ›∏§†Á”|ñqŒKÉﬁ_éW)™]\⁄ƒS'GÔA)‘©\‚5åGﬁy@kœÅ.{Z¨'#)µ±»+Ì¡ƒc˜÷ÒNQè⁄ ´Ë∆%˜†øÅ˘UXEœ†ËD≤ÉJ¬25õocc—™~BÁh•P¥I.wèˇy˚Ë˝U˝/ûÂËn˙ëùBá˚+ˇª’¸mª˘ﬂ⁄ÕWÕ_W∞}ãK˜≠±?∏4\¿0tÆMÿﬁ‘G“R’Í£Z}D’ÜÜÊªãÊjRk,æ≥\À‰©‡+Ä?ú)3ÿh‰$3ËXÒ≤wz¸æsôÆ‚PZ!óä£	U`ßRNüÿi;≠\:uO+A*2*zœÌ&0.Ø%^QL#ΩŒIÕ´$&5ßVáÁHÌr5®`«xX‹E»<K’AY®BuwWë=§&‰LOŒ@[WaÙ˘»„ÊzN™ÓÚ≈ïΩ:ı;∂…å2 ‡
+„∆Ñ
+”…ÄzAßj¡hL'j°|Êü‘·(û‡sB{ıZ eÒ„TÂêFQu QT,Ï=¨˛ï;òÑ ö¡>K¨ÙYÀ¿-\ê7Ï	HÖ‚◊(,E2åÇ†\Ål‚2?∂¶*£Ö∂îuÈk]TZZ™∏-÷/.◊&Ó∂ÖR∆•zöa/òa$k>=$+‰®˚D
+G≤vMë„¸óÙêY◊Ê•“‹wZ‘“k˘·æ≈a g %W∂*l;]çcŒZﬁ‘ÛíryôHˆî<¿b⁄î∞I)e;©z€&M∫◊ßë∆\~Ôƒ“£∂Ò°45w†›”ã!+FL˘q3ÖF¿ˇC}“sU´u2ÊØˆ'£ûéèsØ5ÁAHeZüFÌãuMo«íˇz2i“9ÕÊh‹ÓÖIó	üuÉ–d˚w¿‡„¢õU∂2™ØY◊ ˘– 	cØ˘®πŸ$≈ÿÛ»?ßæN™⁄◊*ŸC˝√ó¬ìuD¥ô=a
+Ω‰ò≤ﬁæÄ=ö?Æ∞yü∞Â[¡D@ó'∆í\rtÅm∫Ë<o·?!Ã7É0îøtü¯Kr)A˜1ü¯	aæÑÈR”}‚0…%Gÿ¶ãÓcp>Ò¬|3C9ÃÍáI.¬ #X}√'~BòoaV)áY}‚0…%Gÿ¶ã’«‡0|‚'Ñ˘fÜ¢
+yŒºüPÜ(QX›£G@ödÍ'¥˘“hc\xæãIxgo©ç4N‡áüóûPá`cgºπ–nµ◊Î¢Fµ\–»0Àõ?Üâ≥$£[ ≠ø<ìWE0™"]„º´ÇÏ—Û™*≤ ]˛\Œ›Ÿ•!ª2ê:ô)÷+<ÕÍxŸkË^E6{üWÂ¯ÂãdoçîC$Œíí1Ih|O"|°+©Ú†”,Ertı{”ﬂWÍŸ?%ç}å¨Ò-+¨'ﬂÚ]®$‚¸∂
+Réî HãwóHπH ™…8d1góIgóÑhSöÍÜU%Æf"Ÿ|Óáëjv=@*¬HØ˘Èu˜3Pkvi„
+´R*~˛≤HwHwÙÑo¬7ˇÒÕ¬∑‚ıM„€‡≤wgÂÃ¡ñËO8ß´¬πËq.z¬π‚ıM„‹9‡‹yàâOŒ∫È«™–-~Dtãü–≠x=›™3Tå¨aR#Aó	‰Å◊≤IÊ¢3Ÿ≥‰!õ≥d ÔA˙ÒÍ◊Øü;˝°OK»Ó:û3 \y¢^⁄KIΩÏG§^ˆı*\ﬂ¥∞p6ÅüØ›(ß‰m`ÖˆŒi/Œı#Eï¬ÏöÈ`Ú'¨+\ﬂ4÷%ñÔ}ø	0G˘Ñu⁄KÖu°€<¨±<‚÷ÂÆ'I=ì‘v√;2dÂbˇQ$ı˜0%9¥¢´@?.Õ•"\x£ã›¡«#`¬CûY·˙¶≈áLS>≥:POh®Ωîör≤ëﬂ»G‘úKœzB ¬ıM#e"§û0Rs©0ÚöÌ‚ˇ·Ò–±†'\,\è+Èˇ†“>O¸›jãúâuyéÖ∫<'÷+	—Bè∆±xRY_•∂hÛóò_;aÏÇîˇÆííÕ@≈>3´¶^¶îKBµæS:‚0ïJ&~(e˙ñ®í¶≤o}äÚe(b)˘'Ù/˙–}ö?Ú–iüPá<uı uñÁX¢]rÃZi&≠åµ∂ÆÍÃíL ˝P=4≠à“iN™AtV´ßôùÉì,‡Œ´Í¡id∑k08À¸ÍælWœß±tZÌä[26÷≠…q∂bXóõm0#J;U€ê∆¡u™^'·©ù‘[ﬁ5Z&uÒuçûN˝£ÁÁ,Äf˚%3SòÌ_I£™‹L€π≤&^|aı˚¡ÀÑ£,}a;±Âz ≥‹>≤∆—V[Æö@_ë8W¸´ÜF¥ÓkË`—s±Òq“#Œ|eQu]n≥ûyÓÛ ∆S`J√R.f˜Û˛<äÖ™áS∫Wª|/îÏIWÅx^Í"÷Ú=s®ÆF÷6í5Åˆ&@N©¶/ù∞F2ôº@Á\“µV∫ˆ˜¨¶ˇA`P}û•Bjÿ|DÀü!¨ùûÚb«£Âjﬂ648d# 7”g∂»˘–çà
+≥É=r hì∫Ã«ﬂ&NDuÁ∆.ìâÔ9QDYE»J˜≥^;nòÍ«∆ﬁWÆÁ»ªÏT*⁄∆y}…\_Hm»‰.£ÑUNnÖé•DDâ‹≠%Ω¥â«‚úS`+à}^<◊
+ÊÂéù?R∏|"d‚“˙éÁ·29ÇYkw[≠”ˇ‘!´”çá‰∏ì.99l©EÍŸ≈ˇ.+ü»˝ıd|‰1Óo¸◊a≥€ûWj≠:5T^”;πC£>≤üY 2∞Òï6uMﬂYv1Muz5’‘
+Q£
+aÊä2ÇÄSi
+h3å„q¥±≤ÇìµÄb∑A–x+∞›÷<P#û)Ê´¯§´ªf|Ao£x'apÌb˘ı∆.»†FŸUR«ç3r˝Õ%ybóô®4qa√ /∆…ã`Ø4õ+ õº!¶˜mT‡ﬂ1PÚ»ˆ·“aÕGtÎJß·≈™úIe◊’oÛWàòZ”◊ÌÀe“¬Ò$¶ç…
+¸3ù'r·:à6}\"Õq5ˇô¸ÁûYì˚»`∫≥N≈∞F±•  tiù√<UèâO!ﬁÍ!f<'Á¡$ƒ∆YÌvπü˛˘‘˙¶pøº£ÌW’˝{©G$iNìXÊ‘ÛÜ¡·Fa8]èiˇ©Ê-ﬁ∆Øe1⁄	‚∫Ê”ﬂFvåºq1v¢€’ e(√&6ñÆC„‘`ÙúêS
+CóG‰ƒ«·`œv—@¬èÌ(t˚Ï"Ø4 ≤ª`8æ≥∫gª8Á4x2rh4Rﬂ/^x
+ä≠ÁPb4~◊E+kﬂlo-ˇìÒ.‡`Nå∆ÁÏ2ç≈£¿‡ûü¶A8∏ç≈ÛSìÌÇQd9Ü£w,†8¿ÑçœSJë‡“}Guè¬ù!’›•¬†,iï7≤5vÂg*4¯.ê!’ãºE£AÄ‘ã(ÛÁ	3åßﬂ- _ÚRˆñrJ»)[íìK©®îP©mÿwÚ*Ù®Ê“µÈ™‹Ò‚&U¥∏À.æƒT
+h»◊}ø§ZT!¶Ω Âb5€OzMò‹Ò"âÅæ“ÏõkíﬁÈ*ª§„ìN)§≥AŒ+Ï—§ŒŒÔ÷çƒ›ë≠§ºx4<µâ;Ç@ZÖ-·8y÷≥⁄∆PÅ6Æ˛ï˜qWYÔ:*;∂ƒıêD!HTj⁄Â∞@›S⁄–√ÄŒ∫Àôê	h«Ìßfû *V(Õˇ∫Íú5¬k^ÛEÂ$π¥„&…⁄¨≤0ILekN},Mµrò”°¯Z˘Æëﬁî‡>b£Â£”˝ç%è+óÄ·¿ŸD*Ì≠§82∆"ﬁZ¥u®¶R)qËA”Ëq†&d15ØQÊ´Ã…%seNöD·¡wX≠|áfóå¨€&Ë]ÍÏ∫Ú@Ûô6≠	˙ìdV&~›5Ù$Î∞¸∑âNw<ò»&)úp+Ç'‹îo,µ‚–©õ≥ÈÆ\¯µÉ}ñÏl±Ôñ>Çá›èyH€éo´ÖGé{VXàÎ˜ΩâÌDçlÒó9ü∏Q61~í∂wfÕùó™ü®Ω]≥ú–âÅÄ	/˙˜øgãS›Ü±äü∞!x≤Î-œÒÒê6∏mÎzÑÛE»”e∫õ‡ÿG‹Z[ÿ:
+ 8a…»ÁRB|Ö–€b®†|’õE•/3≤∆U@√oëãFÏ¢Ô®5}r¶õw&Óı#kŸ∆˘†âÃÃÅÍ•TõL"5Ñzº@$©ò1ùâ©"1C!†Æ;r˝ÊMì :GÜ|"eóÎ ô$"¨,⁄1'~$”Ö≠ªå.‹õ$£H¡ ˝%:à∆ùÑØº‘—‰JA±∞§OL{cµi◊Ua‘ñÔ¥2Y~]qùf˚¥ï ÉÈÓ¬¯(”QW…A=TëTÎ1íu(ŒK⁄{òbrNôú™o.,yì´ ™&j¿πW©ÃÈ°ã7‹∂ …‡√dà™vI4örõVn¬ä†›‰™∂uâW¡Ó"§Ì9‹ƒ≈5 ƒcCïN!*ˇíÓ’ÔsÅs4jÎC5¶®e§™	óRÌ™WØ‹™FU¬ã.6.UÂ,”P 6™ …˚•ÜÙ¿fà…c*wwCfi©≠dˇê)ŸF˙s%À◊ƒá’—√Á§â+PabzC.˘Æ‚nnêg8éõäÔ/—z&Ÿt•Q≠◊P˘ÎæÇ®ﬂê≈3«s˙1±RœÉï÷ÃCclo»<\úm-Í&‹&LTÍ´0— Hœçh‘Ø≈vÃ 9;ZöMìZ+¥(Y◊`XMøÕËvç‘åŸ|Ÿù˛ä¸‡
+üEnp•ﬂ"7∫ wëlËø»›c‚√»›`‚«(›`‡À»›S√üëªœ»ßëª√»Øëª√ƒ∑ëª¡ÿøÅóY¿}âÜP∏¸ÄÇBHÂ	ï∞P?T~á∆¨*©àN–±bsƒï;h†gìﬁ»ç7ÔR1ÓÃ∫vÚb‹Ω÷OùS´ùπ…L§=∑–‘ö—A]YâVΩÍ‡‘à≤DgvŸ<T◊
+,ï¢E!T«B˚tnπèíf·πß*g''93≠ˆË%Î◊¡òöTÿ. @õÃﬁ(6úYzΩ¬◊òÔ|WV†ñ4ŒwgômÁÏ≠§Ù&i¿˜≥Lw∫ø#©)H˝,”Ωﬂ>‹ª8‹>;ﬂ;Õ’˙"ç˜áK§IJÖœfŸœΩùèˆw∂.éOˆN∑œèOeeç`èÁıƒü˜Oœ?¿ÛN˜ﬁÌùÓÌï
+∂ê∆œß3>Îı
+CÌäp/—mÎè+µu&ÔEîb◊Ê¶Ëõ* ‘0Û™ù˘ìÀ™Gm„ïnˇŸ0˚çSÃi)öì–kÃ⁄¿;duR6Ë
+Ó(”(Ò»ı‰™efsÔ–,ëµÑvUFd˛—∂¢°ì£¨br^’Ltö	ÜO«v'#Íü∫i~Ï∂ëAj†êÍ
+dÅZ2NXj÷Ê÷X>◊ëp©±@o*:ssÍ”‹îßö¡íØrﬂ—ËÉÿäAÅnJ÷ï;Œ£˘°10^ÓDŸ°Çˇå9uä"jz_⁄Êm{ƒÔl´«är¸éjx·cÊ»¬=´?lÑrÖè9⁄¨¥Î‹&	"ë˘ío·≤§/ëº•/ı˝f6qãé8±¶Â{—∂r˘/‘∂¯'Zî;ƒ˚Ú˝˜ÂŸã‡R6xïvN·û™ó~∏™I?úS4≠°ÈjVò ¢_√®ïYÖŒÒƒÄ‹à˘öÃ©häq∑3›Í˘Ä$Ó∑V( ãµU∂Ó Ë~_3∫VñÅ£AÒO ä∏W.lJêó(Lw*5qô”>Aúq<Ú=•po'6ê∏
+∞;	’˘¢`«Ï¡ßá‰NF[Åúæsoª—]öûÅh\ö`ObLÔ˛Ñª(`~‘çn90¶Ô”ö'LZ—LV√déeE‰»q‡u*@Ò«`Ùe!Q$Äeû;7Kh´XC ñÔ˛0ê&z¨¬“	
+Ç ÛxïÑ√CÀı	çM}`Rå<!&“¢ïi1à“ƒóÏ·Õ.jy5%m–øQ»-∆º0§àb+åq\…À\Ø5ÚÉZT1 hŒ2©^Y3@êÑ9à%ü¨‚¿VJ¡LÛ&öXíQ≥cy˝	⁄¿âÎ√n∫6$lÏ=∂¶¡$éñÛ%4®,Õäp‡Oæî⁄«Ñ˚Ø)>(∞°R≤UEp …h¨ùI#è;˛qÇË€∂ÕOEÓ&ÑÀ’ I@2ëÙK_mÁÉÏ◊Ú≈r≠)ºb#‘Ië„].Å—‚F—œ4¯3oêôI ^N;£≠Ñjÿ¬≤•†´∂û‘8:ïÎê*sy%∏*≤Q¨¬tîfî¡ø}83b][Ægı<jbpn«Ac≈%'ÉPÌbJú"¥A˙Ì 
+ŸªÌï8æ√≤Á»$BÙ∫ı¢[9$R›yËX6Í(õ‰£b1xnÀ/q·_Íæƒ?–3âˇpƒ∆øSg‚OáKY5'˜“—Èò˚ˇh¯9«ØÒt$íd=Ù˜ÏhµcÖÑzÎËÚ¨iÑˇÚÁì‰3_D˙ôv≥ﬂª{ñ/<Ë>˝·ƒö6NÈ˚-úá÷5ñ9»æI”äﬂ±Zõ‚}Tæœlß™Ï‚_Â`¿Nb$⁄m0~Ua*o{∞¡Ñ]ZËU¬H£)’≈œB®˚}å`®–¨zHò˘À(÷∑9tÎ∆‰¬2µ/¿`Æz†ÿàiÙ‘Å¨ª!_ºJ3∞«=˘l⁄ïmÌ¨ΩÃão4æœΩ‰É3C∞0«wy◊p8ﬂk”·—ÿsc˝MÓAÕ© π…ò√¡Al<	çÈ∏QS1TAyT1w2Eâ‘üŒ˛‹≈‹ãZV`]ƒ¡E4tú∏Òë≥†eZ⁄⁄Øäπz˘πzAÈ¬wnTi"≈°àæÕü}”[Ü≈9Ndi&3/ËÊ∫	A§zÁzΩ˚í;Î.∂éŸ>⁄Ÿª8ÿ€}øwzÒÏŒÍc◊N0∑–%Mﬂ∏h≤éã≈•˚ÚÍÀ:€+
+ô‡Ô—ó‡‚ë\8à&˝æEH}ßﬂÈ*?JCPÚ¢´‡Ö∆VﬂçßM—˜ä®Rôq7∏ÒΩ¿≤ÕE‘=∫≠R“Ωïh/*IµNv©TïÜ¬îUÌN7óC#◊ÁÙı’dÍ)L;LÁN4í—-S©âj9≈RQıÜÊ˜§fîÃ÷Æ≤ï‰ÊdN¡ëù.dÎH®Ó@;Ëm“dÍƒ-≤Á{—TòŸ≤1Û#*'c∏@x0§Òñ	≈@`∞ºeÃi¥l¨·†ã“uÿõrá3` ¥å±<ETnÂë:vãgùöan5ämL’ê≤Gù fã&Zf?<k9iÓèB≥ãëp+q(7.rK-@âz“≈"ƒπTY†C´î"e—(+ıò◊+ÒpñYP)Ç)N‡7¸e“Ÿ¶ ˚ ôPH?·§KÛò±P{uˆ	ÅÂYEè4ﬁ+ßN<óEä¶,î’f=™>'©Í7á˜=°f-Bı∂˘úoÀ¢û
+~U∂qÚΩé{Å=ó@t@Â	ˇCWJØ;sÖrŒ*e2›≈ií	ÀÑâ¬$tI"∆.€rΩÈ)ú7˛	í>q£3î‰óII†'¢ADıÄ·¿ùêc‡=¬ ‘´V´AÈ¢@*iBhÿrÌ\àjŸ4òœŒDRÑ*-<¿V‡â˛>”jZx (Ô≤4·MÛ%JÌ4ª	_1∂˘jΩ]t/H§≈BÃíƒqaúcFØ;jW ñØä6.øë;ê(Ïo&∑ﬁºƒ¯)Mï0›!˚'Ë˝’ÈM¿UZDó:÷´º6å?P:L™AümêåhîbJ™Ç£´ruíL/ÒºåÔ(§†ÜLAeo[Ù◊ñ
+ÊÈ∏òÉä5'¶π“a#1I∞‡®JE(”ç°ØZŒQkÁ®≤∑3LT•óŸ¥¶¶ kñ˘t]‡(n?uv›e∆ƒ{c6g2
+òΩRÃNÜ((º–œGYh¡(Ò∑Ä'hœê@ŒˆQpk	I“'ølP™Éo–cí˛$Ó˘Áñbì˘™wZπ—&ëÆÈ$Ew}öi¿“?T…Ê›öãt†N“˘Ow#ı=˘;9¡osÈÍTqÉÆúüiCÕÉúÎ‘à®JÜIÆ§n!
+îôÍ+jﬁ≤+Kë±¢©ﬂ'<QFﬂN*πxµÁT<êVÀâ44ï∞’Ë“’äS≤ÚªË—ﬁHÕõÑï‡-∏˜7íÁﬂõ=¿∫±‹òDYÜ÷yŒù(Bßë=Wõ]ó]5ﬁ©èÖtˆqü¬∫%yÍlù√Î±±#	sYhXû»∑Yùô⁄uÅ®êøÑ·ä–©-¨GW§'ï)…·4ùÄ ®è÷7K =Z\ÜwÎª&	„åF	&ˆKñÁëFqaá%‘—ú¯,'ÉÒÏ.¡»$¬éwﬂÔΩ'ß{˙∞∫∑KKD¥Gé≥xYŸçIXæ…˙≈¬ò•R¥±í‘Ï∆ı(µ^R…LY03)cÂÕ∞òBõ=†mÕıv;eìÙãµvöåíXmg!6Èó›∂ÒÛ6ËÛRe)y^*+äπ0Î¬≥“;∫m≥≤ü˘K^4ôHΩÖ3ÿÈE‘_~ë‚?ˇ˝_˛Éêkí⁄¶x¸Q†}z>·'}˙ˇ&	äò?∫*„-ª*î8{≥¶≈ÖÍ	(©+)∫dZV44ZmZ'Úﬁ †Ã‘Ùb©éB+”gënTÉUŸnæÿM÷èî•Ä’P])Ëﬁ…∂‚çqÁé{4E7¢%÷√…Ùµk(∫ÜÍsz§;º…¡.Æ0l¡∞c+¬cíw9Îπ¸€øí„IºëŒå/ejyò˚y⁄äAŸ≤ÎÆQÃ €Õ∫ú∑D[b&(e&⁄√Í†…¨$í¨ÃNóç„•ÛUiHÏ∆^YCöÂ-ÔÕé?ˇ˝˛è›ûÈyF†0ßÍk&º®+ÿ{ÏÄw¯™—l^‡bô…QCXZ	 f\zE…Ã‰bjÊ¬Eœ≥| B3Ò‘Ò6¸ c-Ò∫¨≠Ûf⁄üû`ñÎ≥HÌ÷»ˇsQ’µÏÃÑA8/ÿÛ◊œ;∫¥|4∫p˝ ‰g◊π¡ÆwFÿa}‘0-X∑L`≠¬SŸ91ØbZ`íÍ¶¸f∏ì„J)∆h\¢àZw>N5ß¢®ël“ëu¥iÜiL§6aˆ9U›»ÜRóŸ¨˝›íiÕn_¢}ﬁt’òÂØ*ä?îÛjlvMÇé¶—œSÏjzì◊e9,]Y·a¨QÃmﬂÎÖ˙ù∂‹’•≥P»=Ç’Ën§’“™¢°¨Óm⁄?◊∞®∞QπM#·Ù°¶ySÙ/1óK≈‚ÓFì"N˜m*~`Ñë˜›Dßv|õªqóë '»º	i<œP	2hƒó]Ê˝.≥ﬂ°ïŒp<wbŒÊg¸÷T«í˙⁄ìÃg⁄ã°<ˇOŒvgrì‡EM·≠OŒîI∫{xàä"™ãŸ˜«V—ñÙèw^`≈Ÿ÷ÚÅlu.¿⁄QÉMøÑîú?Èµæ∫æÏÉ√O<√&‘ZxÿÄeI6ãAFö¸“Â©…/„@R·#JºP…;l$ej˝gWBSjT]*¥xâûÜGrgV.ˆ^z/øÓâ„¡˘·7Í[cß& œÒïMO”HÃ¿+h˛Bàk∑E∂#âÛ„È /3—B&=Œ3&+goÙÜ*îπ°eaÎßCs˚ïq<åîΩU5ïŒM`¨p·UWÈ¬´†xUÇÓp&ã¢–T5-'^¶fQmâ’¸e*Ú—üÔ†8cÆ…óç©Œï•>6C≠ÀNÕôÈ„≥“9rïGc£≥∞!5yê⁄Ûì<`=„πCna4Ã,2π\à.òåIE◊;˝Í∏T4ei ∆@4í0Aë{Rá#NiN÷tàã∫¯Éh S˜≤}{”änO£îx±˝∞7ıW˚Ø$y´mBa∞ôœfÌP#ÖoÑ‰˛5Ô€\0?%"h9Ö√ÙDôœå’/MˆsæEb≈Z≈6í∆^ÄG 4u¢¥)n˙öÓ¢7-Hó‰âUËÃRwŸQP+¿ﬂ»±Œ¸¶–VcÛõ/9ÇÔ"ZÑ?ç.⁄ÎÌ˚•/ÂÍ6„˙~¶Ä·;û6ì°QËÉô∫Ω◊÷Ò¸xÚ±∂w V7Àµ0MR©]ê[>¸y,gls›îÖío‘‚áfñ’ö…[$e¥¶±}≥Ò⁄´;â¬Û	ùT†ÔπàuÙ6…5ü$l]≥∫Ù30◊Rëe›e§!Î‹ áV<l¸7⁄À¸Eö§≥¥údŒS1@3ê|/f]¬'ˆutcâ†`Xb9pÍfô°(◊é-J´JC,h
+î∏õóyU”'jŸ
+t2∞‡Ó°›≥ç ô;NÓ+
+Ññ˛Ñ¿üÅ?qƒÎHp6˝Ì	MÂó9ö~ˇ(hj.Nõ¸ÜE^ΩÔIô¡ë…âèÄ‰_5÷ôó,∆:D†{@¬‰∑=—∂‰˙=à ú¸æEêoÅ«:$á≥cA yBSz}k"»7,`ékOF}˙ÙIãÄºlpm.‰ï˘$O§Á˜ !îÚ˜-(|)Dº6ÁÒCr¸'t˚∆8Ωë-°ÜKº>ﬁ<g*`‹¯02œÁ⁄5nÃâ‘unÃ·i€º:á⁄ƒﬂY÷‚t£L|ññL◊k\◊√å(*·ä’íØ¨4pÃÍÉ<Œœläú4É6¬7S4~ƒ û‘:g7fNJÊé÷Wm¡œZ/L’Ãæ@¯#F)byΩâ‚e›8@#û\¬Yõã≥5ÿÎlq‹¨·€Ác≠∑—|√dÃDÿö’P|Ì≈W,«}áGw?C¸ŸWåÄ·z"‚?&õ…Öèœı{ñÎâÇ≥IÇ˙é8≈+/~q… ¨BŒÙ∆BﬂíP™yãX,Ï∑ÁàWU€WÒs˝2ó¥™I≠KœÍ9ûYÆkπñ∞∆$*3˘è&æV†∏Nì€{¡≠∂”—éΩy˜›waÀı˚ﬁƒvíñlf‡˚†búÜú¨∞∞ç¨j'_ˇ#‚§’«e®ò´%ãº≠p∫ID∞¡3Ã≥ﬁìﬁíÕ1OéßP¸Ì¥5¬◊ÎtYOê.Ét∫5sÜÛG≠Qa-4ú%»:È/$˜ö°ù°wè∫íu&’F≤x^Ó∂ÏÊi\ëÇµ>Ò¢Ù9/∆Q@˚(ªNëJ9§2£ê Õ´ÆΩh◊∫ë•.êü£{±8â,uè˛U-§9#º≈Lçî˘ñÎyäY,ƒs,{5`6‹mB¨x¢J–©ï‘ +ÃIo∂ŒóäuFñèàb;ccÑiÛV∑>ÌÈsO˛HòÂ√ÿMgê›¢›…i%-!ﬁ·{u∫oh§…(zC.p˚3iäkt¥tIkMôê'≥Ì∫+	Ãòÿd'“z†ﬂó≤îÇD'«Á|]’/pWêmaYLf"9N\›·kÈ(q◊¸+7ÌÇxœµ†R•eË˛Lµïjò|Ê`¿±≈çy£LL≠ï‰9Òét´Î%πã)ÓIg÷üí˜ngÎµÎe∏◊ê{»jÏÊã∂P∑ø¯!)∑r3  • Òä≤Òı≥ﬂÕå6qÊk≠ô¸“"$:òÂíËZ√≤˛kÎèÇØ÷i|Ñ∆HI¡,%Ô∞Ä6˘„ƒ1B·√˚‚≠lÿeUä:≤∫ÜÛA5ì”>uFÅAâ	””~`™Ø∫˚%ù\EÔèÖÈ∞-¶lF¯	{„ñí∑‰Õœ_S¯"_ \Û„› 	o&Nv∑œ~|{º}∫K˛∏í=Ó.ÍáÛJÖD.ΩÏZ—∞X°Mì–Y«ÒÑ£≤“KΩ≤®K}Ì÷KçÌâ'ˇEK«•˛Hª∂Á÷'{HﬁFç6ËﬂapSä‰eíF[aå„rÇá@#«∞∫$∫kó∂|¥Ï‡t;*°îmÚŒÉ™∆{ÂF\dU∑Q©’Øò˜æı“VKÁN8r}K÷Z\.œøvKî	v®z=ó˝E:E_v„&·Ã_önõ¢¢ƒ/é è≥åØ‹"w9Ë’¥c|Ω2ÏJﬁ~\z˘hD$ÜüAf≤ Uñ=t'çﬂ¥∞8µSúg}¡úÙ–dQjÿ-Ô‚^ß§ööÅsâ“.ªÔ¯N5‰®≠úÕr∫˝¬ÿõ ÓﬁøØ0CÆ≠ü¡,ÿ©Ø8~gxˇÔ“Xò"iﬁh8À©V¯1 ca¢0˚Â Ëgï∏´ÁL*∏&T∆©ûÒ-7[fL≠ÆÊ≥$mΩ Ò_Á µ/Ãñ7sö“%≠Ú*üìÿ∂∞Ñ\KC|ÇÂO2ü ûÿ˘∞Ä‚ou'ﬁ·Êœ"DäV—ÍYƒŒ´˘âƒé≥¬“hﬂYı¥g√‡ÜœÄ5ÄN¬‡ Ö©„PQ\O™Y uòr¡£JµfŸiW¨ä¬c`ƒúrÜ§. ^â•ºK—!Y¡∞h¡$æ[∂§íã(ΩÇâ‘’êﬂÊ3M#)Kı™®´…˝<«ìÿ|GË{Îd˘¶JÿØ,Õ%UÅôüQ˜míÁ»◊+Ö◊úÿπn.v&r¥\ÙúøxåG∑*ì0 ˆÎ·™RV2ÎHàƒ1™YŸç\#&íó«§*‹pU˙¶e°–@n“g¿A,gO•Ë[ùL·+⁄g˛—2 ˙+`Wπ ëùà‹∏ÒÓè`ø®@òM&¯â›oqn:f$q⁄}'ë.UÚ•ÏÀ
+ÑÆMbÜR€Ÿ«ÆxÓÄaèùò“lYÍ¡7˙(èˆ[n¥Õ^õe\¡~8K≠ë5n4•Ã Úê‹Ëü⁄Z#Ìãµ"–!ﬁWª++’Ü'@≈ﬂ‘πâˆ>¬≈r#9˛©≤'ÀfAŒáß∑Ó€≤%_±–nÖuãûú¬¨Ò…ônﬁÒ«*˚Â∫}6WÖñ≈
+Zû«–XNk8Zk˙z
+{¢1‰∞ÜùºØáXa;%ò⁄^ú¨ˇ&÷S[oÁËmÆÉHÇÕ+kmUwMUGMïë©d/q˝ÊM≥Ë´ç©{=\ì—úÇöEt'm“œ9;dü≈#◊4œ1 /ÓRç^Îí)>Ó.ÔßºÌäåSTÙM—æ¬j»†≈9°ÂŸπØ…wYì◊ƒ—ù]DYÿM#˜ ˆMy˙ldW	\xÄÈm¢wÈ&¿[≤øh‡Ìk‡hÇ‘:s´›∏5z˜%† wÖ±¥…–)ÜÇQﬁ¬jÀÀåŒﬂ∆ó∞M<ÉŒk«ü8ï>≠≠_˚£!B&ôÛƒ®rΩ∏˘:ÔÇ!^Ux9Õºµ´ˆ2^«’Ê9(m)˛µr–¸ÖŸN¸ÃÍØSá>®a˛z◊∂®*ßœ4π◊à[bZ ﬁ˙ñwöÖ5 ù‹â˜^ó D|ÂœÓp∫åΩ¿ÎºÆâ€JÏe~¬*"⁄´<c:¢îkﬁéºÍÈïÆÈB£ÚUjaòÃ∆ﬁ—9¬D˝’†!πô ì\ô ìFëug¸∆»…[∂ûTı
+ØÍnR
+7Ÿx¡‰o óÿáä#3w`MzX/“„í*∆·‘ê8UÜ¿Áö¬àÑÑu-Ò`„s, U‰Ëä9-¡ãıÌHÄ—ºMG∆*jƒ„òêN†ã∏I§·Ñ∆L¡2úmBo¨ΩªãÔ@2dD∫O˜9∑…5˚åTøÁ…¯BØÚ0*û≈WHßÃÓL√*:Ì™ê^^üA/A…PG5hﬁcB)+d™BcL»lM°ì◊ƒvïWÓ‚4÷¬ô¨œBc+Ai«w|Ω&®*†€¬N0hÙÉò‡k1≥·¢˘Æµ∞L(ˆ-`üYNzyCHu˝R9fm´ö3ªGA“7©Ô}îÕZÙ˙±©À›ä’˛ΩÏ WUNÊ+äò‘+ FLf+ëòœr]ò•nÌ$6Õ¿:—ÖjÜ◊&Â≥≠˛)€àõrã¥Aj£”äg≤[ßŒûd{ìõx,ôÿ†eK6ÒœŸvÂ&æûe‚
+ÓS›Q8 0˚kN:∆]Ü+‰dtHûxì®–óÖv^5Ë.åØÂ/U<H∂ßaM ü$'*–´Îk)˚h´öØò∏~˙Å◊D#VRgÉü·ò∫ÓéÇƒπì9Ñ"ÑÖ˛¶ƒJ¨v-©ßÙö¶.ÀºÉﬂµ[‘È˝‚∆√∆‚˘ﬁ·…≈‚íƒÜ•u^æ4w^ä¡B%ÇkAˇ≤∏∞N¿∏”±¯Ã…|=XgﬂëÇπÃmŸC”s«Â¬ñ‡L<Œ
+äêùÃÓ!˜&ö T!ÅKj$BŒî¶»◊[	&ƒ
+‚ úÿ(O¿ƒë$<ê`À°£Qraå°jCR3≈°ŸkP@>√ﬁ_ˇÖLù∏E®ÑHzé‹‡$…î∞î˙ø&Êˇ⁄¢›(ëæ{-%Vj!÷¸µ[DÊÆΩµñƒC–&=bıäªr. ú-îIº±-≈öeaà2∑m«™"(€GÈ≈˘ö÷íoHê7·YxØ€’	€mﬂ¡8´çz7µ/”jµ¯:u_\{É\>1ÿµÔ/Üïgw©õûYØ6Hn~Ì°É≠9∑„|]Çæ¢ı˛Ÿq"ﬁ©˜OΩµ⁄⁄l_5GW≤˛Wﬁë3é]FEz åZE⁄˘›% SIIJ¡µÆ»J±›º_øÏ`Êº|îL∆>ãb´Î”Œ◊¶e/‰‚¨“µ'auQ`x°‡JJ{KéÇÖ»©d•ƒ⁄,úy”wZ˝m Yÿå.)õ¯à≤U î3!ÎqÖ)ﬁá9z$a¿ÑÈ+†®
+n“dYÏ’ …ëuÌò˘‰l“kû[Ω®∞(õ∑~H!0π˛PTHÙé´±fä üB∑<Qƒ0bâ÷HûÕ˙a‡y=+‘’›1ï“¿Ñ©XΩ∆"f),*ıﬁÇk“$∫Vç*U¶Én—ÿ†ÒbÜÈ+∞î0˙F-Ò_Ú”›ïÛ^ä)ã=uÀÂÁâU/JõﬁBcSßS»s≤Ì@°≠SµíÒîπÉàfa|†Ò;Ä4Òm~ó w`MÉ:aÏÙ&
+X;∏5©ºè&˜–∏Ås–«KÃ>tá∑£»¯îôì;K–:∂¯¡∑Ë7é]—ìXñÏàßS(èì∆ vÄ¨`∂P»kvRQe<Ò"}y4˝À™ï*˝*3’í¢∫5çŸÀ®~F3sshG*ÿTÖÌÚD”öÈ]1Û4œ~ôÆL‰ÑCGe=ä•Ô≤ÙÜ§cç‰≈ÑuoÍ‘A&ÜJ«cR– À˜íº≈Lg5h2pÁ|'Â°
+≥eá()Ô1¢˛è+é>ˆ~ïnuY˛+|DaP4TRé∂xìë/Ub¶¨dõLË7·.Q\¨`˜®ããîK˛Ra7M~ﬁÅ&ú˙*•]…Œª6L~òM<ƒÊ≥í!]Œ
+àÇŒÅE„†Ÿ©Ñ—vAÛ’z¥´a‚hÊÄ|A˙[4úÊªÂ RÈsà8%Æ¶§˙sNf/ È√Ê«5÷`5!ñníà»C◊%∆,97Tâò¶ûÙÉêMöÛl»∂ªO†Ü Ë≈®KçõmBãì¡ø7ÕUT9·Y¨éWÙºIàª∞∞•t)¿h=jÅlzŒUå‰ì;4@[ˆPÌ3€D¡PQ‚ [¨Çx…‘M:óíSæ>ÉÒpö'ú/‡•_§L)£¡_Â}õbΩíåÌ»ôçDPìç ê`ª“—®—’˚^6)|Ï“–˜ƒê”≤Ä≤
+Ü1ößh–w≈ò*%qûH<:·Ç÷˙‡"‚I¬31ØtÄ≤kÜÖ9òJåH‘õ≠Rè‹4±M≥Kã⁄säÙ≠ú/T ÅJÈ! /ê®ÑÚπæÔÑ)!S…]© Ïç.pˇµ;ËÇq£∞ø)õTôLÖóÂ≈≈õ“≤∫˚ ΩeÜÏü†˜W¨‹«ÕY–Õ@YYËÑ'Hö”Õ?h&_©Éî§@6&-Uô∏¬+2$™˘KxŸó]©2=
+ì…)VVÕèÕê´L0›â’êß|äT TQj*.fÑı˚˛ï)ÆÎÒ∫⁄n+Px%ô££m.eÁh^JÓJ¿ƒ;È™M¬Åí‡/j¥@zñ=p/-yÌXöñ K!%Õaˆ¨æ®À
+
+ñí±Ω(’Ù·N^W2ŸØèÌV◊˝*¶Ï)·äø˘<Ÿú∫˛tJV»ª àµbã°p‚¯â“Ÿåì?¬>écì;KUÀ±ÖA1Üºá qIWß⁄ˇU]◊Y^H∑H÷Dö ¿~Q&)eª	ºúÂº	_§ôo˙T6ŸÀüeL3ÑG&©uıC≠§û)^"ÿïg_ˇÈt'∞ù≥üﬂìkDkP≠8(olH’*πø¡®µµ{êµÆos·P≠€WÄ∂‚ÎÚ˜+üƒ¸ÛFe⁄AÇ*Pk‡ƒ{Lz;›∑’˙§¬„ã·éß\¸ﬂ; 1ù9ïQ¡?9zﬂjµ™
+Ä„ëwÏè0Ì,N¸<wô‹ë±{ÎxßË=⁄ ´‰~©ø n}=ì0≠Å¬÷0'?ﬂù∆¢•ã’ƒ{[ Î˘^`a:N<'€gg≈}L¯â4d·¢…Ç.óÓ[cpYÒ‘!.õΩh≈`Z†°°©$ÿ¢9òπQΩeY¢áê≥1`áàGÍ‚1¡âÍ3A‰ŸŒÌÙ6EÀ ÔC’TA∆™™˚pˆE~Î$&©âRÊ÷01M>ºFÕnö3‘"IÔ=IOTB±¥5k$ÊΩ§∂p‹‘QEvô⁄¿∆7≤7ÑHVùcYj|;ï6s#g¿€ùƒSµî™	Çê Ç¬¶≠îCü2˚d›B5
+W£Å≈E‹ΩSñ•≈vW ©Tekf1-G£RYóµ¨g†R`®'aßn8ﬁ•´«KÁƒH‰V÷ﬂ#8\Øqô∂Á»z4Fº†ü∂AÖ§4ó?:›ﬂ!G,Ò»ØåQ}_¸uw`—∞,BÎ4>Ú”∫è_¸çÖZê$)˘¯»/.)2˘≈∑·}@ûQ£≈ãí4≤GﬁÜ$9Ìû¸t¯Ä◊œ˘¬F"ü,Í∂»™–∂Ñ™≠æjéy»U1®™®iWï—`ÕCÃxA.cèè´a⁄Ù@k4÷)ú∂§
+-˙Ü,ná!jÍ6ÈM…q8∞|–5√§>¡I~~PÌúä¥[√≈jC.‰A©Á*)BDø(◊ J«u≈ÇÒ•à©ãGiıã`ˇ≤íÇÙìA_ÌÉ„›˜˚GÔ…Èﬁü>ÏüÓÌ>`€g…5Sñö«!I‰Z¨<∂Z<J+Ú˛Vpn¬?â\´∂`“É˝ì3%?±„—¿yU€ùÑIÿÁhdÅ©≤ò ól"vôÈ.’ﬁV^H_-£πpsoPUˆh.≈ìTt≠GÕ≠ˇ˘ÔˇÚf-ç™®ßÓYºjñ‘®X®§ï√)ÓzHétaΩÿk¯…∏kïö¶K∫DWO`V®<ƒµ·“íï—‡1<·+^´j¸FHõ'¡}÷ƒã/Ë∏l—u1Ê#óÚS,£/ã6¢Ú
+ﬁº1]¬=ûB#Zı‰˝øÁ•—:6T¨«‡Óy5Â2j1U=‰≥`Âø˝ÎWèï;ÿr¥âäwô¬
+†Ò0¥,ƒ‘BK	å”Íü¿˙jÔÛëv⁄\1 6éÂ¿Ø‹
+iàø–gÉ@µ”*πä$*«ºCòb?rc/xÊ∆Rï0fá≥A·ˇ  ˇˇÏ}[s9ñÊ˚˛
+X„-Q›"%Q∂ªJ#À°õmuÈ÷]5G)E¶%NëLv&eY√QDøÏæÓ√ÓæmƒFÃOÎ_∞?aqêH â[íî\v+£ª,íô 8¿π«IÖ éS’bõÍR≠≤{â∑*%<±.É`eÓÑUU/*â>!&†å“∏~ìF£íÚ5Û¸€bb§WQç≥~–¥¥tç≤CmΩÃÄﬁ˝+¯
+ÊENë/\z–…<^¡∞¬.Vò˘Â¬Ø˝h¯õ3>Ö])∏˙ÜI2?&"D≈ˇ®DæﬁlD57í~∫ç¡JéjíH,P"†≠ÿêdV∏xf§Èå∫øÁ¯]ß”ﬁPµ%á„x`xD∞ÇO…õ$lq†Å`∆µˇôæ’0Í#—®√¡í◊˛°lÆD˜∑ôÁ}3GõîFëÌ˜˜lÔR
+∑`°dR◊eΩ&Øß¸Öç¬QJX1ìr•¿Ô»Ÿ(œwæålG1ïÈß§b¸Å‚9€œ∆ò˚"˚Ôv“8˙‹‡ˇ`4C:Ú4.4√DŒÊAõ‘¸Ò ëËÙ%π,
+Âﬂ™í≈≤Ã~-˛v÷ÏÑÄí.’”Ëvôàö–À$Û†Ó0˚ë◊_&¢Ù5¸yõ-^‡{ôËı∑óâÑë∂L$®≥e"!ñâ€∞y~˛Õo¬øØ®ñß‹%}ÿg˘Îõ_—¯•≥–Å=K≈e/´∫∆…4'˜—EaÓøP,\/ÏAPyó∆xå-lΩÖiÕ05ê¸ÖŒ5U”B‹IºClª÷}aãCƒmËúC©éHÓÚ≠t£RÌ '≈˚5?ßß§à3d®iß∫JÅFq‚QÓ!¯]ıµ–&LÆ¿U “î|¬jªcØ£¿ı∂
+H)£í˝?¿J±=bBqó“	ÑÇJëyãËÜÃ≥≥Ây~>cÚs©dŸô⁄[n›‚f ﬂï…≠Ixd=[<-˜Í	…å dnóˆn<≥LÊ£±C∂b∞◊›Îeùﬁ`3aö…D∆ı‹≤˘πßŒƒ¬*–„˘y©H5ydwÍ8¡è¥^I˙	}ê-’£Ã}‚.Öjk~˚Œ\∂ZGbpîs7∆…ÎﬁÁ∏[k.yksàæÇÍq˚vÛD∆V˝R+…ö∂í“»Ó‘qÜØ§ Ôm%yÏÆ§åo˚•VíÉ∆j+)çÏNßk%É<=vûçn„7€G˚ømüµ˜[ê¥Ù£—/»∆<zhÔÔæ=>ÿ›>¸ı‰tøµ›>aµ„Œ9Aq2ØÆ~:hµﬂ—éxL6ˆìO8}Áèrt›€v(Tí/∑Ãπ'í‡çYè*lΩƒQé8—u3wÚH‡h}∏ÔÅ⁄ë¶,Ñ»	[;¿Û1∏–»kì.€Ü]«˛§åjT!È—U…b6á√D(ÌaÁ‚Ω≠áóÙ˝q0«I»÷~EŒ˜¿A⁄¯ÊÚÚØ÷üØíèÊ6|&O99<’Ë°ÀÈ°ÀË!ƒÌæAŒywGΩ~]∆r∑zXÄ"Hv@∑â«ΩÃC9©J∑Çzòj—æÙÖ)ˆ‰Súé{îgûQ%ÇeQfsÍzØ6—¯¬>…‹z˜•'∆Ò@≥Ãﬂ¯agzÓ3«ÊMàer~–ÀœYx¥Îk» ¨ÂqNKx~c˛W<§å∏vr3\r;8Ç&z^ø√©M±÷z‘Ñ'dÿc7p~ôSÜ)‘Î˙¥ï4ÛTµÀ‚XÁ∆˙*€`Í©≥ó‚=∏x™dÎ…f¶æ±¥“¿\û_«…8ﬁ Ì´^F.Ñß´Il$Ê≥é^è.G;Â”]¿‘ëYeºU$≤y5‡…à-’E‘Êûë=X?A lÔ£
+“
+¬Ä≈_è∫∏∆∑à˜*˜ëÌïë\ãÂ∞ö∏+et˜‹-’Ï–√ˇ≈¯m@w6Ÿ`ä¨`É‰'¿π)˘ÇX√pÅ„Ûîû˛	¨ïÑ@∏~¢Î1√N
+DyÄ:’œMò…Zôj+6ÂúQ≠T¬°,%t0ñ{  L-)úh†kµ¿ ≥wg*È@∏tTû;Æ§Ñ«ÈÓt˝Xƒêã@Ô+yõÕÓm[ø¬@˛•¬’KŒ‰uÙCèüﬁété<7øúºkëΩwÌ_»ˆŸŸ¡õ„£˝„6iüÏmˇrœ⁄O·9»…0ëpﬁ±a©≈„dÉL†~ ~dIñŸ{'µ~Äı¨mI(à·ÖÑŒb˙@2ÙÜ»ŒEûµƒ`ÙKH5(6Z‹;g@UÚ˜ø˝/á UŒΩªﬂ¢…fm7I!∫Ôœ◊›À8DÚ¥eHw¯·ﬂΩÔ¨¬M„˛…´«‰ßòÄµí7aØ»k·P>jy\üaÒå]–`3‚OwÈö¿|·eaìPŸË®7ÏMô(ƒùé∆‘›)T±≥Ω!@˜4ü¡V’so∂£d¨1ﬂ£1î„Ÿ*ƒy¯N|ˇVa≥õCfûÂpÜãÇÛé-S´c=4^«Xg–†=:_…[Æœ´#ΩÆçÕ*uÛFÆ‘YefÚó•áÙàΩûbø≈∑/')¿(Ú§_!}äOÊ≠á∞5≠(ïpÂpZtH\•—"ç–NGŒ‚]†≥\iLŸJ9X«“Z[gíˆW@∫ﬂ∏FèMfh;ﬁ≈XB|,p-y-°OÅH£˛‹á;πÑ‚_P‹≈B=≠ãü0[S∆’©$2õE__0…Ê.»6ÑZ68”∞†*Hº/Ù<(©bNBºáOIÚöº"Óx¨xBŒ⁄€«{;ø¿øÌwg;(–5zıÃéú®∆^K1◊g`¡π∏%Ω!yKo¬›4éH≠–ó®‹˜l˘dA‚°°°∏rë∞®€ôõ£ËÀ`ç1xïD¡ ~<“U≠Ô^AN©µvóyµ°4 <˝‹ùóòª‚”¡¥$)¡=º£åaÔñΩrbxŒù„ÜÍ•¬ß*tê_Ü¿Õ¶^`›S‡Ÿ|
+Àü∏™‰ógM*V9œÒ®ó¯ÜQ
+›W√»WÎ@<Ï-Ë;C~ç’˛wG)U—∞¨4ˇET¯@ibƒ,„Ì#ß8E∏∞⁄Tœd√b0òã¿ÿÁ∞wtP7ı?9AZ¯lÿRƒë% Ìƒ~!Ùõû\∞Õﬁpt=v¿¯vƒœHÂ"¥"úPq˙r·5î«Ãè-∞î/≤ÇC´}—h4\MqH–7?{ıø\«È≠k˚”É‰
+2ÈÈIãÚHzµ∏¡2ÿÖÛ<1¬v$œ@ÓLø˛•,?Pı*HÖùÎlCÆ‡ê\è1=kèYGdG·w™Ùa≤ƒ˘ÍE—dÍØí◊‰˝"ÂvãÀPnîsEÿ√ŸT√j†î-˘t±Ê¡4⁄öõ/Ífq¬Äí~q∆∆ _∞xV)‘_>À*)ÁK»ñvU bWZzTæ‡-ºã°hñ?ZßZÕ¨Úq˜`+ü≈.è˘#Õﬂ©¢ä∂)›"≈ADèLÅºÆ˚›“9 åx('†í˝•Ï≠úSÒ¥Òr@aØÑŒ”ø,°ÛòÄ;˘ ‰Ÿ≤æ∑0—ª0£ÏFfädkâ‰väÖ&Ï|ôÌFÍ…µ7f±qâ°∏l ¨¥˘#º7aœ)Ñº°ˇÏ2¥Æ¨ê3¶—!`¥qYØÏ¿n! ±∞laQm˛V¬˛É3øÀŒwÆk∞E∞ﬁBjª≠%Ê≤öï÷¬G¡,ﬂπyÕ<…<No	Fs⁄a4˝√hÜcwÆ(ÆáΩ˜kc©{„H˜ëZ{;hÖ“J–©Ö∑{¥q8?ı∫qB'ıÀ;Wàﬁ¯íoK∞≥6o⁄o/#∏WÈü›wX_
+∞„$Òg M°˜lÏa~<ˇñõ`ƒ]8!†§¯Y<ÆΩ€Î‘#ó]˛‹üã•gü≈¥√«˘y≥ì–é¢°´}>4yÀè≠b›äcÎâ6¯∆Uî’¿∫‰ûV÷¸‹x––ˆﬂªY*ÈG‡Ó“ŒvH,„Ñˇﬂ¬Ô≠ELRﬁ('ò©~íÊms}å\_$wÆ Ô P‘3B≈ü◊ƒ0ƒ™i„(`ULD˛p˙15µ15’15hL÷£C]{;\A∆⁄‡‚AúF˝n>æ¸£:D˘€J£ÙúÚX4&∂ò6‘—u:Íãô‰ü‘ÅJ_z«ÈÊ€AŒ,…ÅƒÖÅ;Õ>Uãa–ï™∂[ıÕnÃ÷#&g(xB◊√ÕﬁZü7P_Ô
+˛#g¢˙jËx¡˚ç•yÇúø*â|âuU#QfÖ -ü%ﬂ9ÃwÂ*çÖ¶™5bJi7O +ßvZƒà)vHõ<Eê¥?ÉO¶$/Â˚·-æí5·+Q√~äaØ¸∞Í°¶¶±‘ Ï0•&”`Ã h]ßRTQÒ¬~J¡óˆäŒëÙÃ!»∆ò*MﬂÁëœW(,≠.f˘T´æ˝P ‚;…·ÏÊ‰•Ú¬‡0‰ ±œÎ,(ïpRﬁÍ	à¡éfJ¯Á√(d7fB„|TpI‰èú)íª†h∏ò`ÿÀ∞$Í •pM¯Ç~oÛÓ˚"?‰^p{pKˆKR≤Ó6® ?®1<◊≈Eﬁo¯qÉï~∆…arßªÙº™-5z√Nˇ∫SYπ‹ß|„UhÇ˚ +D<D_Pöa⁄~BéßºS$0à.†˙¿S•$$Á∞£R3ƒ·,¥‡Ó·Û˝Êÿ‚bõ)¯vŸ´iGíÿá!x·Ó¶…ØÃØuÛUúWÙg#[cˇHﬂW$•Ù C.ÙlU	”{.|æ<%à3≠ ì¶ºı^÷És€∂ã+8@+,†‚1Ç2å·Ú∂5ë`r^
+P)ƒƒ*·(Exﬂ°O'»¨*Dπ¡5·¸.Ù§®"XÒ˚#Œƒ˝ﬁ»S!4yÀG
+i~V;Ãeô>l ”+óÜŸ9 0}+uc¢ÆRÇ•.éºíÏGjxdï–»‚ö»B8˝ëW^	| Ì•Í-ﬂ+z›_ky⁄Ü=©<È¸ÕU∞†y˝|%ÉE8•KÛ‹!ò9˜Ö)˛∆IsÄP™—Ç’'Û`™ø›T†˙©ùT<À¸ •.¬ítXÇË¬V…W}*º|•SÛkRI'¡ˆMû˝ï4b—^8√aF…r√ˇT}Ú´õ
+x÷=RÇîdÇızµppIïµ§ô0sø∫{G˚ÙÎÛ+ ˚ GÂéï¨H('≤◊Ào_»—!$cI8ÆVô<Gc[·≤ıU‚¨òÆµ[Å˜$$[]ÉÊ¬÷v∑ãö]‘ÁŸ… Gë§„JyS’4
+ﬁß“äTL<c3&üH’¢FR4™1ø^XÃC lg;Å¨¿⁄Er9W§F?Mç]hÑ#„ŒßÖR~'õ˚>ÇÊ}ﬁ ê:–0˚yx7m‹/OIX!ÔéY^Ò˛·Prg‰Ì…·TÜ;=99¥ûçæ|8fèº≤à+RËI9TÉLÒCJ;ΩÎâJpz§Ñt∑uŸPŸÄ‚nû!ÒRº2bª©
+ä∆?±ô]ór˚›¥Ób@5€oeª£Ω	ﬁOÍµ÷˛uâœµ«“öﬂÁ≤í˛’Y«‹Úì◊‚9wà}‡∞ˆ‡<SóU„€E1FÖÛ]üØÜ{yÁìÏeÚˇ@ÆËˇU?±î≠ˆ‹ï≠Ë1\KdìÖ¯¥A∑Õ¶…∆MQ
+s‚˘=πå«Zë]ƒö>©-œ/…è'!”Êi\ßIÄà§4f„Ï ‚7Wı$@-M≈‰˘Eße	∏&⁄1,\ïü¢^?∫Ë«AÏ<n4ƒ’nDpZ3†¯åL,£1ù%oåºé
+.ËÕoxMOZ⁄|ó çÈÊ™∞Ó’ Î£€<aU+°Í?êkwµØ˚œ)3â≤∑.îF¶€"ç/{ŒÖêë¥Ñ«n≠Œ∞∏òìòQ»<,Ù0ke'Ç⁄Doh6†mﬂR™#Û ≥ıix0VÓ˜÷ß*∫“«u5¸˛Y ,QKú	tÏÁ˜]Àèë¿eØ˛Ù>˝
+Æ‡`Gp°›>ùxûæ^y~ÉuGÊµ4d€KﬂΩXUæ2w`nÑ∫G´7Ê–úŒS’eúﬁ6ì¥T~Uò6–_%Ì≥‹k%DíŸ\W≤›‰ﬁ\ûÍTÙ÷X§µÔC÷ >öä^òj˛ó™ìÏv®ÊtŒ ‰NW´ë∫6’F3ôV i»PØ⁄T—dÜ∑ˇ˝oˇ9’É&4hn®8û
+KUÂVá«≤8@tÌ5PÅi>7Ü[à®äô`@‡‚ÇF‡§ÎrÅ∆Jü»a≥&˜3uuPÛ»l8@6ÄU˝^√} =⁄Ô≤O	SDô=¥~p\ﬂ}ª›z≥œ‘+≤∑}ˆvÁdªµßÿF'Bj0´c⁄ÎÏEŸ’`?î Ñï∏1">˝â Tû
+Â
+£|G@À;—rdtk≠¡vf ?ÕÕi ~*%'!v∂u¥≥Ω»Ìlü˚·I˙‡Æ *ÄxvyEœerSˇÚ§∞Õ¢p—øNŸ8X™w=˛Dﬂ/„	ÙFjÒåDµ˜QÂ"»ﬁGÔ+qó≈t¸{}Õ$rÖq)K]–r X«÷»å9‰|àêØrà≠B·–Ôa˝ºÖCÌ%]ÌiﬁÅQU˛p™Õ´¶ﬁ”	f®£≈SÖhaÀbõ!‚Xÿ\πjZ«Ê÷5ñú-@âE√ËãÿÜ:e’‚Yë°òW®0^–S≠eŸ
+®sŸ2‡»†qf Y∆s)ãcû›⁄Ω˜b˙-Ä‡–(’Éjˇ±ﬂÎ ∂9¡%Œ∆f´ö≈í6E‚vÅvŒ“˜ìî|GèuH≥J»)ù´†˙√ó@é3Bè(é3"vÑÿÎÒ–lí›cÖ&<RAúF5k¡÷ÕvöåÆnùuáãêõ`3√)¥–GæÈ$É—AΩ‘V˚V	∆n∑`ˆ†a|C€|ITü´/∑Ó≤!i÷¢W6T{+‡t‘⁄ÄıL˘xsx≤≥}à2	*|´ﬁ∏Ä˝ ?Aá„ã«h‚Iò¨é0~©∏—1e˚óqzî]÷Œ∑;ùò“˝^<ÏAÈ“∂#ï∞∆,éÕïyﬁíºçˆA
+¿jCRÔØ+‚K+c∫[jú/ì≈8Mì‘ù˛œÃrüºıó,≥ŒjlÍÈ ÜtS⁄ù¶∂¶TÅMp£LhI∆A“!rFiΩi∆F≤#ô®+èÚ|Ì3‘$ˆ1Íg,-Òâë∂Ààﬂ¸˚ó2’“õ:fÉ*ª{i	m∏w(–f2Bƒ4Üv0˙'?°@π,&í*≈§"™≥ñ¨zç5<ÉùO÷a˙≈÷$–ó¢Ïvÿ!Ó–Q‡Ê!gAw‹‡@Á˘Cà!gæØìË∫÷qÔnËV¥‰:d2Q±=ì∞Ô8˘»8£Øï&P,§KûNƒ„¬m($t£u˙…uót£q˘∑O‡H~≥ÔÛrZˆ©JFZzè Lîøœ]≠
+(Ä¬<U$ 3ä‚:´·(Ç¨Ñ§»#'ÃG›Ù}˙j≠8Í◊±,Xˆ:í€öÇ4	g4∆Æ£~ùM∞"F`:+o±GvoTô ﬁÚ
+˛Î–_bPdóáÂUv˘µ ¶öv/ŒÄ∂i.èÆ¢l6=(õ6˙òe≥*uX§"∞&[@ƒ“‰Ë”t.Ÿ§‰õ3s7&û}q9iv´5Ã»_ËäàÂEã¡Ê¢ö|ÅÖµK©„€!;l•èDTÍ;n’“égØ›d¸R˚V◊≈xMÜù®l\4ÖR∞ë†J∂æq˝ Î?3G?_%ö„ª©:æüq0qWD±•@ƒzHUzk∞É'ÖÖéÀf
+ﬁ¬Vq£k."r∂Ô\z„H.¥ûÃ±…⁄ÈÔ:I¶®Øcr`7≥⁄≈tíW»q˛gÌ†µr‹rFÉáœ±,™HSmSå·øÔ |hÒ∏µ¯AJπW=d~jªSÒõQ%ÄØØM¯˛vf ¶ã›N#⁄yLjg≠ïˆº÷Z iMª–OWö•÷[óö/µ0y(’Áttæ“i◊∫Ωè—Pæ∫tbA—!Æù◊ÛYd„◊ö–`íP2ÿﬁ!g˚á˚ªÌìñ◊ŸÜ"ó◊KGÅVAü-1¡6¡‘Äº‹Î¥£ÆoìùôDRoU«uƒ≤‚˛(dÃ¸]π√≈d$.£0k‚ß12,≈b∂†“K©B¿$îè2Hb·?èπë—H…∆fe.7T‰2ê‰!´ï®1që“VÚÌè
+íy/X’¢Í≈w$†2}ƒ$øœ∑@Gï“%8â≤≥)zùn…w)9‹\2GCü‹ƒ!_˜„Ùõ†1Ìïæ2C√~olr”9(ç%∆ÔA¨∫òJd8?“Å˛pƒ∆‹‘oÅ»¯´|ƒuö≤wÆD[¯=πˆqî¢¢a¨Q˝÷.˝≠mê$«R∆{ÚÆ’&≠ì≥ˆ~Yú8E4ôù4++‰m‹	%<˝ÇDy™ì‰ΩH GúHΩ…3ßÕe<)RØìÙ¨üå…KRÀËøÙ»?Ëæ⁄‡hﬁ_QûAjÓM‘Ó—∏í˙ æı¶øÊ9B∑y9≠¡Óπ¿Í'˝f”P¯HüÉ)ﬂuWr›ï“\ı<h*ÆA&ÛMÑÊ'¨>x›µÔËC¨J1Lmú÷ƒ
+®/éí]∞√∑A€â˙—∞€b*Õ}˘™X=WBÚä¨d{j±+ïÿîUc´≠ÓJq5%∂⁄ä„ﬁÚ7®î”∫y÷áLÇjêª ?ÙÀåïk∫∏C®]…ûÅÒià[ÃC—Tˇlô®≈0xÑ*mºæZ¶Ä“[A’±"ê”0å≠aM‘tÖ÷Õ-$rBœæ.‰„†]Ÿò·ô‹ûˆ'c(*Üé≠IV6wíæØ§ZhQ5µ¨⁄‰<n\6ÿBÎë?í5_vVOB∑i2Äá`¨ﬁ
+Z•‚jªjUJ´AÉ?∆∑{…Õ0 zç]¿√„∆oÒ-„˚∞tãÓx0v—Åw˚1•,Û•Ωv †ì·U›aX‚πâHkf‰Ot 1D#Èoõu¢QÙ∫”u;Ìk∫WŸ%∆.G0ì%NÃÏﬂøîbå◊LeÂ¬{7ııÚ€PNQ∫Á›[Ï£Ø°Q«]N(à)
+§˙`6jüé¶!πJ§°Üíƒ¬KÙ¿tæÑJZΩÒm˝áU{æÈ+≤“◊v-∞∑Ç‹Ω¡tg¿4ãæåNu\¨iÅﬁπ6∑%˙˚ˇ˘ﬂ3-—ºã∂WŒNûÇB‘c†r›d√÷qÓæ©„˙ò≤Qa©Û‡æ…9}πô$!Ç»iˇz*p&˛ã¡’&ÁﬁA†ﬂ›”A¢`¸®D,∂1În7DXıäd55-¿z!\…Mè.cõX∑xñZ››ûÊ6ÛÜäáôâ„xà
+›6]”CRïbª·πVÛ‹0,üh+RBå	íÊ#	Z?u,"ÂãaÈ˛
+∑¿õ¶Ñ\/»<ë6|@—∆º0ü^∂sŸPB≥¸‘ö3ó\.x¸‡çKñ]!g`¡Œg|É`∏˘ÿK3ó≤À^ên…±¿Z|ﬂh4Úf>4‡ßZ-Z&‚7∂" å^Z¬Æ¢‡ ≠Hã⁄!ØHì≤Ù57ù∞1\8«p<Üã©∆¿Mçlu6!N ©y=ÍFlï¿Ôºëì◊˚öN∫Å}WÎ«c“£∑Æ˛3˝gSZÚ‹^Jz¸£o´K€àU¸Â[Í}è¸W˛'oŒ9 ycÒvpèΩ?ä∆Wçè˝$Ik=≤¢∂∏Dª¿ª™Ù¿'çv‡Ã)’sÚæ˜¡],ëÕhΩQÃäÔ…‹tΩ!ﬁﬂ-«ªﬂìe÷dëàQo'Ø{êÎñ§qçøæÁhU)´1∫ŒÆÇût∏r6Œ(ç?¡·ˇ†ÀZØòˇwç?‰ ,üä^	wâV%ìg Üonã/BÉ	$˜˜oI‘Iì,# :eÆ>é¢FÊMÈq™WÂ∞`ôÎaDyá§bI™©nÇáI=wò‘ÃÅü<Ú∑[∫≤ákZ≥Â–õ#¸¶ éÈâÂ«ÊÃ—üœtk5œañó¬CÁÁÀ±üN hDÓAòª¿ÂÕ±ï"ƒ˝Ù‰qF-liKZ+¸ÖK^h˙R≥¶ﬂ9¨%<0ÕS|'>á⁄·ﬁX.˜ü;0ô·∂ ¡b¡Œ?∏‘»ÈÏ™”ŸöÌ`Ú“ûä¶	QISPh*ﬁ}– ÉQä…ué,¡^ƒêÍX˛ ∂jc,`¥mf·p˛£G}%'0Ñx*V‡+8>Q¸:ÿûƒKÔ⁄Ã:äòc
+d0¿:˜/]˛§å;8ßÏıB––å÷ø-≤Ç∂b◊ÉÀhn≈*¢q™¸hÜ!6˚4f,hƒ∞	ßq´∞+7ÊÓ≈Tu0MúQ/æ®QŒmÙá+ƒ§ÍÅÙ≠ºΩˆáz~Áñ~áT™dG5¸¡Ö‡7TKnÄc‘Kµ≈◊Ωa/ª¢™&ËIJ∂ôÜÑa)‹Œ!u©(„Eaü≤ÃWãK>Ãà¸R√…\ı?¶ÕÚç Õ%‹@XNÚXB‹¸Nç|ÜÜtπl>êá∏,Ÿ‘ÔyΩÆ®¬\é#‘/ﬂ^ı+ÈÛØ[çáK∂%3Ú£Ç“0>NâŸ≤-ì#,ÜÎ£“öó›z<ŒSø ˝Arî§Q¿]bõSÁÁs´È˘ÍÓU‹˘m∑óvtúæ™æ~Æ¿~G≈œ~L%ßyxR\@¢ﬁÉ≥Ï~{›∑ìüÒL¨=˘X|pÚ9 ;øˇµÕ√B= È“KxˆaQ˘∫p/K™âå\+–lƒ®–¨`Æ&›R˜“Â*NäNîv3@·KHF?SäeÃÕN˛N“câvo da* Á2©4ˇ0√tƒTŒd_ 9º2ˇ∆+æ˙∂Ñ_7≥˛`±ç1}fgß#»"69g¯h\z:πåQÿÜÁwì~V3‡ÀDŸp6dˆ≤ÇÑ¢4tPfn≠&`†Uöw0£¥¡])∏±Yà|8ÃŒG†Ü„k˛G_„Ëá\lZwdö“¯MæÓ^¬-A˝7ßÍøÈÔøÈÎ≥1Ù∂Üç¬‰¶5§ΩÌÎ<EœÓ…«¿ï’¡¶NÍu„ÑŒ@@U∏sÖËçœZVMÿX—»πVYS≠·öï€[~Õ#~òî7gNc>T^´\-m˙^%ìÂ;¿u48ÎK^◊7∏jï?â£ z∞[∏
+:)É\]m^ÖC™Å"É@Ô4…6WçXˇ~∏˘öàÛ@¯∫|6ÿb˛¬WÔ¢RŸ·@£\SÚÀdt8Á CYñMOJ{Ö∫√”Ú<Êl7ÁÁ5™∞ﬂÙ`w@$*tY9:≤j¶@ÄW–IÜË∞TÑÑ4∆:kí«.—€`_‡‡Á¡6ç¸“9≤*QÚ%õ(®Ïê|,&ƒ@aÑH˙3m?Ù]Ê¬ _“¸Ü«2»WhYø˘§ÚZ@˝Xi¯(/¿…ç¡øJhD¯îp∂~ç≤B4¯Õ5˘%G`≥ç¥aÛç\2‹h[Rµﬁ ôÀ.»ò#Ü_µXô¡±k4Ó¨W2Ó<∆ù’í†Y ã®BÎ^,≠∑ÍÛc÷∞F‹≤ã+S,UyÖƒÅ9œíc~Sµ •q…¯T•LNà/Æ Œ,æ&Ã4¨Ÿ·sBEπÚ>)F´‹èÁrFâ}_(µı¢•°‘¿ÀüXü2G®∏å-$˝yRp;ç2µ(H)od~4^ë’Ì$Â∂rä˚Ña≤'÷:Ô¢Ì2íÈzûÕ˚¬ıΩeÇ?1VáÙkda™@!ˇ[sÿEaÀ¢óº•d‚†1≈ﬁ9…≤û·
+Õ|ÜKŒ~^¿‰Á£µ’5BYˆ⁄sˇ”<’∂ æÈÒ5`fÔÛ=˘¡]a£∏*‘⁄(.&m—1T®πQ\≥_ „Ú_òƒóW˝¯<Œ≈nx~ôØøÅ£¢AëÍT·êØ~“â˙gTƒé.„$Q*ÆùG£—Üæ&Oy—ì;*Ä˝˘Ï‰∏¡`Ë¨¡+Ñäâa|Üã™–pH≥~'hê$8è|g¿a÷Rû+%<7øü!·ŸìŒv €êP÷µ¬R\¿$NŒ°◊64lR€m-yÜ"•ﬁ¥ƒ‘>◊yƒ<Û±öâ™ZÉ=õTR¶‹“Àr‹`)êzjNÉ1EG¢yçæPkÑ.UêúÇ/dÛ*<¡Ul]U;ç1îEä≤—8'óRÕ·ô¬Å 99∞§¶ªŒî|ÂÄ ˘‹Ω˝?ê1 ¨ë[Á¬d·≈¯X©0ï|!WíW]|Ä∑ GY ‡ΩBYñ?∞FÙ@6Ï
+cl<ø≤ s7Œ<˜~ ¬ìî€Ñ∞ÒPìG¥<≥’P¥dò¯\¶Q&]Ûd~As°ﬂä'fò7_âÿ–®\‹≠ê˚+2œH*⁄iMU\J}¥‹H˛t"ñ≠(eN¢LÁöıΩö.t{HË:b‚¬…≤¬"ﬁ˚≤Lc4-⁄,M>úözˆCÊ>»P™Hπ√±à
+≤'ØeÒ†áBé,#õ.dÈ≤4,À~e2H„Â€K]Xÿ™◊Ûr†≈åìz›WùMæ&¥Ãö¬¨ó§P 0ôGÆ2ó UÊCò∏˛?iG◊Ju„WJU„óHù»U€√[aÆÏ◊r{ˆ
+wÍ}~]FSGöD^y‘D™k"¬ƒ;£6R.˙ƒîz!L3Q÷lﬁ*	èèöóBÇ#ó√EÈìoV1a3¯ı©%≈ Û?ÔO%aÌ?*$!√˘í
+I)˛ÒÎVI
+
+/$ﬂÇ‘ø.uDe‹Æé∞iªe‰~ódVUDõ¯GU‰ﬁUu∆Á°é,˙w™å|Î™«∫¶z4UèØNıhﬁãÍ—|T=ä˜õJıh~•™G≥P=ö˜¨z4Uèê·¸~TèÊ7°z4™GÛÎV=ö_Hıhﬁ£ÍqoK2O’£˘®z<∞Í—úüÍ—|T=|Ì›õÍÒlÉ2ZıèÍ˙áR±~6dwtmƒ2-V≠Ω=ÔX,51z^:à Â[’DîŸ¸ÍÙë-(_‹õn¢ÙÚ®°ÑÁj(FXÑØZI)ëΩx¢Dˇ_ï¬b‚ ≠µ(3x/∫ÀÉ¨—ååq%’ò˚VcL”>]¶ƒ‰5W{˜¶—<ﬂ npõGÂ¶∫r3∫NG˝x∫[ãv„^∏9Î8˛“ºÙ>K≤z#M‹∑™›ày¸Í4Öƒá{”hDè⁄L»pæ†6S¬Z˚™5ïÃãëË˝´“`t~˛–⁄ãòπ{—\Ó}]f‘ZJ≥ˇ®±‹∑∆¢O˘¥Öi?j*Æˆ*i*3›‚◊v  _Æ£~o|KÜ]™ Rﬁ‚—jtÂbÑ0+YGQd48*Cl’:	CX¬¡Ñqı>{ÎúàgÄî‹“ß*JH´éØπ¥£FèKKE,ˆËîØXõ;√Ê⁄°Õ—/‹%˛B¿œùƒÂÆ!k>´Ôå€√“íÒk≠·ª•ö^Æ∫ΩΩŸW≠˝◊˚≠˝}≤w–⁄ﬂmü¥~)ë4ùÌN;∫`∂\ÿÑ“Äã&ŒUÒÇD√eãq˝c‘ç)ã0–åÍ,é“Œ˘éº∆ïµVw≥€
+åunÍœê€‡÷W‰ÕÅldﬁ–ñ∆}∫·>≈ÑÛG⁄≈M˝O6T§M˛˛∂rY‚Hà.≤§=éI?˛á 81mﬁ‹¨f».§@
+ÒrB@∏9*'Qn±C«≠É]*:ŸZB÷Ã_Æ„Ù÷vÇñ Ñ‡G~≤¶Í†V∆2?1¨LPÍq‘Øˇ@e…<BUíW‹x2Êâ1.õù/ÖÒÆ+$]èm(∏n€C±dlK©∏b≈ÉS,X‡JôWÈsÂ
+Ç∞≥˚´“d‘Ô/l≤¶¬z3ü∞§µr–Zÿ:hQ©Ï 4ƒ6¢~≈Féi#«–»Òtœü—Áœ‡y‰ön”á€p;çËÃ{/dø9PkÀQMÕI≠à≈¯èI≠¨òƒ
+Ÿ≈2œæµû¶û™…¿…¿sw¢JúªgG≠0ıÕ
+=zaK“©OÜ˝€PR4˝Êí»å¬ç®zº◊Ki´IzK⁄àŸ:ªÑcñn ∞Ûcü˛Õj	,‚ôœNû1∆Åó+“/%ﬁ¢óõ„´8ÍZ>/V´9*äì©0Ä´¨‰8uä˜cE√ºÖø gUGPÙŸ\_Mﬂ û≠∞Ò®45[K:√ô•-aÑ>[SPóïÄ¡l∂frŒg{£]g÷Ò0˙K{óWP—∏0„ÙW+Ÿ¡ìt[ÿ7ÕE“Ωï«B∑/›ı[¬ˇ»Õ	Ã≈w{◊W≠√‹{‡xyEÀv€^ô# Õü\O LÙ‹‹‘'á…MúÓ“M\[íttE®WÔÇBÛ¡mv•ç!mÒ¡:À-eSuË∂◊J”	;K÷H“4S…)ﬂÊ≈fK/ä$ﬂé7)¯2ÂõÇÑ1ÈaˆYêg&kÜG%+:yEjO ÖúLıüîÍN`s∑Tâí˙ÙÃ>á<ï©˘ªÔ§’»?@SÆñÓ\q¬*æçkµhô\†ª°`„›d ¯€µÒ√í≥=Vmk…oV¶ºO6%KGäÄ8Ë¶ÌswµÉr⁄Eüef§œı}LÌ›‘ø'WÙˇzaã§n∂ŒG#p¶ß∞Ö≤ÄûÆíqTx‚lˆó$K;/ÛgÔH‘øTÃ˘eyÏä˝ì\¸ï8ÎXYeò%'ç””§ﬂÎ‹æ\&ı¸´`ÿp°Ô!ÒÉŒUînèk´!ÅÙA—¡Ò$†,ï∏3†=˚ãä‹t◊˛ÂóäU	è'ÒÄ°k^Å¢∏—Ñ±º;Ú˜ø˝''≠aï~CÉTÇ™D≠åªﬁÿ±Ú1°Ÿ€äÇ„[≤3j ∆ÁrÖ∑2,„åÖ¨å—cÅGÕè∑…)π˘Ç®"ò~Ø+Rﬂ◊Ù‘wıµÂ˘yø˙i¬^]≈‘õ„´ﬂÁé™¢V5jÃ$O…í”≈êÈ≈≠ë™Ì-4héq@ÓËΩ⁄ﬁ)ó~R"ÄËo°aJ–o '$è≤)òIï@è™!”/+«mTÆ3EáŸ‡W)|c
+´¶i@≥Y8Âkæaø£IîH˝ΩEET◊?˙3Awz?~<áæ–9§5®ÇP/l©ügiXÉY§MkﬂÃØÒf©ÒÊçã∂_Œ–Ö	ñÂãYöÆr0ÃFË¢-+ü√˛ú¸a•¨™≥2ó≥™Øy´Ó¿%8«}–,â2[A¡ˇ8\Â·~Vî«}ﬂ‘õœ¸Ù„µ|˝ÆÑ®å9≥ÑuL_ÙÀë∫4öπGâÜ∑ﬂ2’õe)>'_•8≤´@ú¢^ÿÇˇí⁄ÂÈ›(Ì.Õ¬|v)«=ÿ%µ\9÷Èv†‘:K≥Ì=*ÄÏëZ!Ñ@i”KJ≥¥∫{∂CÂ¶≥˙Í◊£8˝‘À ~d'ôqﬁlÌˇz¥}÷ﬁo-lΩÅHÜ£(£8À˚ÔÔæ=>ÿ›>¸ı‰tøµ›>i…Ÿ	|TI∂)u”A´˝é6œcó∂~Í•c»UñÉÔYlRBé˝P€?≈È)ÿÎR˘ü*á	ãÙ`˘]x;Ò˘Òh)∞)æüÁg®å#kclVHT=¿ ˚•-Ê}}Ém∑wﬂíΩwÌ_»ŸÓ€˝Ωwá˚-wÿ;ÛwÆ‚Óu?NÁ˘^5ö˝˘î—Ïî.“1|?CpªeØ÷}2w¸VfÉ∂ﬁÑ`õOêècóGá¨]ícy1,öàÎrc–øN£a‹'bπ][hsÂj›ÚÀ®¥ï)ßU]xÉ1∏:Ú+S?Ç˛3(ÎéBS»êU~≈Rü‚î.à`˚ΩŒ∏û|¨#Á•≤È@πˆ¨±π2™XÓ®cÆ’-∑	ày	›ú÷V/Y¬pàñΩÓ9«Õ˘Î”…›2çarS[¢¬ëıVwÉˇã¢Ôõ√ìùÌ√E˚3B;?z:®„’ﬂˇH÷V◊‹=_ßêä˚ö£;àÀ Ë·LÔ˝ëπ‡Ë§Pêß3ΩÓob‡é&¿Gv⁄èn„®â6¥›Ôëùﬁêl_¢ÆÁAà&§è +˛ë¥‹s‹û∆]•õ›´Ñæ‹œqœ˝Ô·lˇp˚¯ÕIÀ”IÜ^8∏üo∞Ó¢Â^´é†ÎÔ©⁄°/‰≤ ¬∂f@≠–Ë3Û*ílø∏›%ÌáÔœ¨ü0óMæì#—pc—)·[d˙≤ô∞‡úÑrzÚ’‡ŒUÀ“¸Ë3=	1∂\ä5/¢yl®" ¢Ç<%@®∑~ß˝ÎÃp,€3îà›McàÄe'2dÃ⁄èﬁÕvVUã¿f-ÔRô9#ê√yùsr3O¥û  8¨Z„{,$Ö*∑)nJl‘≠#6 ¬(◊VÈí»	+Î´d¿√æ\≥Ãÿ≤Å±∑‡¯†¥Â´ 7}Fÿbw…/Òÿ¬®,ΩÈlî™E¿ô»Bâ|HtA∑p“ã¯íûóÎél∂cUñk„òGø=Ú©Dôáﬂp–¢v©·€+
+Ï¬}ƒﬁ6´=‹∏∏ΩBÎÕj≠7C[ÁÄ_°≠èsΩS¯º=∞$˝–DJ?z∞qKÎ+êQ√Ñ5≤⁄˚–-¿"&ÚRröºà˚	d‚PÍ_≈î[bL¥⁄ò“†t¡DNYˆÁKÂçã 4ï™Ã˘/KÎ∑,Õˆr1/ÚÄù$È«—pâ¡É`√Ô≠Ã6'60 }LJúπU|`;®ëK6]≈É≠>£≈`;£æk˘2w´ˆ∆—;≥ÙdßÜÏ»¶VÇÅ¨c-ö7<qÀBôt≥=•s=nŒ®ÇöÃ*)*~∆dHm]xÅSd˝ÒÃ∆ÿO9åá∑°f[ƒˆò◊G•∞5Ÿ∫jå˝0Ò5Ê:åR/Ã˙QV!Vb˝|ƒπñë)îË;bf?Ad‰má:mÑ€&gÄËE5W9‰Ë˝ÍTfπvÜ¬RJh≠*VËSF—e -TÓWÄ%ñsçXwoRi4ïJ¶_≤˚Âà ].Ï=’6p÷ßuºUëî¬V&»#ùeUÆ8Y‰ Ÿ9d´W`ˆB9:.<4Né+"„ ,ÆRL\XT\∏ô?8†7uËAx‘DUπÍπÂP<ï∏Œ√Çˆ(…RaF	ÊÜœÂXÓ¸Æu Õp7◊‘ºõYêL7∑˚q:ﬁÌ•=˜X†ôÜrÅ-!ãˇ•CJ«Ú<IwÄ§;E÷U„ﬂË6™Åg)úá›ñ=æXr≈á5C≈u—‰ªÔm·P”ô”¬ÅŒ¡mÙµ„D(UÅÆÆ‡EπÛ˙˚÷r˘
+¥úÀóó!sU©‡…O$ûƒªfÊ¥2ó˜ÿ g√Yj ;’7 ö®ôQT9ô@4¨ ˇ∆Ωqü∂ÀﬁÜŸë|ê[;ç≤´fk®Ù∞’Ã©ﬁ5å;nM£òŒDíf·Ì.SJà–˝2:ˇT≠+>6ôcë'^‚QCwødò6‡{ØØza$ÃC©ÍKÌËál^àTœÕ”ñD2Ë¬V†≤ÂQ£D±”≠ù√w˚Å
+àô7(h)ØNhc™G)êüŸ{—k’‚rt8á»UΩŒ\§ô˚2Ûcja´µøw_ã¨∏ÛÓmçπùkNKà∆…M§‹Sè¬˝¸œ´AW˙∏N˙ó“«Ác-¸xÚŒ|`ÕÄB¥FT`2\IgE©Ì∂|©ÿÅXˇ°÷’¢z1B„µß2{Ã…‰°éx„«å‚X5¡…Ç®’ ñÉ¶ZH®ÿ*≥KT–fâä´ 5¸õjVs	cYd∞Wà’Ù€6¬Ï°∂àπP~ÿÆjáî\uÌKûQö3Ùk8§¥!?ûR_ÓîbdºˆxFïÓ˙∆Œ®Ê?£ö_ﬂ’|<£~7gTµR„ègøgﬁgîl∑üœ1©8’ÍXﬂÁYe
+–˙
+Œ+”∞œ¨/vfi4˝xrÈw}ÅìK*¬8üÉÀXßÚ]zËÁWplÈC~<≤æÿë5Ky±†3kÍ¶´Ωd¯⁄>≥Ê†>€ ß≠É„6˘éÏˇÀÈI´ÌŒ>ç?èít˛ıñ≥Nß :=MŸÈ0S“©ÿˆ‡ôª≥8>>ÀøøÔ§”}§*2Ç◊¡bâîÀeR≈8πN°Œï¨.Ë˘”;(iDió“ÔEöD]:ø„)≤MgÚÂ∫£oÇcnnzCJ∆úÖöïoYπï•z⁄∏wl\E»Ùú“ˆ4&ˆh≈¬0s!ql$àöÛó˚\g&?¡‘cÓãÉØúˇøˇ˚?˛;˘√”IYsàø˛™‰èÚ]{{ˇ«üOé˜N»Ó€Ì£”Éì„≥∑ßãw§^î“`Å÷	@j¸¡ë@å=˝œˇF —yÉ®›Å≈≈IÚ‰ßxx]∫Â|…Ôq˜Rºú≠P˘—
+âR"/Ÿ®&U˘>6∏~/J?oj¬@©Ùò• øá/>P	¯úº«Ô„lÉ◊Õ-ﬂv˜·ú@Õﬁ†≤ Áˇ:¸k®1Nﬁóa>w-åÜäPOãJïy’…<Ÿii„_áÁ‰èQ©¶=ëΩ^	ÏïòÏB<<dß:⁄&3ı-ﬁm®`D8pΩ,ÏS	H≠òNÚO“˜˘¸¡fx*ãèÁyÏø˝XÔ¥	-‚¸%¶¨∞`ÕG#d}Í]hoÑ≠qì“sµMœ∏“∞êS¬wìQè*h?_E„l{4";9‰'!‰ÏÊ›=q'ÖÛùL7ròäÏÖŒë	≥√ÀQ9√Ã¬zÖq”oïÀxù
+â	Âµ˚(·5¢|9ÔEP/97‹îAÈs∂úæM5NïN_"∑8-i‹îî¨"t5ŒjÅõïE`cÊy(p3ÉîYFó8T.€ÿr∆À#1r(0£QäŸJ∑yot˚r@2RkÏ.Õ,cóBﬁî7¢k&3&6¥ÎOgüû˝cÓÖÌ|¨êõ∑•Ê∆z,Iœ
+t"Í·Tœáu’Óveπ˙‚XÉl∂ºçiõb¬¬GÕ24¡d∏hi«`ñÏ˜´ƒîÉÀÎÆ‰•·6\„	|#è!+$Zy j.∫–∏-ê£íªÓòΩrcﬁê^øëΩ›Âó+NZi¡LdêÌ)Ÿ(∆¶@Ò›¬yRËœÒ8ówghA.9K3—∑©.â{ˇàØVa>Ü†äÖ+ØÔ¬é:à ¢!¡1Èü—MˆrÚ¸Nõª&±o_YËÍç£~ØÉò79Ø+¿=nÌ∆∂àcÒNh‚`Yr(Â·¬≤quÃ[T¨áÕ$ÇY’“∞âÚtå|¬ÿ±\NHC	Øœ©sK=+©4ÿlùàPöTUÉøﬂæ¥]ù–7xìfe“QqãÇ4øaOíi\≥CöZó]M†§ûµ∑è˜∂Oé˜…Ó…ªVª∞Núµ[;Ô⁄T¡";'€≠=R;<¯iü¥ßzq◊È·ˆ/Kä^;…:)àØËîByùi@{Ω|Ú%ï&OŒπ§1à>◊oÄxV?›|»«»”…«ﬁ∏ù¸åyz™/¢7BdÉa∂X#QﬁÃãU‹ÕÖÎkƒÔÆ?[º”˝`Á⁄QÜ.πdYƒ„4Èìù(-ÈÚ•˜®\ãõ˛ï∆˝¥^Ω(∑Ê>£˙XbΩØdüyVûCHQ‚SSFïª≈;}
+B=1&$Ç“‘îFP‡ÃöéÖ˛ f˙i¬ËÇI»9ê®l\üìœ~oHŸI˘≠q¸gPc’˜œÈ8üÛAc)Q:L¡RŒÔLv+€V∑%Åæ0F'7i4≤p¸ ˝®ÛõÜPò
+¯ÿûµKÚ6∫ÓgˆZÎxƒSÖ;ªé√åÄ`ƒ`2P“∫±ﬁ†ÛmSÎÎäº‚ˆ≤q⁄ª∏Kj≈ó¥≤öÕ´57ë2ÌÌ6;∑⁄!Ω‚ﬂl_I´_≈ä«ÕSÊÌ3[ﬁÊ ’öÒçM÷≥5É‚lŸ)lÿafã{ÿ6È¬úÄ)˝ïJ9f˜€Q@ºi<å@hd-8ìÑYóˇ€˙oj'„÷>≥í±πiçÊ=ú‹aàÆ,è«mÍc†z⁄óOÙöﬁ˜ˆR∏™h‰ıœ∞bê—nÎ˚¥oAJÅq&t?~Géô„
+5e∑CeN"∏g<Ïí\BÎn‹0ÿÚ∞Q∫dÂ–M¬íiBˆ·Õ”CÍ¶˛Ï{÷Õsã[É˜°ÊË7ÄØó¥ëË"K˙◊„òÄ˝
+≤≤ì†ÿX<JéRUæ‚TJ9*>BNÂçF√¸Lcá≤2{Ê/◊qzk÷\J—°P∑F¥¶ÜmZî†i(˚T»•¥0ük9é»Giö„BîÁƒn*Êq zƒáqvó„ç ,≈ÜúDâEí0d‰∏{ ÿøXh”rÌC⁄£çuoL8Ûo'óóTÑ›a”c‹é÷öÚdæ.ƒä⁄I∆0íò¢1ö2˙ö%Õ+ûâ*:∆ñlY5**Âs!ÙJtlÉ¢ﬂ¿«‹Ò]Z`ó©)™{æe∞CöD∑pv”É3TÅ‡µé»
+X†£Y àËé„^FËÙ–€ËüîXD€Bπ#„Qx›“≠˚‹Çï®ôÒN]
+•£⁄ kú2Q Öq“±Òo¨ûGí;=º∏Òa6:„fÅÊŒ∞97Uœ7¶oNª¿t∫r‡*~≥Uæ◊x˜≤bFË2nı®N◊˚˜∏È‰æy ]ÊÕ£ËsÖ'åzÄÆ›qÛƒaz©Ù•çsqˇ3•.¯äëöxÌ©Ë,¯îTCFíÇÊ≥F≥ƒÄ ÒüX†Ï>W√ÃzI≠Ü•ˆ¢åÄ:>º\bvÀ¥◊YΩÌ:ã”W4¶e?˜∆WµE™√ˇ∫∏¥dçd†‹ëë^Ÿã≤+‚≤ñÙ qüjÿ0Îù…ä8¶NrÂ.¨[voh◊-ˆìÀﬁ–⁄åâÉ˘È}öh¥ÁÛåwti¸0π<πáá¢1¬∆S'êÆıÔKüI»CÑ+à9zçjsàM⁄†Êô,0ä≈ô‰°Xc÷ìÈÉ˜Õfº2ÿ±3}caã;∏ﬁn^	≥ÜÜ+Ë π•û{((sI˙˝ã(eZéA5~øHe≤≈e=Z˙´˝¡O!≥ˇ’Á.ò¨*£E%Ç4´∏c`ù˚Ùƒ…9»)˛UìTJ´§¨MæWµysEgñyfÜ	Z,í;!iiÃ"ÃÍö3IÛ‚∞…Úeiﬁ≠ñ˜âπe≥po1õ¶˘˚!≈@DıŸï°∑˚,‹0Élì±i	B¨m§`W0ÀYyUœ"Ÿ™Õ+(°÷‡uñ±ê√à{¢r?’eåÔMÏ&˝¨¶ºkn.î¬-‘¡fè2Sı0Ùf6ÀD—iÀVme“K”x#+w"¸›,‰‹SX%kC!ZÆî
+å£3î,1/ £O‰:"‹g™¿n≤ë˝)4I,¶⁄F}3¥ì‹w≥fÓ]AÛuﬁú∂Û¶øÛ¶Ωsµ2íøÛ¢$Ø N0ˆo∏ACÏ#Q*(˘¢eB°‰˛áﬂπ¢ßY/öÍÏ∞Qc	0h«ñ 6!à%∞°,£»e¨Ï˝c|ø∑‡c¸q£ÿ	 q‘O“‹%gˆOÊ.ÓErg ≈í†§“˜ü◊DÁJU'©˜cX2ñF!æ™:í¶6í¶:íÊΩéƒJßÚò⁄€˘ê‰“V ê§¸òæ4?`l¢îG¯ì†±ç¥J¿t|¸ì:<ÈKÀËLá∑#öﬁGoàà) 7M;#ç∫=∫{Í„§~A>¶…@Ù©…¬["~PCit»•.y‹P≥Ò<èë)j_ô¢eä±∫t»Øù√°_¨
+]§<¯È<ˆaÜ3hvH†Ü∆î ÿdÉ<‹ß	·>MÖÚXÖyÑ˝H≈+á â¿ ◊d¡%àºë∆ËÒ´±BLêÆ◊ZtÜ˙a+¸YJñ-÷Ú¬x¨î+¢=Ù`èb.l Ù˘ùíÌaÀ¨≥#âáô˛∞S95\ıV=d—ƒû5¶∞Æ6mf2ÆÛ¨œ	·≈™•7õGeµY≈˜ÛTì ‘Yñ«ÙΩ9¸©TöèÔ˝ﬁÒFˆº«[∫f—ùÃöÈÛ?ßï‹∏ﬂ˝ÁW~Ê5∆¸p-bPÈWÎÓcvRHêLÖ„¸_pw‰Îúôì;/ÙK{K<yIJŒÚU»µ%*É—∑¥}ˇñ§7ât[	KC_JKW…Ãº_ôL_éÏ’2YÁû¨@∏Ä <{Â\Bﬂi Vπ¢Ia´G∆BJ&Sm”n)+Æí@√ElÏÊ/v›Öt¿©œ{üläÉSYÅcl˚˛N≈ö¬nÈy’X]˚‡(\ úoœWuQä{ﬂÿóπµ/¨s≈\ë£ºïnî]≈]•#*o˚&ﬁh',.obV`Ñ◊†7¨ﬂ‘ô‡∞ß3ï…π%zXÊπÇuÿ£JE<6ﬂO'x:”‚ö””7me— eÂøÅπèFƒqz=ÏDc{µ6-ÍﬁÁìDi5Ë¿™2]o.(œõˆØ¯bsm{íôï 5eñ≈ÙäÏì&Àl∞/,.◊îy\°√ûq„ÀJ4Ê	wá™ãƒfÒ9H≤3º∫í[∆J’∆Î‘Võà†íúpÖeCbìÓ"Gr∞yûÃYD"áè=†6iïz£ûª&A¬∂gB¡–»j‰`!–Ô]á ;Î§ÃKî/™îYvyèmö$ãEóS<%V$|ÜñèX≤Y±hCÊ‘BO´ˆƒÛ•˛ı^mæBÃ;‹˘Ö¨êw«€ggoé˜˜Ú¨¬3Úˆ‰pÔ‡¯9=99‰…á%‰Àö9Æá‡ämËr{=)˚Ω–S`rÜ…9p◊5Yw/»	˙±!≤Åƒ›3à⁄º∏•cT≠å¥,ÅCº–õ™∑îÎ6îõ≈6˜À_Õ∫¢¨[ïÂÌ¶^ÕØK|.=⁄›_$T“⁄¨öö:…b_^W¡ì¿⁄úõrÉ¿ìÏX¶ÆdL€‘fÃ]‘◊›†ñ3ñÑ÷ü7%_ÇúÅ'›M›ÆV¸nsg-{ìÏ6üwYúfÍ(1¡“ÖˇÂ:/›U“J7å¡ñ˝Kª3ï≈ŸI~
+‰9\‰-ù,∞%ü&I? œ≈∆ÓÙETßﬂ∫¶Î2zNQÍπî )1h∑-X;€ÑÂÔS‘ÎCZΩ”Í~{∑%: Í÷9v± <‡£K¢õ®áË∑ú”A[MöPy*Üœ9Ì«@i<Äú?˙?¯Ös í?•q‘pºî-l&ˆmr>j|(4E?@(m|ØÄõ'öK…Ri_Ÿ«c®Î˚Ã~@ò)ä€:´Ø»"DN•Òe/√óñêW“XZ‚n≈DoIÜ<ó≠7yê5ú°c«<#ÉÓj—äì ÔB%í±º0∂ +ÇùeIÌjÃ<Îó>Ûpí˘∞†$k¯¢4B	^^Â‡@/Ù≥)Áç
+Ó⁄z∞ëT1Í)º´∞∫Vl„∆ ¯ï«Q∞ïlP≤Ô®0EsC~,ÂŸäRTΩ*ra\P±rTd*Ï”ÔFI2»¢X†ÕWˆ•È∫∆'œ©A3øBƒUc2œ(|z-òO7Ô‹ö∞‡;jexvÒ≠<KvA·XS˚IXYA”$ÓñjUêpN∑[˚«mrpº∑t|–˛ÖúÌR]Ùÿél3äÄY–){c¨Õ©z√Î$(ÏÂø∞Í€/'⁄wÊªX@∫>ZÓ<L"ê!•õ˘7÷ñ£Œï“4˝¨ﬁ€ÅØ‚ÏÂÑˇ°˛Z øú´˜à¨íóÒß|«äcâﬁÌÏíüˆˆØŒı5~Í≈7∏0&É}hÅôyˇD˘Ké8Z,£d‰xGË◊à;∆$¸{R*4\∑Ñ%• ökòï¶π‡ˇV–ï¨∫†7«Ï…ÄÏıR,˝^>‘Ã⁄ÉAk»&¨6dzX¬˝@Ñì;Éîibñù%Îk!?iJRîa°gHºëÉd»SRo9^ NÑÜÒcÕ{¬ØA§ÊÎ≥ì◊©µ ,Ùdÿø]
+Œ’±Ê#b˛˛ƒºqº•]‰ŸA
+wX˛”Ã{úeG. ƒÏÇ˛e4$=7	ß∂B@fw¶V8GŸÅ˚|asUKQõåêÕ9+∂Ç5A:<GŸ†¢°¢>ùIYÕÎ–MIÈãû ﬁAÚ^J˙à5…Út?Å≤>™ã∏ü‹ò´‘X$îy!ù¸…r¯!	1¸¢‡êòo0ë¿·¥LˆñIyª◊>H∆KßÇ$9’ù?$IN≤fÁ!¶“¸f‘Øˇ¿IîbnF…ˇ  ˇˇÏ}Î~€F≤Á˜}äé&QsLä∫9∂∆vñ¶(õ›Ü¢ìôÒ/{ëâ	H0 eY—OœqeøÔy±≠Í– ˙írdG¯`ãd£—ËÆ™ÆÆÀøò€]úÉSg|V@°¡Sl5 öÚÿÒO4 w9∞ºBÎ˙–U≠/¥òWÄRŸë°T‰Ï¿j%!˛˚ø4'áE Sî_æÂ3»çg9Åe∞ëôä-‡Y≠òK® Î|ËPF‹JQ•È»÷N¢úÏìD"≠ÿ5πl◊∞%Ö)‹¶2[˝F›E
+¸ıŸLi≠*NS1ì÷®“®Ö•#ly"Ê˜·–õi!	_±´˝∏T'†PG£úB
+`ﬂ8-ñò"f7h9ıtÌU˜¿ﬂmÔ°5ÉVÊDnÔ·ƒ7˚æ7Y∂£É‡cê∞‰“π?ï~Ÿ¶h9DÙªíÓÍ›)aê°L´0u™G86ß;¶Ô4≠U!áñ‹ô≈é+¿øgE3n
+aíátµµÄ•≈$0∫e[#ÄSZ◊oz€je≈ÁÒ#û5»„∂6k$ÉqQC.:≈g`y–ê\í"T˚àπ÷Ö ¥ƒ/¶Q<Ò‘;Faêπ1¬¿>ú”èXÒK˛ÈN˙‹éÜ>&§◊Ú_±‘s¨6gk*=ñM˛µN˛ﬂˇ%Åb∑Ÿ-z1~eÄ√ÍYr3*”õDe0LTæ°⁄¬&=y#ˇÏñ≥;ú6¯<Úa„åW”7=!Õ€ÿlÅÿI@¶!†ÚQÿ°˙}Û◊ﬁp‰◊¯ÿª”±ü\ÖÛe„≠ÃØo¬™◊[Ωµ»ÛZƒyµÜeº“⁄ø_l¢ü:mã«Ÿˆi´˝ñ¥˙oè:˝éd?hùøeÒX«ß≠#È¨{õå£Î‘÷ùBGC/ÃK∫“äüh&úEÍMÚ{}œ!û	5KP∫ j√„"ºäQµ+ÿiYÒ⁄}ñ4ö£†≈JØaÙP£~˜˚k\ˇ|˚„¯óR¢*7	¨úî¿md6}‹él≥Y°%JßÅÍ”dagÜáØÈÊÃúƒ^éJj˜B2õ”'†xmdí∞€J?RƒßÚ4?¸∞Ät®è=™ä·Æ0ûá£äÁ9¥Q≈Ç»Õò´ˆ)«íîeMƒÍH'˚‹Í«XœI(Û◊‰	{E8óza}Ä Áæqø3‹b¶=?°6;ñÁNxÅåaƒn~†w7©`µS©≥ùî≠&ÁziWªÙ¬Deÿr6û∞¥á≤
+≠?Àºõu`2ÓR—˙¢òº∏qÅ⁄£≥Ã3±ˆœ/.B-ï¶7Ã,@•ÁçÊ˙íó∫¯‡É≈å9$áQú1¬K"å)<óÇ@Y√;–5•à>/_Rl@=Œ
+b≤∑a¡Ê–£ˆi‹`£GäôÃû°Ω£¸`S.œº‡1º∑%]˜‹(Q wƒS•w©∆§≈IÅAÈ≈®ùﬂBïv(˘	7∫¬Ç—”ò.ƒ8õSû™ŒbZæjxÿdßï`∏ƒCï¡˚˘‰ãóπËŸ!]^‘«èræ°≥åB¯˚Y»»ñﬂÎ˙‹3Foöß~Sx™jﬁxàxû2†∑‹LñoTõõN‘õ*u¡#≠àﬁ\)0oG„í◊ıñ€)äçN·Ç¬g≤>Vz‚±m∫ê3ÌgçWπ@bZRw±∏ËÌ4V°‡Õm'‚6{wDH´•Bü‘ë%Ô#⁄m.ÊÓN-úË˘$3íååd¥m“∞?Ò»L.Ù”Ê*„πZêSïTgÍëáR ¢¸vyG0li*jè˝¡ØÌ }-IcÇ3ëùú‹	á≈:ëM.TÒ!MSÈB2-≠œb˘»9>‡„*I'PÅpdÏérY¬iÖp^≤N:"'≤1¸§›*˚©Àë%]üè=tIf:¯˙˙=‘y/-ÿ8bf„fÑ£Ô-≥˙ûÅ|”ÙgÅÔÇÿE¢v≈cé§Øj˚ÿ[⁄ˆë
+ã“Ú&ÇÓ|ö„—'§KS)+ÀNïïÇí“ª∆ªÊ‡§l_7Ï	·’E˝gâ£Éû!v|ﬂõ„]„PÏ˙4Ù∂é°?ü|[¬TN	]¬â`vÉ"¥bÙÎ]¡ÿ®ÌÑz}cûònÚ˝Ûd‡QscÏ3Ô˛_ˇ Î}‡=˝+Ÿ†^|t=¨'‰Á1(≠≠ŸCÅ˙~ËM@%çÆf>	π¬⁄ ±Ç˘·ˇGìLB—jy4’`†S3°Ë‰+xœ5e∂úÀÄVœ£âQ©∂è©Q±0Úî¢2Ü7Ö!L£9<—«sˆ®∫`oìË≥©à)ü Bût)≠ôA\Ï@GWd¯.·0«CÄòßFÆF£`J˛£Ù√ñ˛É¨ˇêèˇ^áÔj®Ztá41éb–Ë;z∞f?¢qÇˇ§OgÉªˆ(Ò˜ëU^:àÜ˛ª^Ma˛k`Õ≈blæπ¡Ä}KA3›qPzã–VHA¸#A#åË(â	 ˆª
+îº˜ù¥%†ﬁƒÉV|Ú≠∫û‡’¶y%ãiYøCè`:˝w≥· ÂœYN«%‰çˆZ ºEà!*0ª¨ÒÅÚÀ{Cåªµµ„1ÅŸå⁄nP∆Ú…[píÖOÉüßŸ£@QMN_1ã¶¬§ûpuhô∏ª^ÆπTÈ*rj*‚û` Úó/ß:&˘k 
+ˇEòÎÃ®e∫q√Ëë√kÈ 8!ª≤4é⁄zQmÀ$7evÿ®‡b‡˘Ù±ﬂ fÙ´IâKY1$ï))ùÓ4ùé&5üàHSâB™èÃ2)®XÓô‰À¶Ò¢∫Ä{í¬ÕÙ‰@{`:çS*ù!¥2◊n1jÊ;^gù⁄áÒ|>Kˆ77ΩY–∏FΩƒõ°’}≤	{¡\üóﬂﬁJ{’› ÆˇÑ£‘ÙW3ÿ*ª,‘#éÀO˜ö≈™4<Äó©¯*»àN·ˆrÑ$4«U“—≤ŸñZ1SÃ,ı®=™Ú⁄:®≥àoV^è"j÷‰ ÌL-0˙Ÿ+Zu´ùNÅq≈dì-K"Qq«3’ÄM'≤ˆû˙)û»f¸'ôŸˇ,øEu—ñ@ò#›$çMLÊfŸPvÓvUé
+ìπ£"í7sQäı¶öãrπT«ø,_¥5t¨0ùzˇKbU$ï5t÷Ìw	¥iùØ€Çi·≥ƒ]ö◊›.êt[U¶≈\ 0ö\ﬁÉU∑∑’fW’UÆH”‘®Úx∫ä>‹Ryÿ• C‚frqCSí¥YHÏZIJ/Yºõ•±ßÈ«e2z-ïÑÁCsV}∆6Xö(·l^’G√·F§(ÃêÓZvÏêRàÄçjú≥4∑F∂v¶“'-‚`∂,™‚øÑ-∂Ëßi‚’…êQÃBÿO"Ê´¶ÿ@ú3ba≠KújutìÒ	Ùﬂ¢~¡√1¥Ûy√!ô˙◊‚)Ijd:8Ã%sÛ√Ã¯F|MK è%/¿ö‹SHÍ±Ê>àéMI>Y+ßdûö≠oß©„Y¥˛Ç|–•PÎvö¥eNc1ıë&ÿlíŒG`¢≈{:∑ÊæòÓó2ﬁ◊^ev¿M‡vÍ’èù∂∞Øºs¶ç=8]/Ò“lªÅG‘°B„ŸJ, ‘`å¡Lv+ç0ªŸäSSqj)ÊAú‘yå¶ãÿø…78Û`¿K1ˇà…4‹/XÑ”È3ZÑ≈ÂT*Ä]9Q(!∂ú≥°‰Æ+&WH∑èz™µ*ŸM˙'Xb}®ÖˆU˜`üà‹-ÁgŸrP§ñ+û∞â?Æ&Ö$Ö‰äÁjî€%Y8l≤J8fHŸƒ•*&ìÌ·π˘ù“°
+Ö∏¨qãŒ=âcØ*µ◊,«¸òb•™<çïê»‚kˆ* Åπ>«±ûªn≠sâ3$}⁄œ¨:˜ÉÚæ89ÁäE≈Ä÷f/ÌÄˆöøúf◊´û◊—/_EMo‡eh”Ìó%◊fŸ≠ï˛Ãm8xr‰Kî∏´‡¥tM2G5Ú)H°Vµ∞’s M’ßÍ’ö“6CΩ|π”^/:7æ∆Æ‡d¡œıEôWì¥≥\öj%(h?éû¢Ïr/ƒ¿üPÒ≈‡ÖÖ‹≠˘ÀÏ|M’N'Ák˛í\±2Ω¯ıbŸˇö”ëø˘‡ÏÄÕ_ô∏»∆9¨!•≤ê“&¸j6nuÆ≠ûGÒÇ≥uoHΩ®C
+*«‡]Ô(Á¯Æ÷o5¬V˙Å zÜ]TÊ~z◊*XtÚÓ„¸•ﬁ¥æ„¶÷w¸–i¸5*X“Ä<å£MCÔôƒU>ÍÂâºö◊∫–√4˛¢¬8ùâévS^÷]D_t&}åÌ@j¢F=»òåœ±ÖUÎ£®HRå0'∂F—‹)_?Enúç»ƒ®|’%áÙ|≠ı•úØ_Ç˚‰•¨Œ‚hÃˆ…?yP1›•1‰x‚!7?&|—pÃ«‘ «’£‹–Äx~∂DÎ
+™à $VÒIãQ'À§U∑√‰z˙:≈ÈqL¶.PuÓcÔÅtŸ=9Ë˛‘=x◊:"Ì”„3Dı8ê`=⁄ù^ø{ÿm∑˙äÆ‹È©Ò= g>L±L‘á≈{E˝xnG˝∏†èÌ?/–áDEπº˜Ç˙Q0œ¸ny0íi¡BÛÌæ<ç˝IÁSQnäïq>JπòÃnÕåZ˚‰ ·∂€ƒ9ÉÔ¯N0Û≥Äv‹Wl#˘õ…Ú5!†∂m=¬z‡UÄı®ì3‘_/(O2/9à∏g.∞(ÿ—ä9ØBîˇœ&0?Ll·8Í©©µÍÃGØP¯HÅ∞§1k§≥∆ùS®Òñ¢cÉ‹n6v∑)ŸMÈÑÇŒcO™eZD:)kØNErŒQ‡]!äÄüYŒUQ*dòJtßÙ<‹lÊáî»πxnÒœ≈≤)åôóZ£ÈﬂB$)®ìÇÄjêÎ+@ÁÚ\Q‡•±‰ÿü{tT¿áÿÊ∏Ôb“ã* [Ë-NXU¿ﬂ5πü ’fOŸkÍÀÀ®]ykØ⁄co2√ÿçq0c°%‰ &"˝ÒÃÅÿÄû5õí[‡˘ø^G”aD‰` ÁgK{öÓr‘!\x ºŸïœÄÂØápßÓiéÏ&-X™˜)ƒJ(¶ﬁˇ f¬vÌ’OΩœôà¬ç~L∞qñ_©≥ÂŸx®fñ¬ïÏs÷¥ñ÷J…VGsBaq¥ª%«'b¶V::X∞ä“∏Åïé.è`cE°…∞]@`ûâ›Èe‰ 1”<}jC·ÙúKõ(ÈXô‘‘«
+Z¢gXﬂßﬁ˘¢HÊ{=lex¯ÓÙª˝”©µﬂvè6∞ÓTÎŒ„ΩsG!†‹n¯ˇülçT≤áã}à']¸I¢îyaïKÂMœs≤B WË(Ü«±ó h:‘ì^∑MN¢
+µ/¨lp<ô¥@›
+*W8Œ<òÙ˙…fk˝éXZKXÕˆÜ)ÇÛ™¶£Áœbï,8¯!‡¬ΩP«R6è∏¢(·ã_ã¯·5Ó6…õw≠ﬁA∑uB⁄ß'á›ﬁq´ﬂ==˘„ÂO:ﬂã"+ßüÈÅ˙dï“(8ä•˚swu"™G≥í∏2ákÆa›«ÿÂG≠l¸plõÉvMNÆ0Ó˛¶¸lM]ËƒµøıûËÀ˜òX¨éoÜae÷9a}∑ÜCê∂…˝M	}å√î,Yz‰/7NÄíy;¿˘’d‚≈e»Xáx⁄ÏhSÄ·…Ã/àÏ%Dı⁄´Ã˚“ÎuZÁr˛Ó¯∏’˚ßN+Ûq∫O®œGsddf/‹•°˜c?ˆ/n»–áqQX Ùiê÷˝,ÁvŸIê–¥åö‹p¨ñπ(‰≥¯˙\Ω†tÛÓNå,åû$W·åP„õéÅ!âÉ‰WDÖ!ŸÈ˝)ıÁ_Qfû¸Ñ¯ü¸…å‚	…Uâ&ﬁ‘˘ÙOÃ‡ïG¸è7ΩÅ%Qºf“
+|éÕ´¿—◊e~…‘˛oÅ'˜µH'∏ŒîÊ
+?_ﬁ+%¯e`!}iG£…€õ£ÕI v3l∫Ö@≥π¬s\Ö*Ö)#˛B}I®∏ZeT˙àd8Ô¥ﬂıh	ÅNø’=“v∏¯Á^ÇËhﬂ"¿,'¸4ºñˆx¿l0N[P˜,•´BwF’ˆvHΩtCˇc0]Um«Å∑Ö)fÉv⁄at5$=öO∏:TŸ@6Â™ÈF]
+[˘ZîdPLµÆî√ÿı∆Ñ÷LQñÇ±ﬂ'›PCÁÆ‡q}{◊nº.xÜ5^97™a“C
+˛"òåÙÈ‚I<xY·9@'/úø\ì†0i{≤î4ﬂÃk.π“Èü—≈øºânÅ≤‹"^ö*S¸pR/'ÕIcìL`œaâ∑¶X1eº—≤áœœ]¥2ˇø&í”!úöß3bÔ®‘”®¢ódÆ®éAÎ2Øl◊÷zﬁ˙∆@ŒS?~€?>“c´≥‰Hv.?É”Ã}ó§ñÎÜ&FúgJÇ÷Ù2¢∫æ.Öù™„ÈpãÆgÇ˝5“1”‡Ú⁄-æœ'°1‚Œ%cB•,\Ÿ/Z'z´∑˘±€Õè†°¶„ÿø|π&¢x√i„ﬂ…–Éè–ï?ﬂúŒ&õË1¬	$…ˇ⁄nl7∂ûª$ÛÙ˚∆f~\#†„√~5ø	˝dÏ˚Ê§üõ∂Yxëe”¯!Êwû’ü9W∏≈Â∑•‚Úú3ﬁ·i'¬ $©»Ùdhwz[SêæΩÕ—íU±P‹‚`6∑=V¡4åº!≈Â’îfs◊Ù§^∫ôºÊêœê¯Û~0Ò£´yM~éËgÄ!x5ÈxB@—µá∂ö¿&aùÇõÊ‡W†A´ÍÛîs‚@ºó≤≠j°ÀﬂôÉ\JH{ô˙_¬‹[,~R»ﬁÿsàl°q'~©¡¿bËM™@]zu$¯Mz–Å∞“Ñ/Ä‰
++ä⁄¥˙≠◊hvÈ¸„ÏË¥ßyÂv—Éã?G%ªΩ?oÄÎWY…Ó¿]ôA4	±´K’≤KﬂµÛiF1ç!‡\ù)®¸∆§V„ÅQ›œ‡¥HÍ¨oùEæÉs∫=•'„∆Ø˛MRõx!†bDÌÆ;rÓ}ÙãπbÔ•ÜõÕ'‰"éÆˇ	ä∫åíŸ[ôô65µ2 +À]í«ö√ÑóÍÀÉ`Càöê$:˘\Ö¸TJ'ﬂäÛr_l√Íˆ2*ûp}ô∏·‹Å=›¿ô<,ãvÃ,ä,‰Jªu.”}©}{¡ΩZﬁ8™™fUŸrU∆ıòÏÃ|æòÙOaio[|€T	˛2Ó_⁄oáC˚·ˇ\5-0öR2kA!- ÔrxaÅT¡>Ê)€ÔQÖÛ»X(§3á{|B∫m2•ﬁ€'É76=.É‚æ7A<H’˚TÇî C‹{)¯„#4x∞®¥ô1 en·J5ïçñä≈ÀœæŒ˝´[|y
+©q%±£>∆´ËêÊ¶Ñ∏]Ñ£,â†¬ë ç„|˜Sf´wµˇ˛/Â~§K™-ΩéR‘[∏Vπëj=a €4∫éΩY^∆j§jÒ¸£‡}Ü¨ZŒæ5∆í·G)fƒ\RÑôC£ÂÖ∂¥§˙œAÃ∏fAy∏¨[ú˝>:WÈH4: 7y¢÷ñÇúx‘¯ÉÆTÊoÜ2ípo0XÙNî*Ü{’}meTä∏à≥H—;gq≥Ë'vÚ]A}\æsep≥ú˜U÷I[e‹ ¥ïØ˜
+wØÑ¬\®kQ Zå™†(UuQ¥Óã… ›™ç†FËASÊ
+ÁßYÂ2=2º˙å˜éÒüú‰Dı éw˚bºcªu™Ã%„·
+é˛∏Òéˆ—ï∏ò•c2LﬂDoëÂ‡πó:¢0^bJ ∫ÿåô«ïÃ0"'’±î/G©LXRtyI∑v˙*íÆêïìWÇ•8âT´wkéHŸB!#®Ñ£R€rmnv•`®Ú_ZØ.éFªXuY{®˜gî,¢x4/Ô˜õﬂ7Û	ó¬#É^cÈ¿¸Y£hgíTF÷3MQá3ØbIch›5í4äöó2¯Ù,VëPÿØv…Dù1¶Ôãú=¶}K™v—fh5bô L‰tm≥É	6éÄÌ®y4dÇFFàõÓhx√-ﬂSÓÁåq!h^ùåó~˚ÒYÍ˘ÕÀµiT_YQj\–h≈‡¸`p‚ãÇŸX0ò?Õ\¡‚‰”(ì`
+¬‘}\®’h@üûπöR∑≤ˇàrI]:°Ng»âQú¨ΩJó“Væ—q€òc}∑≠SÌ≥Ë9¶⁄SQ4»r4“$)#äªÛXh¡NöM°Oä6^-∆∏äQ©‡e–â¡& B÷ßØ/ÿq∏√®<ZÃ≠|„cÃ´[#⁄∂‘ç˘Ö-h˚ñí¶∆!
+„÷ìF·:)îÖsï†Õ-37-›
+JvÆœN¡úŸ˛kü‡[85\Ò‰¿Gıâü∫C™	”>¨2‹›=cßF£ÂEæÄád«£´ŸêZ∂^í[“h4Úá"[pªÜt™DOÔÈ,˝‚r#‡ésÏGÁÃ“^„Ω9·C&>Få(Vçª†∫êÀ	
+ø◊Óa'ùDh)§Å›©π0π¸$°±Ÿ˜VN^Aj`«/æoÊ˚–ËU∂≠g∏}ÖºhÆ∫¿¶∂Í
+n|lT]≠x_eÍ∑–C’pÇ	Õ˚?údÂìÔM~∏íπ∑j]v—qÒúóéäÎ⁄ôtÅ1F K˙„ù¸™b<z•ÀIø`Cöï
+'¶Vei≠	ØgLYñÕæ∏Ü)t©7≠Ï≤J¥ÒD1îCJ*≠÷wa»≥¶`HG∂_0ì
+&5°„≥π®Y%ºA35⁄\˚‹[Ø'¬…ÏMá—'ë€$∞q«¡¯öèﬁ‡ÜÃ4¯Öö‚Àƒıﬂvé;‰ºOSm’±F˝±?ÒDú—}ÑÌJ°EÕ*°Er…L[ò—QÁ∞OŒZ'ù£}rﬁ9Í¥j¡≈≥ÃåÂ¬πk6ÎçÌ©W:IÒûö“ßX√Vßs
+tÂíj®%>n∑\.≠≠¬9Û@pŒU!FR¥å ∞ŸUò¯ZSÖ*û…aq,< S‰;r‰Å<ò§£¯Nö(mˆU5◊Ïyéõµ@•x9áÅî„7Å!Yà^Æä^ÍUSÉ∞Ÿ‘mì∫„±6ŒÃ¡&R»Ï’P+Ó#—‘Éﬂ}∂CHâ¶≥(û{aº0∏à—5ºÅüÇÒ∂Û¯∞∏…2√H' º˘> É†ódL‰ãÜ¬ƒ‘ePÿéË"¿√¶~ß≠≤Ûõ"üJﬂ”ÏRêq∏£lÌÛ-¶’nwN˙Á “é:˘≤≠C Sxr‹J÷J¸®?ókû
+œÌ√Ê4÷A‹KAèZABÌå˘[tÒcLú“°‰îé´ã∑Ô5
+ûﬁf˜…:«Œ[¢mÜ‘
+;¨!9à˛ÌMGÜˆC?@˚>Œ"üÉzÒoÿÊA(=O∞†ì–löå]zW·¸ız˚À!Ω≠ôvüºœ⁄¬m[ùÌÉÁÙœÁÌÔ·|Ω˛ã¶á;]◊ñ	ú√)Ü∑ÿgò∑$≠ÿüz3Ë∆®1·‘†˝|ûÎlwû6Èü≠Ê”›{ò±AL@(⁄'¨Õí√´¯∆>]ØÈ	çﬂÚAó”ØË/ E Kå~¶È;Ï|˝}‹Ôæ√‘˝Ù∆3Ñe5FΩˆ‚	Ï63î®p>ô8ëWìÄñﬂvù∏÷·≥√=«â„mÒ∂›ŒaÁ)õ∏Œ˜Õñ~‚îﬂˇ¬¸∫ÊJÓ∂
+ ‘ß;7∫t+òd1%∑Ñˆà5Á—·l≤%¢ôÑn‚ØGmú$∏1ùZ√ç„c∂ù‹~`±tX∂vVﬂQ®iíjñÛõO'U ¬œÈâ6w:#F£´ÑWåíc⁄=Üº¡±â˛7íLüì°•F<+xáß“œõ©•9Ô{A'.¸ÍﬂÈÎ«/‰4W´Ùë¿RßüK±ÙòC\pÉ “≥∏Xîo"tØ¶V˜<à	∆«É' Ì>ô9ˇ∂îu·ñÇ'}£L	‘Îµ◊\#4s˜ÂÌ≠§@S&‹'‡0´∑{w∑ÌgÖ3Ùyπ–):BeúÿÙà2g5oQö$àÈ•u5ö-çïÇ.áàÌ}Ú∫’˛ÒMÔÙ›…iüùˆH˚›yˇÙ∏˚ØNŸêBª’b‡ÕÊôî»ô÷Q„¸j∫Ï9£=é0çÒuv–ÎG¶t#›ÅCÒÆŒ=v ›∑«¡,Q.áÜÌÈnA#ù;≥5Ê£÷~FÉ>(4¿SRÕTz?Ue˙Tï…ı¿Ùá~Fç®˚ﬁ$wˇ”√ÌŒkó˚ª†∏É˙ôª{ÓÓr˜yªı1Ï¨ÚÌù√√Ôwùnß€"9«0πá≠Ì≠ß[-ó⁄^|˙¿Îà!◊Cg{{'¿§ãÄlñW«∞‹Î¨îïÙ®¨Éòñu•º_HÌoïºEe öb.â
+≥“4êﬂ$LU©Ï›Ú?:hW˘dP)œ~îÛ'õK˝Ó´µº#UibÃŸW¨V5†k∫ûc˙Ôí⁄@:ﬂµÄ	kFø:‘{ØFê#®°£&g¿ñ,©ãæ€ê¯àdGÎÏUêÏJﬁÕGÌ©b\s…QZ†!Ó∫˛÷ÔôÇÌ‰ßΩ<>Ãb$ÏQ¢zsw.7K„GLﬂGõH«.ñNGU_¥œ™À…rñ*π./íÎÿ• Áæ@QvR¬*£ˇπ˘…ı˝Jèîπ»¢YÔuä[ü–4:Ωﬁ§W∞ïÅ¶£≤ÔO∫√—V8]1¸E˝ã≠¡›ïÖO~lëñÄP’·†08‰i…ò¨Æ/g∏∞Íø≥OéZˇ<}◊'Á˝ﬁªvˇ]ØSIﬂﬂ≠®ÔSo-‡Y´›=ycêz:o·ÚGÜ…Ö@A´xn¿ìCàù%ãüƒñtŒ=HÃÉd^z]ÚÀRﬁ
+ªÍW÷ËòKïèπ∂~3ô*È‘9ûOY^5£!L•∆)(ãªGÜujTÓB˘•®:«_ÏQ{ìâK‚,9¸´ G)]GW	yçSh≥Xiƒ¯ÛTä3çtì˚XS∂ïSÇgÎ∑åb∑V¿∞"o0ˇôAº⁄#;Tgá>ñÉ–öctÔÉ!ﬁ£qùG"∞ê6ÙµúﬂÙAFÜ∞iÊÕ˝ÁÓAˇÌ∑µÛp°Âwˆ‡w‹ÿø#«†‹Éñ~/[˚Œ=mÌ?cÄKm£UÜ^<¨ Œ∂∞8£o≈ÑY˙fè“Ã$Õû+˜v>w
+±g&!∂µ˝(y˛«Ï‰úÚi… AÏ˚”Øèˆ•w{§˛ ‘ˇs:{˜Bˇ{M§ˇ◊ëïøÓô.√´‡+î˚Ïµ…æ2Ÿ‚ƒ›≈7õˇìtÜ##F„≤ä™”◊j•∂®ÅMÊıßÍ:,Ÿ≤j+aËôrâHr%,⁄(Ce≥˝º©Bn´U´3˝oüÚïë2Pr]∞íÕÙ¨ZØ÷≥r≤Pm⁄õb˘‘ƒPh©◊}Û6ÕÈwzÁ›ü:‰¨◊˘©€˘ôt⁄?Z≥G8˛Ök	]ä#	÷3/§ñXD,Ñf2åkñ:)°ΩçÚπ)⁄ñÕo∑ˆ™;ô`ﬁ÷Gü·?g±ˇ1Øµ’µ›ê∂yB¸ñ"¯P∂°A˜,F8â‚Ï–Ë∫yDÆJàV¶BF4•Ö0NI˙±?Û
+<ç—«L≤ÿ˜¬˙<ò¯ﬂT™˚t|
+‘s«‡NèºnºÈêM“= ÌVÔ¿°ˆS)À™∞s‰ëhvÛπVÔ©˝ã`œp§EïëÅ3pzRﬁ›Q¢L„·@˚˝≠qpÅ—^¨éF)æTÍ∞Bÿ¡&É√lr4BäéÃã
+9•*Ò¨QŒnkÓ•ì‡∆ÅÀù¶,ïíVçœ¿pvXA&’»l[%ı!©¯± ûÖb·yTb5gÏì˛qØ¢Æﬁ|˛‹´§J≈(∏˛LP“n≥ßV˜&s‘i®*E#§(Íœa:˙Œ3Ä3Ö+∞ü‹ ∞F–E
+tÊTœ£ò®ÕLZÇWµ≠`PÀ,ht˛eJ[{ı∂ıØÓ19z˜˜„÷â6qF© ¶ôAEŒ'»@«^V?P-È¥Ê‹'˛~ã£z”Âù‹–ÍöU&”≈’& Çµ.`«xã4J‹Ïˇ.’†◊5Œ≠ç9ˆ∏Ø˙øØ¶A√bÑ~u(:Õã≈¨k„õµÒû˚{≠CÿÂÎªœ~U)Ω\q` •âJÁ`ö:lÜ”é˙«ëà4Éˇ=¶ï√uôΩ¯è…Æ£‰thåHÂì‰˜öh
+êÌ÷	Õ±wæ¥sEQ—pÌ’œ8,‘ª'p\8∑Ùnb√OÌ±?¯µƒÉ∞0Â%œC§Û<¨¶Ó9’\è$t˛œÛ~Áò¥OèœNO4i•1[–DE¶©°Œ9-˘Î£ã°^È§Vö	fπCÅ.`LÈH-;˜ï3>¨ãl
+;7à[…4l°€≠£ÈuZ›ì7G;)1Æwøo<›#?{≠j∫QåÇö;"πHGTT}ÈÔ;MyGŒvÖlÏ™ mB9@9nÕ◊ä’•ÅâóQ<a°xñ≈ÛÚ}Ä\∆’BÌ°w·áVIiw»Ê5•ˇÖˆ"∏«ºÿ§èqf7áƒcúß•h^pÏûNA9–¸ŒB@◊ÆQb”≠ÌmOeÿL{…Çàµ∑P¬Ã4s¡uîßN†p|ã"?©Îº)˘Gä–ó^BªªE#ç$–õxÿ›_˝m#|œ·ÈikÑu˙-¨&±‰ãKî$Où	ÁË©$ÊèmÎJ~ÂﬁraIj©5ab|7àf7#€ÕÌß‰¯üı˛è ˛ﬂúì~àq~ì‡Æ÷ -<∆dﬂ'Û¯jÄerì'då∞Ä.Ó◊ÈZlﬂoQã›PQ“!òÁ∞õf)¥Vcg@N©	>‚ãƒ0Ω¥R¸Ù txa0ó¿3$µ˝≈&[åWÚ“µO[Ì∑§s–Ìì≥ﬁÈaˆ9%¸RÀwÜ¡úCÄ}ç L€ãÇ0¯ÿπ8èv©\”-Œ’t√rn©Á¨l∑¡©N≈z‚Œ«∂ö ëR_Cä"î∂4ÿr*0"◊
+V‹CT$]≠ü»m(sÁÃ‰t5—…˜rô€9j§i“Ö!)¶˘ä9VÃ¨±‹î¸ïïpãx^B7*kV8¸d≤_¥©Ùìb?–ºé˙¢>ìº¨Ö±Çú!Ø˘L◊VÔÈô\†˘È%;©µΩÈ4Çmé&4]e∏a“ÀòÇ%kR<+Ê*·hÀÎw∞?$X≠{®vP¢(Tg'——ÉPî≥î¯HΩO˘˜„.F9∫0¢kﬂhêV≠≈Áûq&N®πz°Ü«>Ó‘ÈErìRzëv9_ÆÇZ¥“áæ2àéæäÖ¡é,ÉM∆qaŒ∆8ÏZ0Œ}e¬Ú¬–é,+C€<.ç„“t&^í÷pÇƒum|º©º:¥/ÀÍ–6_ÏÍ<ú}üõ_–ÇuÔC˛JjTYE`\:˚ãÌ˛ßÒémÃ∆õ}Å+Íjd8-0ìsG'N—®MñÎx}Ü£Ã·S:õ;z˛ú%”d∂æÚ*Èè5gU∏Î⁄ ∞%J cÖ∂orVcì÷Ö#ﬂ‰vxÂÇ†˘èÍ∫n˘Z¯ê'{dìî'—@˚ø]X(¡ÿ¸8éb]V…KYªPÒ]©2Ö≤œF£AﬂÃO‘‡$Ô3mˇó}-¸Z÷ã‹^w¬¿NTK†ªc@+·®÷Fw«˜xÈ∫ÁKÎâd~	4;‘u@w0©∫-UÈ`∆YDûtî7™ñRY@Î~¥Ÿ§ª¸0ã’2≥Cç@gdÂXø√\ ; 
+ün|<Ë’wõR4´ªî*VÚ’ÅÏ∆
+¨¡ÆàçRn!¥-€À≈AùåÓˆÍ^Á∞”ÎtÃû=¨VÊ˚√'¶*~Ù˘o_£%ta8z˝[ﬂ:’Mx¥òö,¶˜f+-”˚R÷RV›ƒb.Õ◊çÆl•ˇ™ö@KÑŸÜEF≠eÍL¢ÂBU+Ñ"≠®JM˛◊CK{bFJÿçﬁ◊À7˙O9Ã‚úÙ∫mnÔYôaö/ÿI-”j3W@óô^ÛπøóoÙ»@´»´∞¥<zhOjÒ∏0éÉ5e|≤IñuÂ¡n¨ªâhÙ∏Héã‘Û<Bé¢ÕqZnù§çK%µ{\-«’:0˝éf»O˛Ù 'µ7˘éÙX•˙`J~<ﬁp_æ)ö≈1ÆûhÙ∏téK˜⁄É)X^
+b7V)(=.Nï≈i¶ÛT	ı2Ò˛¨+≈€=.ñ„b˝x≈W£Ä#ÍWâyΩ?ƒX…¸"Òéÿ˝∆e µ,,î®óÚá≠óÏ,“D1G3∫ØÛ»Ï~èBè~:âµ~éé¨ùS'Á=°·•]úWÏ‚∫8Ò8Ja⁄ÀI≈^∫–KÕm”RW]sW/6Y<hj?ã¢I‚˘ÀS;Ô»Å⁄s-©˝ë⁄ﬂﬂoËE4ôDCvÈqÔê{Æ'#πÁZ~Ò‰~ôE§N∫‰:ÄQzqåÔM&7$∫ûV¢µ˙…⁄+¯:;çGﬁ4¯S2"—ÂOlm/&gXr§r¯ú¬:·≈¥+≥uÇ7z0™ûÑ≥˛¿ïæÛô?@Ek∆ìÜ§Ö∆Ï8•T‡›‡Ω∆ïí⁄}ì…Ò_ÿ¥8:•ÿ5™m>˝ÿJ˝¡xJ—zh]é9Ó¶’˙iüøÜΩÇˇ$Q|√˝HæØ÷QØ€F€ ª”:¨'¨©¡˜’:z”:Ó¸ÁqÎºﬂÅ˝ıû“èΩ]∏µ7« ˇ~
+‚˘º≥Ñ∂Qeﬁ:Ì∑'›vÎË?Oœ:ΩVˇ¥'œ„)ÃÉ7è‡Y˝”ÂüıS∑◊O‚ÅkØDw©ûSØÚS*äÛ
+Hcá,I∞BT¿gè\Ã1Æâ∫ëyΩcI&*Tt˘ÏÅÅ^r3Kx`¡ıK eˇä¸Ö0÷Àﬂ…ˆh¯∫`ílÃ£Û9V”¨màÄ2
+\π.w!¨_rbŸ,S!Ò,Ùi"<™S¡î¢•â–C¯“á…™#_±†ƒ!LƒO05/…Ããˇ0åºy≠0I∏C%tñîc¡e
+ÄHOjº3:C¢„§YaJXòãá≤'fN∆D}R2T∂‚Òu¿¥›Èe§çﬁº‰∫O
+´JÃBæ\áÄFP)sÅ∫·ÄÛC⁄V0à∫yú±ä‹§wJl§æy»h_¨º∫ŸÁ•¥c¡\˙ÊúørwÔ‘7yÚ˘+Ω-w*Sﬂ¯´lïKoÃŸÍ4+"8≤ïëø’¨W‡≥‚_®õ'ôôﬁ!iñ™õÓ˛¶BMb§= ¶õv@”π(ƒ∆4çÿüÖ∞g‘6ﬂˇØ˛{´˛Øf˝˘/õ#‡∫ıç|Ω=ÂÊ†Ö©9esìº£<EFat·ÖÚ¡ö™Áâé◊ˇ§bZ¬òÛ∑%‡òaÕ√Õƒ´˙¨ú õç4A)'=_'”Ä˙Æ1ÔCÇ{π÷Ù»…çFCÍZ_?⁄Â•ë¶ÂùÊ‘Ë≈ñE¬›âëáåL˚#0É∞T¡≤à%õ (ºWvêdKákÇ¿Ø≈∏jÒ=¨n56<âëËR5¢
+ãŸèaõ¶‡	Ê≈«=àïÃÌ≤ã≈å„e”]ï˚,»7ÑÉ≠¡>≠õc\]∫ï”ÜÍÁÀØqËN™ {oQ	 ìˆø⁄`¯”ﬁõ÷	≠`›:8HC„ï—©∞5>Fø?Fø˛Ëw º‘Ü¢$€J\≤t(ºÇÿˇ$±}Ô¢åX≠SRiÆ∫Óv([áœÏÍÏ«2>Wyë≤u°ˇ0Í⁄∫P…Te9‰riÅ˚]"p
+ãÓÊL’‚]e,[DemØ42f°HGß‹-±™Ü≤îÜ®µ±ßæo?ΩOFö—“!Â‡2›mn5À›óãg(ˆ*fbÔQÂ“Gs˜j6ß{!á©˝0)ˆ5A;ˆ©ÕøN≈≥.GiY9∑VÉâ¨]%ïG]ßbLA+Paˇk+ˇ:Å§äZDTﬂãA'W†e(0*(I[õ€Ñ ⁄#¡æ»!“b–£ßR'ßÊh#π>5-Ë9pÑÍ«/◊¯∞„L4àC$π∏°yÃOf≤<!QL_pƒ“uÃ]x	Ì26øÚ„]ÖïoÔ\’ÅkÅÒx˚2¨o5·¸#Øâõ◊Oö›˝‹rn>mVÄ¥tGÊ6®Õ®˝cÆ∑Ô4ã|√¥ÈÌmÑÎtDÂûÅ@.◊˘∏(œq©ñπ#⁄™]õN∆1ºéíﬂ˘ò)é-u_|G)Ÿò°(}G˛~ÂÖ¡e¿l∂ñ⁄óŒ∞ÒEy?√õ◊oƒÈ1›ÈöQﬁ÷ÙÓv1„å˜éÙò$ñ1SO∞∑ “G≠FöM}ÁÏúp7¶£QcÁ†∫â”ˆå iÖd{”ùb’YŸ»ïDiæq$Ãì«wÉz‹0›lÈW),->Ø¸˝s¢È≈u™ÖSß¥/\b·ë…wﬂ¶∞;˝§ˆ˙©˙°K∂DHß·äa)ˇŸg}«jL
+qßI_F0ù¿y|e†Ü;µMü]H~mÑ˛tƒ j]π±ò≥,Àü)ıÍºJ¢H‚:âî™ƒ%-N%Lƒ‰&∫ä9Õ6ÃÉ‘ãUv÷ÎN?’\8ÜaKÃ7;!Qá5xEöî‡-˝è®≥pQöﬁ;\ıÌeiºIFõÇ)6LT‚∞∂/ÃãT^¯mV‘#;bÏ4∆-c·Bf•[]OqôOò≈À©xQÆSÇMˆäã™´˙’≠Ωˇ≈"yŸuG|ÿGVÙL]NºôÏÃ€pùµç¬‚_ºä8…Ä⁄jÃ(¨T—QcØ¥÷eÃ_6z,±≈Ìq&+T!s®ö≈4RsMWq)ÖP¡¬PD≤_óL	sûπí+^wÓÏìÅ«w’¿@Ë±*/Ö“X¯#[;<∏⁄È¡*€MÅ:y‰h+qF>úßIÌ€[ªø€–÷ùÕ∆h.Oú“(·ÛªÜM«"ö
+(Ÿ°àñ+Òá¡ï}?v‹ùÿ´k…F∫]9,°πFªÂóY'V:0.&J4‹;ùDæ8TH˚}≈ÕŸ&/5i˜-êê_˝õó∑b v∆™∫k.¥oäSQ’˝“æ{a—˛/é§S¸bJæyôù2›vÆä;´˚Ëﬁ7¸˚I: ∑ç/™s¿]Rÿ—Ü&¶ΩÿÃÒù]ˆtóF˘˝0´Hã†Õ®M”Q'Ã{Í”ùvJ"≥≠„LÁ´†ß∆tˆ≈^™€fe∞Òóu◊ﬁaVÿÁwõä~%ãø}ã6UDœ.—oØÙ•éºvÍIÇ9ÑÔWE¬KZ˙ä ëÀt;kEx›Jc—ÈCi)¥ä:^ézmÍ‹RA
+ä†Œ©kØneCœ]Öïü#ÙxïM#˛,∫≥Uys◊¶Ó´W˜tË@üM≈_| ≈÷Øül∂÷+ÕÇäΩiÌV =¨æ$'Y8æÜN˝,U]ó(o¬◊q6ßKT≤2e"ﬁ't2sÅ∆n‹Ê™ƒ~âì√•˘‰‰Ç©ÔcrVÕìÆá/ãRtg<º–V5t|∑Q”tZµ§∂ú¢ÀÅM¡[ÙH©◊€ŸÅ'ÅBü˚iL]øo˛¢zin0uäß√ ®Õm˘ÜûŸ¯qi
+{ç™°Ò4U—:´Ôü“`Ç›b–b∂ÍÖ„]≠¥wÆÆ%ΩEÇÆ™Ã"∆¯¿ü√YXNÉÍvµ#ÆX¸)|∫C˜ï˛Ñc4ı⁄‘ãùCÎ#fŸ ì°W–.ß‘U_µ˚ÚL$¡âMŸRçŸ,“>œL®0‚V>1äl¶/löJ9o+ü#ë¥Ei÷ú\>|õ˚˝é¸x¸œ+_Œ‰Q.Ã¨à'+ß/ã&N§πeSyë‚¨’IˆçÄ£Ñ!bÿ|˝.õi£>,B
+à±∫Ÿó&¯¡ÑgÃ}aÃù¶9c 
+∞⁄ y<ó…	m…9“«|â˘À˘mÁ}•»µ«@3√Ó¸C[…ö]≠$	FS¢°e˝qêËÛ‰y“¢â‹3dçnƒp◊íH$ÜûÀaã†ç±\XîœX¢©ëÉVÜg¢ÏoaTeoãcõ(ª[·DŸ›äqN‘Ûyüh' 'ﬁÊ	í˘D¸Æ–‘˝§*ÛCO˛ã◊_π÷y_∞ïô¢4+f¯Ä≠2nöbÅMõﬁÚáı
+âs“s©6‡ÊÄOsÖw¡ÆKËœ˙.ÓeW/±"˜ŒÒdR∞≠ÆÅb
+L‰ÚcZëvËÉÚúöUìk6>ö9È“êÓÎÿõezrø’§∆„b\¯Ãˇ-Iî,™ã≈#©äõ'P-àŸ™≈63ao•ÏédeC…)6˝–¶ÅóΩRv”¥[åEïpâäÃ‡Ã`3»ª§Øé£ÈHíiU"‰l6ˆˇ˛/Û<;òÍmÎ•üÉ?˚π(u7ã-‚ÒdÙx2z<=ûåﬁ…»zˇŸ_M÷Ø{ûÔ¢˝L&À?æ™˘S’ı3y÷ˇêEí´˚-πL¨öüaâ∞¡„ÚTZÁbs•ı˘:ÀÕ=∏™VtŒÅãæ¢≤sn±*üsXØØÆ¸‹É[µÂã–ë?Y∫∑Ñn≈Ë∏Ì+*G˜0©BQ:«Â˙™ “=∏E[†8˘≥óß+€I*ŸUÍfë¢]eõ⁄beªJ˝,^∏Àljy`Ùø@π:˝ˇi
+÷=“ˇ◊Cˇã∞”1¿ü¶Ñù¬ë±xªRgKî±˚¢HØB9;ª«◊X–Ó¡≠YÂ≤v:YÒß(l∑ZáÁÍúù+ttÆ–…yﬂŒœÎ‹¸<éÕƒΩkºÇ3˜A™Ñ◊¢ÒcvvmE<uºõ‡Ùè¿ WGÉiÎÁ	XÓã\πèG_ã≤‚öyaQfXöcêﬂ√–ó'∑¶
+j	Ç_:ß˘6U›»P´Øó¢ÁpÑ∫“àáë≈\ˇ%O:è˝ﬂe7ªysØ)ÓüFÛ∫áΩ˚CU*ú•H9·pÏX∆=\˘V?êXB„€jQ√î}¡¸HÂ8âo:éQÖi,ƒX&Áƒø60√_»)πíêñ¡}
+;À‚Ñ^∑˙Ì∑‰¨◊=ÈìÔHÁgßΩ>¡ZGÍ2Bg∞ÈÃ[aáaBe&CÿE|ä√¸◊"3‡>√4øèC{RÅ°ÌUbìπlô°B°ã\!P`∆·kπŒƒPÍv)ùıIâ$Uº˚ëı«¯èƒΩJW~ïË∑;Ùìfp®#π(A+À≠§¢∫¢0S(«b€ÒÓYc–f°w≥ˆäéyı”,äÁ§{@(+R;-Mª.O¢ôY,–aÖ’„(aeX8¯`ŸT?!◊ÏKÉ+3N~Ç5|6Äq0◊cüV¥@âL)\=™Ïg'oí∆ãÕŸ‚*wee∂,ûñ™˚DÁ?ßô¶;„6•⁄ª√ì äo>∑h	-7åíÂ ≥0qÛ:ﬁ8ïã™o)ÚPûbƒ$‚ÉÁ+FÑ£}˙w;+Ó£OKúWT√a<GàxÊM˝püñéâ£∞|ÜR	*õ·ë◊ı˜;¥FEÜ"'bCUqˆ⁄¢/R!’Úf¿ø(‚’2eºcN*”ï$auHìBHgäd2OÄ±wTSiô0ùº|ÀÖWﬁKÃÔØœJ(õ—ËhM%<Ú‚Öè©5á˛‹b#´Vdá8îŸ1Ÿ…p˘ÚC÷⁄IÕØö_s’vÙç∏ê
+\6~}∂è $xñ›ËZßPÂÁÑ÷ÒÈ–*>m^≈G?‡*ÜEŸ†÷ücÕúfZ,Ì>ƒ8†èÆ
+íjK√14‡ê3›Éa:®û?Éµô°ìaY3]2µ±˜ƒﬁ´‘_:Àﬂzïód™˘¥ZÇq4Lz!Huƒ
+«WLHÌ∂«ﬁMıË⁄‘ø…:Ø°*jMØú—4>ä◊∏!2˘^G÷êŸÿÿH!≈mÊ—%⁄√º∂A[bs¬ßxcöâÕÔq–Øÿ∂ÎÚÚL∞< Õ1¡Åmí◊∏1˙Û«ê≠ëØÊjŸíw∫ gÚªørÊ‰oÈŒüﬁ»„ü}5=J‚”N‚Ó¨ ÔHπU|~ï˛ı˘y∂Û	ÑÂÜ6F≈` 1ê§Ügo˝O}bxF'Æ;LIªo.Ç`74hÍÕ 1«@±{ÕfŸÑ ~ÿŒYXŸ%(ﬁ∞€¥ïî”º!g«É˙ƒõ¬·8º!¢ô•Óúﬁ¥ ÆÚA∏S|~J¨¶triz3dÈ,å/ø”lJ»’öÆtoB]Ëﬁ”ò)ÆO8TôÆ5–©@≠ÃzÇ∂’·“d$IgE9ŸMOú
+±®≈Ëu¡3—mgîré—l„”£‚æ± °K¡qÔVH;.ÿfÊ™àÊZP7)∫¡∫áïYÄ€ô>Cø+¥s≠£WxÑP
+Oπ¯$ﬁºÚ√ÿôãW„c[7∫»JÚÂ:p-ƒ««7k ö±8¥	ÜÊ5>ÌÈä‚ô ®Yk*ywón∫∫ÌHC¿∆ü•∏HHÕpèn∏ß◊RÉZÏ5…lÇ®ÄïbòÅNb1AYm*R€ï¥E¨PêîÁtÏ%5§ˆçÖ≈£<zîG‚ÊÀ#ã2Ò‚m†Ω_s≤UWd1Íàé5úÚs˝àiJ/…#£>2ÍÉbT›/¨hré|ùK„¬zåF~|úåj›=‡g5—E[¢ÛLGçı'd›è„(^7º%{Ìkhæø¶√Ë∫A•[XMÅ.•!Gäöâ@ÑÛõ˙s)d&”^f7Ãm˘IÚo¡ôÜ3LrŒ ·UL}ÕıÌf≥X±ÀÍégÅ5‚t§≠Ä†xEç¢t‡õ"nÑ∫s‰]Mcr~ì¿pô¬cíÛ‚x˙(ÂÔ£¸-_ '¶a‰[a(4
+£(î´Iµ,"6H¯@J†	ß¨s¨Ñ5Óù1>#[,ÃK±ƒÉc;Xô!=3Ë±´πW2J> (øKóˆË˚Ÿô„•z√^3˚ÆD]a√l\}«fÒi<Ú£À‹ØÀ≤ƒŸÛ πK>8¥€ƒ
+®π ∆“Z/n-˚,Ìˆeyﬂ¯SL„Å∑N˜VèJçÜVZk˚Z{u+§ˇYç†”‰élíÙÀ~4˜B.o%‹‰<+âô¶ﬂçÈ“Çr-µ®QFS}öºM˘ô „Ω≠Ω¶!ÑÜêd~˙/ooAŸŒ«˚X∞¶Vú>òΩ‹‰mêøí≠fÛÓ~0’Á’G+-ÂXÕ≥“ˆ¬‡ÇÕ È3g˜
+ç„›S˜nÌï‹+ú∑êCüroC√0™<ƒô:b‘ìô¡ÜÀLòj®jù˝Ù<h\¨∫⁄´V¨â≥KqÚˆïMH__Â¬¬ °¡¬∫ ¸Q[˘ÈŸ|ÆsbæÉWù)Jy‡˜yMGØ÷^ÉR1¢KAF±7Édòô˝ä∆b1|ë5Dac6Íê` Ò√Ä°cÌ˚∏”äÁùfΩ_ƒ—u3îÜ»≥æ/i∆]a0ﬁ«(íâè@$O£ Ò-oè£(ë^3S0óˆÏ‡0ﬂÛ öÃ∞“r;åÜ˜Ü'Ú™Ü‰#Ëπ∞-b æœ&ÖN$
+X€å}:it5'[ã%¥‘IÑ1ö&È‡∂qjØ&”$ÿ C†%ç—NAí‡‘„&£üıõWä`STv·[‰¯÷¿!ªÁÉ8
+C˙∫aˇI0J˝,ˆ?˛µC /2Ê{Ë∂2¯VN @qê;6ŸH+◊åP˚o)ƒΩZ¢ËC˙*èG8Sbä⁄ﬁÙ£g“hLfÿ#Ç¡⁄´∑∏Ò(«Ñe†M~‚Å4òT(›C¥Ú›ıúuØ«£œt4ZËX¥ëËAáTöÖÒT8)ìeµ¨ûÁ^k
+Oö∂µ≠€Î%</=Ü^2NÀ–ó"7t[·ª§¥•ã•¸n∫”$ìO4)BÄ)Áﬂà$ËÃ7{—¥å·Äœ:∞#ƒ$a°Ìå˘‘	5öG`÷÷gìıÑôs®Wb¥7ÔuÊ≈–~N∑‘ê∫˛5z¢:‘9áÑg“ÌÌa&›,]¡ú‚Á|zZﬂ;•µ¬A[ç¸ç◊cÃ£1U\Àzù1¥63zƒ¥âQÅ˘3X2ıÉe˝\¯!:ø6ÍÈáêpFX±“‰ÿbù\~8ƒ*d#ﬁ•ÜﬁC˙M-K6ÙaÈ˙<…x¸Óü}Çg‘0zfü¨J÷	å.ô–ˇ.`ùË·à˛˜)§ˇmÛˇAI\BÜ˛•wŒÚ@GçîØÒáyŒ≈X`ÅˆIœÄÙy¡Ó{¬Ô#3›OËÄaÿœgü÷üò¬+AC<ÿ⁄Z“∑∆∂;ˆ∂01ÿrœﬁÊ
+[>≥∑‹fM∑∑ÌMwx”ß–‘–ÚŒÅÂaﬁ#¸Ç‰ô≠©Å/ˇ¶+d)m«.õUà∞ÄÏ3¶º◊Q›¶5ºÍﬂﬁ"™#‰KFËπmdD˘OgVBìÓ∑∑í¯Å¨€,(<	ú˝˙Û=íxsº≈ØÔ5◊ÁÅŸíŸœÔ∑Õ≠_÷Õ£”€ b∂8\dÅﬂ,êÖúèQh¬æS´J”À`0ırTøa[⁄|⁄Ã˚ƒ7Ÿl’ÛæÌ≠¶KBx6¡¸>K˘1á lqeŒ^ﬂ"”≥Ào$Ûhv™ô7b¯∆MP\L<]ÕÜﬁúÓ"∆ª¥38ıÜõzF[Ê]<ª¯”C3:m€Ov›TåäÒÜ√
+Oph£ïÁOsxà¡+Æº©è&œïÜçrä∞¿`SEc ÄÄÆí^Ê:íB?“xÁåÛ‚ecÍSë$”ãˆÿ¸⁄‚AË+¸<¬–QPhêR/˙1—∂µM±Ç6µO9œ¡»À…Óî[A¶Ñ˙ê®`‰ò]ÑZbÌe∫˘3™⁄ôÚf§Yi
+‚—8í9bf¿™b”ﬂYΩH8OÌ≤D¯"HÃ–@ﬁˇek{{k´˝BÅºˇK≥µµ≥’¸•@ó,A˙˚f≥$Åıx'ÈNñ?⁄ªEaKìíÈê¿Ó8)ØGÔbÉì.7/vRu⁄ÉË4†Ê4¸ÉíÕ|7ô±ª;’yü|∏ä√⁄∑ö°ﬂm†ﬂFÔüYdll{Ñù|Ç˛tXüÄVÃ¬Cﬁ∫ÙkkÌIõhí¯·®Öz—î∆†¢eñ°:Y	HáùKƒ…¸˜‡À¶k¬±”m·∫7„∂HoÄ’d»pcÍ∞ús≥ÀA◊î/:e®ZÆ±Á¨Â4≈q˝Yëß9K”
+üè˝ﬂXÕOúU\õÍbØJ}Ïm:1÷≈ä$s/û≥P¢ãw£Û ◊≥@:\Æ_∆®πéÂÜ*}Ø®–tÜëØª¸∆L3e3H&-ì	Gï˙pÁ"ÿ•ˆ1pd†<Æåå$î˘(pV6Çy|5Äîóƒ⁄%?vÔ™j5Ër'?Ûqm˝ºﬂ:<¨ØsÛJj/†”NÉü~@oˆÃãø;ù◊rÁxŒG‚	O»:û67ûê≠Ê˘≤s7˚Ù∂e∑{®Éqü/?˝@Ìπ§◊:€W≤(û∫÷ñ/Wñ5.‰ØïiÆe±Ñ÷ú˚J¯Y$≠±hQ~U‡Ñ©∂…6[1j|r›
+Ôu∆f„h›ˇî—«‰≈8UÎiïÏT,‹ì†^Ωà^HÄr°Ï*?+…ƒ2à∂û=	phRº¨∆ÇtÖ4jo0ù¢'◊yº‹≠§Äõ+¯îvõNZ\⁄´ªz("ÖÚ˝Û>≈ ~+·<ÓG?≠ÑÎX÷=˚XÅÈ$gÈ˝p\›L£ÉàË¨9…i$íBBaB†≥Iy ≥˙àE/†ÊpG≈ ’‘àj ó~É^™˚Á| #«òØjìsÃ[¿ˇ2ÏπÍL`QéΩ¶ÁöÇ8∆ì&ò@ÒÇ<ÿ:ÛuW/rñ·4’÷Â}ñ‡∏Ù•ŸŒ|Ucª‚q9ò“˝Ü1√?”çlM#<æo1<◊fÜÁ*!¨ûMv[á;ﬂ6ÜÆÉO'˛‹zsÔ˛Ÿ‘ï#*rßÃü‚erG_›)ŒtöPuÏP†ËÎB[™ %
+7ê™∆#Í`Ã!·]è4Uzh !ïÓ"CU0*°Á#≥*m5—¨Ù§ÍìmZd•Ó¸ÑŸUe˝1≠·“™ÚÑ™f∞J'K'â"d ¬˚•äï€e!p;ıí≤ÿÈÁ‘I¶ÁIm©’ı∏ﬂV†⁄æ∏?KUŸﬁ?-Â∂°RØ;KπhmoÓè¢¯¶*°ÎÏ\M‰≥Í÷rg’
+6Ïl”´læÆƒ∑gıﬁ¯>∏‚µ˚|À5¢√ˇ≥,÷œ>J°ØÉ—ÆÈª¥qLñÂ;8}˝≈2⁄0∫∏ﬂezÁ®ﬂ‚A4t7ì≥†@¯wé≈ßcJÕ‰%Í´ˇ  ˇˇÏ]›r€HvæœS¥ï©Ω#R∂gG%yJ#…^ÌZí#i&;ôl∆Ÿ"1	 mi¥zÇTe/ì ÕÊ&UπJnÛ<yÅÏ#‰ú˛@w£AÇ4Ì´flì@£—}ŒÈÛÛùs\>ù#√gD·˚vZ'®„÷ºÓ∫â-àÔû$ƒT;5U»}´ïıÑW›Ù⁄{Ñ›«W¬õ€ßT◊$C‘~ﬂﬁhf‘¨⁄+
+kz≥û≠~¶68ﬂ8¯”Úºr_2 ©c“8ò%Ly’Áñ4¶≥©! úã*+æeÏ¿e}Êﬂú¿\|˜≤ûΩ*äãø)ÄŸÓwvRl{M˚ƒ˚ﬁ›ìçö∑ dÇΩïìöﬁë∑s¬¿˜ÓX2S˚x^A◊‹ïE@ä„ˇ—t≥œ?◊’?({Çå≠…–u –°_=›`Ã†uëÊΩ™å⁄◊eÊ$ß˝±≥v⁄”*B'‡æåi∏o¯lK¡U∞/AõfÓ_:;Ç/CÉ“	´Ú}K^√îko o:Lÿn…8Ì(åÜûhRˆ√”Œ”riô)ﬁèç£ºaÇZìy;d£ÛÎß¯Ü]–*ìêÙ¸>&≥∑T8Å…›DéGÏXéF4Ë0¥∑à±tVÎƒº>ï±VîÍæ“Î
+ïóT\`ÆƒelNaoËTz@©÷Ñâ_˛ŒΩk*Îó⁄>;}ı=Ÿ??⁄'/ŒŒ|ˇ¸BmòÍ⁄U@äxÎ“4<≈Ö$„?Üıf∫”†w#âÌeˇqÏ›
+Ò{{+i…ñè∫¨‘m¨çPµNRÏ•ãﬁ∂m»ê.%Hk”¢YUqQ
+;UJîﬁKSò≥wÂw•DÈœ?∑%¢£ÂDá.!⁄0h>Òô F,Q¢=SŸò˝ÿ0ò9•Ÿ:Ti$Á‘gÛ∞èÁFµ&2œêv<}≤±v†ôX<m:qEqUÍpu¬pUöpUrpeJ∞=Xì˛[/È∑úÍk¥MiΩ2ô®ùßÚ⁄≤xIW€œd“’ØßN∫JõÀÃMËñ59∑%`πe]ë´àzo€˛(≈µÕãdçÅ˚⁄ÂÔ›˙ú◊Œ“2ff-[6÷<3∞ÙYWZ≈Gß,&£™â,™©2ß\3Ûõ!’hVTìôPMg?’…xj4Ài^ôM9Ã Cíì¯Ã√tsñïâJµd¿BíxÎÍd£ZØ›\RQCâDÕ$’H™D¶hÉû¡	πµ±TâAÕ%Õœ+„L‰ï	=µhºâƒù0Yç‡∞\±W’T=◊‰ÛAYï}Û§ÒÏõ˘ìke6M-rm"kÊ”#◊è6Ûe˛‰Áñ…2ﬂÏïZﬁXñ ßGÊã»4…ä”/GŒ…¸9ƒ)ád.y#N∞ì•ÃqÃ	YXHù‹è≈Ê{Ãú„Qô◊·PÆ»1√≈™Ø4 *´ÿ÷:fÀ¡ÿ ı∞±•`Ä(¸≈'(+$¯ÀE%O‘ƒqOm_|5∑å	º√‹é:Ÿ’¿Ï≈¨çà%_˝:ÈK…
+usñ|?úÛñÖ\ìñ¿yÁêhP?π`Å	$â`¶ƒÅäuÆõ –\R@£â 5¡ˇµt–% ˘/
+ÿ_ÃﬂÄ_Äˆü8\Z®?8÷¿G#¿˚∞˝ÿæíGùˆÂúÕiﬁËŸ«Æ_∏™SÈ◊√Œ”–~]òS~@wX˘ŸıµDw”Ä"˝aGÄà˜Ï#>"€H<Ú∆Ò L‚ipÊ)êuÅˆÌØ‡√(1+ˇ-⁄å¡c ‹ëhfπ#öÈ/B˚«ﬁ
+68 _w?t:Å_#w ØÎÎ◊¨aÊxL”0kjå¥aÕ <6ÿä∂„Ç´P¡vL∞\Å∂°ÅKX‡:H‡"ÿ†JÍ1¿Ã8çıÒg˚Ω=ã‰¸öºa$üáÉú„W åÁÄ/Æ›‘¡±ìCaÓeqY$lÄ/@x~`8X◊Ü{(‡Ÿ1¿S Ä+≠øÖ£ƒ˛6á¸m˜Îé˙mÛ˚Ä¯]‚◊ÃM6U€†hÎ’Ï⁄8ﬂúæ åÔåÔZÖÓ≠Ò≤M!{¡ı6ÅÍu∆ÙVÑE?<oShﬁ
+xûl[Å·≠A…≥„wgÏ7÷wÍW—Ó/µ;O¬¨@Î÷ ÃŸë∫üa~§¯‹yö.wû®‹î‹"˜”!Á_wûú‡Äøù˙vf‚Aﬁ:·nÑ∫u«‹.q;#ﬁ∂m[øuB⁄Œı^C∂/æˆ”9™aKÄ©]JaDmux˜ÉmÉ;ñvY‡ÉŒH⁄%^uwÌRí~=ÌÔÉ#vvYHﬂ9˚eïxŸ∫hŸÖae? Rvú¨uuÎadõB»6àè≠Öé≠°=~pdÏbp±Ó®ÿ0±ŒàXg<l}4Ï,aÉp∞(ÿlùäX›-Ji©p6ÎpØ⁄ákæÃÕC»V5yˇ˚ì£”Kr~tpt¸˙íúúÓøRa¨1h7°=,Ë{Nª‘'v<Îµ\ü¡Æû:8˙∆pÚàÒ:–Bí‰*òDà#ÒF˛ÂÃµ◊£pëµp≤›°¨¬ÎVaË›¿	ßû!∆ºu [„ˆ3Jpó∂oKıñK´Åw^y¿ŒU{[ŒÒJùlÈò’€)Ö8&„[X≥Çkˇg_+œu€ÃB>8Ë=Hô[&sƒ/˙Äc^ ®ÆÆú@±Ã‚€qzxfxâñ:q¡~¢„g=ü\Mí$‘xÅ√—A‡wﬂÓ›µX}d ◊ãÚ[»ßñ,æh˙r§¢ùl…Åô~∂µ!~í_<Ÿ ºÎ°$IFå∞"£ÿO|òpwí,j‡w5™s˜˜yê√2 Í,+'ªÎ|E
+t[^ªJ∫•Q0Ìì∏äÏ2NKÁÊtTI¿À©ˇ∞Ω¡y˛ıîˇ+e–€∂7I¬2¯√~yü„®ªß%¶àˇâ–“Ú]^êÏ≠»^£:™«*ì#©H…∞¡·’OlY˜]—≥À%}#zM£àFØC MÑkÑm˘UÒ‚uÌ˛πÀ"âj‹fvCy-ΩÚÀ`.S,%—≤-(˙‚˙ˆgVy√Åﬁ’•≠ıøèøXÔÉB«˛}g<Í€ÅŸà2M¢è8«	•£˝’Ü"•›µïÓ«ç–ÅnbïÀ+ªï÷ÊœC±nl*º>œ”ª^¯’;_v◊ΩÖK=ÅÔ ?ÕÅ[îáÆÎ^wuÇ0¶”I:˜\†£√„KryˆÌ˘È>Sö  “ |‘Û4dO¬ûÃWU⁄XvU©B9BEJß˘êj≠Iè(óØﬂàøÍD€`´t~cÊM-ï… tÈ]§# ëc4ÏœÓRÏΩC
+«Góh|∞5Û	∂≈¸Sj<¢9J∆≈®§jO∫#
+Î◊Wkÿ“ÕM≠…©ˆEÖCûÎ_nº¸¡U;º+B71ßπò˝<›ŸeLJC'…ÛÉÅ7√2«L.˝$†‰WªÎÏÅöâ¯£Ò$—9øí€±ÿT≠oL8È®†nhÆ‚x£>\⁄¢íºéîõZ¥÷|ü&6¢6ø3∑”L‰àsF#ü§°£ú#Ï\a	_á›IºNÊcbyì¸+ŸÕÅÒ_i.˙“ﬂÛÔËh≤àmfœ©ΩœÏÆOu£+€3}ÚFmVŸi‰Ç%?b‚çôPl§"â•ÁÅMr¡á\6z¡€\»eôFÎÔ7%¶Ä›?√n°{úr˚≈ùü.,…°qN˚~?1ùåYJURuå©£@ÍìŸÉçîb£Ì(üÍ1≥`2Ù∫≤N.©7$˚ìd¿"Jß^Äí!Uõ ‰çü∏¯Òò@É%™ëïz[Kø≤Â2g{—ÏÛ1∫Õ¶8y—å‘n_jy:8åºQóNF§À
+yÒÌ®KZ⁄Vã¯A¨“#’Üíç*ˇ¯GÚ(ßtÎ~@yß˚^†∫ü$ãàﬂLê(¯µﬂß—I‹o≠æ(sÉ¯¿#˛àxGDˇq‚Gòi¡¨ÆëUEaTÓ
+…?<º©çlÍxìÜ&c<Nzd˛=”ÑÌ`Ã™tq=ıÍÄ}·=«=Ú51BÎ;ùN◊àÖGÔ —ÏåÆi"~ﬁ·&ew®{f∫_/ªwÃt%Âö],vÿt}§;≥ªµ'í	≤·5∞Lœ40´ïÇ0ûl∞Eioº';§´˘EK-ﬁ{œOHÏq‡O|^$a‰ıiKÑˆ&ã“]Æ“∑‚Lì$O∫]«x,‹2‚ﬂÍ([ìÁP%ﬂd0"ï[∑4@W6éLe1WGÑ]¿ ~Hñ›Çªæœè^ùë˝ÉÉ≥Ù{_üùí√£À˝„WeG8“Ë˚›Ó9∆Ø(}pÑ´Å+˙V+EY4˝‹~!>Úo¸⁄’˜íÖÖ√!f€\–…Æa'˘QëògA,≠èºD†∞’(+](‘á)_-Ø‹‘QAA"Õõ≤if≠êIç”¬ª4„IdLŸ\Zy^ñZ‰ˆSûcÔ6æÒí¶±jü1ä¸ÆŒ‚∫û⁄íQs0£ïÁØ¬^ãÊ]$^2â¡z|ÕP
+4j≥ÕË‚A’'t
+Vµ8´¯e<~Ù¸ÎœgﬂZ˝û∆´ï>ßª7ô!®â\g4*+Ñ@á⁄/!
+ÃÄTù?@‚;Æ&ãdïœ&÷Ñ"…E|≈_É˝’ì¥Äìy»6dfE+Ê≥…¶”¶ÔÊ≠GZ˛Âœ˙O"iÔ\Z&butc∞ÊÿoÛ•©”£')xÖ
+äÚÜW∞ÛHRõ)Ieﬂ=d≈øYr∫˙wr2“¢ Õ.hp›ﬁè"T¨ëæp3këóÕ\/∞¥I‚·NQJñ=8ıéŸyø	ÙuæÛƒŸ:Ùn„«ïAé&H;z˙£Ωï˝oäõàöMÁ¢gHìüQΩ”-B¡@kX1Ì›Òëæ†4Óà‚®?pº{0‡ècπJèÄ◊Rkk⁄ÚãwÄY«`eLWhßﬂ![+OÄöpÇ∫≈NÙö‘WÂ\ÑÁßå"HxMp[‚«D.EGØßô£sög¥˚∂}6Ò⁄u¯„vñaö¨S∞Á¬Ê±xL]æPonî5∫b‡—;„Ãπªfÿ|JŒ∫	imnÌ¿ÈÛ˙‰Ò'Œ@:Îâ?§D,Q⁄ã1ΩÜ≠ÅÈ‘‡èÂ5?Ú6ø¿≈ë÷®pRRÛë≥ãÉ{ı4ãÖÔ„ΩªmÖ‰9G<Ow°Öeƒ].‹¢Ú
+'d~∞æÖ§«¸}]t%Fk‰<á‰…∆Váp1‚è`
+ds+0¬ﬂöÔË®lVÇØMÍ@ëò®…~-OHMw≥¨¡•ËΩ
+<#ádÇEhπp ˝ ºÚÉ°«w@«ÀKÍ/√∞Pr‚çcÚ
+v®"$´sÄ≥caï‹H¯…S6>Rì¥Âmµi{ê$„xg}}tºÒ∏”√N?XÔt:$åà¸πœ÷†<œÆƒüÁA‘¨Ív3r|Ç~Ì≈ËP¢Ó}Ä/áÏ{)›1uíz±‹çÛ2À U"ëkæ*y˛^Ña‚‰ö^P⁄nê7„∞˝ÑÉ‘éÀW¬∆tcΩˇÄáqY©≤^j3ë=R4¿dúmûUL◊ÂÍ|´x›cP·RõHgV)’—Ïâ™Ç™«ï1-Éäÿ† l˛¡˘M◊ÌÉ@"ï‹∫¶¿™ß*/;y«ã”=BìHoˇÆAÁÜê;C~Q1»@nê¥ÒwäõnΩS›ïù¬ﬁÈo,µ/ìé≈b_Ü/|P1í0JÉ«‚LA˚Â˙:Ÿ@»Ú!T!qQÔú`ˇˇEÌ-°7~¨7∆DùôÄz£„Æ†À≤◊?Kt˚·ºˆœ˚Ìø€hıñÒ∂˙∏ìÑØ¬˜4: Ω†ex˛6>:<™0Ÿ|ØÂ!S{u Ò¸%3@\ãÚ|sÂù“ûâ	∂ÃuÓê≠≤°M§5K5¬T±’,å55kaÖÄ:uÙ>]ë∑ Ñ∂≠Z<2-c>¿µ∞"–É∞Wå?ı!õÑ†B2‰RkÂÃ¶î§úÓÈ¶æ≥≤FpL˝$’7œ∆CÚcõ!2™∞RÂe∂£Lú %Z-∆Ü2Nysû´CÙô·PrÍ˜vC–mÃû]ü#'gÙ ¡Ÿ˛¡o»—Ôé^ëÛ£ó«óÁ¿¢Õ‡dòÿ£–º“N◊fnÛ≤‰∫æYS‚Bπ<πI⁄ø¬ƒ7˜:rÊq◊h{2^råπæï6ëﬁ◊Rﬁdbòçx±‹ñ∞ã∂Ùï∂vyôå˙Xô∫I*M`Äµ¬wë˜cˇ<åqèá„0“©T:˚^gWojÏÍoXó7éóƒ~ È£y;«Râ≈t)’zç¶>?µΩ™Ö/±H∫”M‡!2ÀÇàƒ„Ø{ÕîÑ◊º%dÎá?X/˛Œ|.™èD3\o?¿>H‘E7
+É¿ª
+h-tT1èXzüï∏£OˆÃÑé…Êπ§√1V[#iEà‚£m"_[ëÖ=j·ñº¸éá;≤æ•A∆Ú6kp]Iör!kƒ€O—`uàå‡ÓX†8ÉÄ≤UÎ®≥¯ŸÏêocÓê;ºI·wÖ»ìª®qOfqiA7Ï<Zà·≈“˜
+'ÈÒπ±¬k}:¢”’˘LØA©e?@ıˆΩü‡Ö|(Iıjåö—t§#÷óvçÏ˜·ç}ÏH:˜¡à/6LX)CPã…K¯˚˝Ò°@É‰¢1ÈO<ê 	Öø2≠π}çN‡˛Hªh5‚ΩFÃO*gAuÔTÆ[πcnπE¿Ô9ì+G}*Àƒ±ûêÓÿÁïüHè¥‘ &àI_Œä£ª¨ñ]ÑZ™¨[ŒÜ⁄§≠’π	‚õ«¶ ¬Fß6jìäÃ≠V2ámÈõ∆A`Jë§’ÂÊ·QÂ–VGŒı,[(Yëó˛qV
+RíÚ^W,ˆYJí
+Ÿ=-÷z¶R{AHikSÏÁW‘Í≈§™p
+(]Ù80∆È8Ÿ[aD±F#OÑ§8◊f*_∆ `©G¨‡a—¨U÷ç⁄®(FÑ=ΩõàK◊Õ€tï;Ïa7ŸMŸaOÌú∂òµWXª·Úâm^õ”∑–6±,k∂Âe}¡X¯w)Ùè‚⁄F	ª›\]”Võ›.n√ﬂ†‹«hc/Ú˙Í…7†Â."§%KıPW¯0aµ`*`·ƒò`5ÍyQè¯Œ ˇ™a«8p,ÖkD…8<-#npöÎΩ◊—t ∫„>R±∫Ω#Ö÷çMDtd‘EÏ“ÒéÍIó•ÔiÑÌ-ŸùÄé˙†W†£yCﬂÄZ£”"›ß(ÊúdcUÛ:≠‰∫mkJP˙¥ôµNŸô-≥Qº[lÜΩ,§Ô—(R¨ ‚é‡Ôà·ño7ûÄÂ∑Ú‹Vß_Zﬂ¡d8.òò¥ˆ<i0Õìx@˚I‰wP%“ZèÅmTg≠TÀ/AØö¯∞∞¿/]êk·–ˇôí[‘eA≠Pπgç–ÿ>\øˆ#ÿˆΩd™òˇ¢l ñ5÷d Ñç˝oIøÅ4ËÚµçïy∞	◊â;‰ƒèÒ
+úé?záF2«Tƒ†.√rvΩâ∞–ÜB•]V^q≈¯†¯≠D‘Î∏*∂x·aØÑ~Bîp<gÏ`›&‘≠ﬂéÒÈÃ÷^PõÈ%≤l#ßä„0ú ‰s†_ÿ›„—uhŒìú¬Ü‚Àzw…8ÄeI_≤Ë,2[vˇ˘.9ÏSÆsm®S}Åäøc%~œs–IÒ[¥ûƒäîëy¢:†„˘Õ<õ∑’…=xÂŒ¯§‘ït»˛ﬁÇ¨æZ]_}Ωä—N∏¿ª}‹‡,NœèÅò9åß^n>Ï«ë¿Û*◊†7f`5≥r‡`°‚ô“‡Ãÿ6‡?Ç”Gù÷>ØñÌ˚çàZﬂ√ß}r“><lr}Œ—≠>úÌ¿9 èƒt®ªÁ{£5\üW ≥⁄¸œ˙¸›ıâ7\©c}º/[v!Ôì´eÊ}Ê…m≠í|éëö◊»pÇeX–/Ωc?g√≤&ò-Ñ´ôyØ4∑(:?ÅÅ—¬ ‰cÈ¢nêl—«√ãÔ^/Ë	'PÉœUIûÂù°0$Ã(•¡á_ta®ëÁ‚{ÔTüπœÑ£åŸ|†ÒIàÚ<È$Œ‡È]ﬂeó_¿Í˜¥;ºFæ˘fccs´IπµüΩ,cƒuñ	J”	®œy^kù1VÈ¸Ÿ!á·O`‘Ø,Õ_ú0h#÷'j	hoÊ7Ñ-«Ü¬1 ∞˝UßëuÃß,,?¨Õ=®'˛≠°9á9≥<êbKqS©uë÷“Û∂öÿü•d/	ªÅπ&zÂŒ9ONq“‘˝Ó–R'â áJw˝~@£‰¿è∫Aä`sHJó‰9(ÁŸZÀùiY7·ﬁËØ¥í›WÄoª[ÚÂVÁ⁄Rﬂ˙2g¨`≤Ç4d»∞lÉÀˆ∏=¶¸∂ÃcGZD˛ÈÜQDª	 Æ!ÍÉÃ¨RL*f≤pÒ˙\q2R8| Œ˝b 	 ß[˘Iìõ≈ÛŸjº6
+!,hç¯,|jÍ—ïvË∫ÛÔs°ªÙÈbcl ÅæE_˛‘Œ¨udG}ª§aƒ*ˆEﬁ¡‘;∞eßì°<ƒÕΩ´\E7TÜÆÂÒ¡ædASø$ãˆ¯XÙü]d
+D¿ÎàæÛÈ˚zÓ$gY”9T∑πãIZ5·d™âDÆ†*»Ölô◊Ì^™,±ÄÍã<ôú>.PE\ˆ*Ê÷⁄J–Ã#„Ï≥U`ÛJÄªE•°gÜw™Ê‰êJ7·a∑†¨‡î5—F¬‡Â»"[Æ‰ªEÀ.‰Vâ√¢ÉÀ"øíHD É≠≤f/y'^ﬁ˙´âJßóMlØ<ˇÎ›ıdP˜¶‘È2ÕÕ≤q˝;ô3cù∞~ÆıÔf÷‚47¶ñÿ47´Êî˝~¯52´”V ⁄MÆB`=ÂŸ≈3_¯,‰°XÏl√…ﬁª±ûÌ|ë8ﬁ{7πæå1m∏™ªe“+¨§b†ÎAcXÚŸÑ7±p†m¬°†ûÁ)≠˛ÿoZÁ¨]©FgQ•|6ﬂœ“fŸº†˜:Æä‚!◊ìÓ ˆ=©Ó±!‰w®ÒÁÖßzı÷∆™®íñ¥Ÿ,ñ∞…ﬂ≠îæY≠hHœ?YõÔ™rÈﬁ<Õ∂Î$¨Ì¨Oá¬√
+õ'v1·©tcìE¯)7:
+t•B’iHéƒ{›Wv/ïœ4˙jÈ+÷@∫Œ¥ÿd≤Ÿ.≥ô~±3∂çµÛ\&{äŒ≤óÖ!eÀfFïÁo˛˘VÈˆ«ÿƒºIœ˜°ê79UòB”¥[ÂÉ§ÆJü˜M3√≈8≥ÈPf∫U,Ã¢)Á·gOãG ç%8mn…•–Ya ö’c≈ÏY"‹5Ûí&)PÃ‘˝L+^¶≥›å’îLÄÏÍ‚`êÌ)@€5a€uÅ€ZË∂3ÈÕ-A⁄ô‰ÙEmˆ¥ô`f⁄ˆû£òÎÌUÇ\‡¸cóT0èÂTQqéÆ˝hò—øŸægwo\S∆ûjvv¶§1˜ÚY˝AQÇÔû§ËªQò¥=ú>Ì1˝/O´∫Ço:¢∏+=Ko:Ï-ösz—xp^Osû∆˛»Ëuñ¬-ùEß”±iíª⁄q0KæÓ‹YNhπú™†@ë†cu"Y„∆W—5Ω∂¢~≠_’/k≠4u¸ÌŸÒ)98;}q|~RŒƒ¿*lÿ“eŒ©æıC‚ﬂ2%˛M[$ªÅƒø⁄≈µ‹/•à⁄÷“G$l◊ê„ûÛß´•£6H‰†∆XwÒûÕ`´	/ù√ ´;·`˝¥eÛÅd¯m&Mjä˘ﬁÿá≥íMÖ›÷AÑÕ¯‡:›˚lqSÊG$ïèv≥TíïÁ
+c∞∆"ñ∞Ñ	bQ`SÓ÷0*j√=y¶Xƒ»oD©◊±€ÿV+«$˜OÇ∆†~«ö®‹Î≈¶, }ÊÆe6¥xyèôCiîIL£Øk‹§µºXg 1««¢Aa†ªX¸lP˚lπÛ¢ÿÔ$pNcüsΩÄº’ÓµìØ¿eÁ'S˘Ls§@¨c' &$ÁÉv∆ iò§µb’@ÌN]£Ró˝∏UËÀ[jPÛNÚl∆»)o<€zíœaªÇ*Úªì«‰W^ùÆJ°πﬁsπ&ÊÊSmÒgQ—P»˘Æõømâ€ÀÈP°∫ı¿ÛÚﬁ\˙m˙"ÖNô∆S‰›	ÀÚDê`=é,ô√πÚú-J;â¸qé g®¬°c2h© K¨F—√íßj©ƒuÚ∑ﬁœàp‚6{î]*“;|L¥¢]Dñ+ŸÃºµW9cÊä°€dú¿ˇtÁıß:]aŒ”∂a±ÇîπDXıæ:\]#âñ´Åøª£Iﬂ◊Äzt„ôÌfπ…YNÿXi¶∞U≤ÆÿäCº”[{‚~KS]¸p!«j1_Ö7ÜÊ∫¯Ò{{+(¡⁄o˘:ÈÛ_Ò√CØ#√Îèíñê|bÖy5≈Ád√»¥»AeêLäG¢ìnì9‚6L≠.ÿÀ.≤\‘X»2îní™∆PA',+xîÎf„«Ï¡‚‹4HÜ¡ã0*,≠+´‡äéi@ªâ-s?˘Û¸SJÏ≠ÿ$|I=™ ¬`¸G£vWπ˘z,ú◊≥k<◊–Y•iò•/Î!ûjˆ¥ÀOu˛1Z’*ıûx…†3ÙnZõkƒ∫Zm≤âJ;&?é˙-sÃ??å‚iKÌÔ|ìî¸+ΩÅejÃÇÈ∆YŸ‚ªmÛvX:Âà+™ÕÕL#AîyèhZ5`Â˘]yΩÔ{U äEJÀJ_|¬‘Ò≈‘‘a[∞¡›‡ucè>Ë˙O™å˘:M°àûM7P˘‰tπ¥s’˛˜_ˇ˚ˇ˛ÁO)π∑∞ûB<w’†∏˜øL’@%^õjê[≠’¿pEs™Å≤ﬁÀ°®ÑRRr‘Ò†ËoR5¯ŒèòÀË“£oﬂá£^¯†$Ë?©íéØÿJÇXÎŸîeêONIêK;g¬?ˇóÜÏ[ﬂùœ]S(¿/SSP)ÿ¶)‰VÎAS0\—ú¶†¨˜rh
+*°î4Öu<h
+˙ﬂß“\øn>≤≈8Çâﬂ	¡0]®DQX¬ØÚ≈BM∑¨&»(ﬂ¿Ù6ú0\ír„‚O[⁄Z∆¯SæiØ2KËI€U^üË÷tp!ro‰ﬁ\^ØóùøÀj≈{Åˇ§y«.ÛJ|Zó…mÔ˚]Œ4ﬁV2ç3aáø<›òS;y≠§Y\y=9vìˇ(h®™≠¸GFBˇˆ/YÁ¯÷°áÕ/#ÔˆA˜nËﬂÏ—ug›Ω~Ù5ys|Õ*¨-b˝ÙÏíı:Jº[Ñ ÖQﬂ˘?cqZŒKkÏbVˇÚäÇ¢ŸÉ”ó&·K√“8ÇŒ¡ÛìBsÁ∑√7~|∫qﬂy£ùœYAf•qgœnß˝‘Y;¨u1ïé‹	…û,ÁáÂ'X…*ì®‡1·qÇGÿ∞:~÷Â0¸íªp÷7Ä˛õuΩÀ¥TÌ8’òdèˇÂEz©—!QlF‘©K⁄ï^)€%¶NjJ€≥°Û¬#¢ÚTÜ‚íL”YY#+¨∫–ä!Yë£ZıM“åo˛≠©”…Pæª)fÔµ°Z¨üyîú{◊> ;Û(9”œ>J&^† ±D’ÙEø»f˚E˙Hm+S‹]Ìhª{µˆVg„dvﬂy’ÊAõfN€˝Q°∏´¯ úÄ‹Ö ≈`˙•»Õ WÖ3K—7æ†Uç|GÙ˝9Ωvl|+&kj2)ÖÄlJÈÿWßßòn}õq˚N ,¶ã«SÔ§Ïd∫¯]∆ª;)√ô.Û¨∂£eg”Õ~oáº˘,ó"·˜Ó¸,¥Wˆ˝”ÿ®·˜“5ÉØé(ˆ‹OvêJn!_úIèï^mû¢U/'4s˚õy+?qÛÂ˚¨n⁄1¥bízRŸËÛÕÖ“ƒî-'≈*7•\óGoÄa√∑znù©_)>J,;∑(5Q%\>í.•µU9]&¥=ØIÊ.~NêrîF'}pÜÂ√£WGóG‰¸¯Ù•ÃK64/Eˆº)ñ˚–Ÿ…ÛHHˆúsêfMŸhz:ˇº‚≤i5{b≠Å¥)»`˚∆˘'Êÿâ⁄∫Zb?ßCXÈ<EïSô Èπ5r_œï°N~EÅ`M≠/.~ØY∆ô≤a≠ØïÆÔ€õÿfs+èUË´tçÂûù[DÂ»ƒë¿û¡¥ûiWFó*≠´&&am≈6ÿ.’⁄Õà5©MÈeÂ˘~ƒ2ék√|Sﬁ≠-“„í2OÂ_]oó)]Tho0øVÑtu@=ãí˝8ˆ˚#ñCÑEQóØzÑ.∑oG˚Üˆ¿ƒP*◊ÍKíËª]±?=å)Ò∫w}Ò-d?mÁÉÌÌm«Óë2Yk1´qO‰W“6j≈J>òt·•›BXKx \yxB·.≥R¸Ô@bÖU•ëÜ@‡‹w«Tj≈≤'µ¸≤Ñ\bNÆT˙V¡=vº†ﬂRMTcM#hºF∞Ï®ó-‰ÿ—@¥›∞Cü—ëáF∑@^‘ã›ﬂ⁄êº™˘Í„ÙP÷<Ç\î⁄Ö§7¥;I(WpI[*«€óTúXœ6î*u¯≈ó“\‡ß˚2∫√Œn1Íéó˘YÈó`»›ˇ’ˇ  ˇˇ l+L¯

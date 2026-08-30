@@ -265,11 +265,53 @@ export async function deletePlayerFromFirestore(playerId: string): Promise<void>
 
 export async function fetchPlayerById(playerId: string): Promise<Player | null> {
   try {
-    const docRef = doc(db, 'players', playerId);
+    const cleanId = (playerId || '').trim();
+    if (!cleanId) return null;
+
+    // 1. Direct doc lookup
+    const docRef = doc(db, 'players', cleanId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       return snap.data() as Player;
     }
+    
+    // 2. Query by 'id' field if doc key differed
+    const q1 = query(collection(db, 'players'), where('id', '==', cleanId));
+    const snap1 = await getDocs(q1);
+    if (!snap1.empty) {
+      return snap1.docs[0].data() as Player;
+    }
+
+    // 3. Query by 'ic' field
+    const q2 = query(collection(db, 'players'), where('ic', '==', cleanId));
+    const snap2 = await getDocs(q2);
+    if (!snap2.empty) {
+      return snap2.docs[0].data() as Player;
+    }
+
+    // 4. Try masterAthletes doc
+    try {
+      const masterDoc = await getDoc(doc(db, 'masterAthletes', cleanId));
+      if (masterDoc.exists()) {
+        return masterDoc.data() as Player;
+      }
+    } catch {}
+
+    // 5. Local storage fallback
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('app:players:')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const list: Player[] = JSON.parse(raw);
+            const found = list.find(p => p.id === cleanId || p.ic === cleanId);
+            if (found) return found;
+          }
+        }
+      }
+    } catch {}
+
     return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `players/${playerId}`);
@@ -309,16 +351,99 @@ export function subscribeToPlayersForComp(compId: string, callback: (players: Pl
   return unsubscribe;
 }
 
+// --- REFEREE DEDUPLICATION & NORMALIZATION HELPER ---
+
+export function deduplicateReferees(list: Referee[]): Referee[] {
+  if (!list || !Array.isArray(list)) return [];
+  const map = new Map<string, Referee>();
+
+  for (const ref of list) {
+    if (!ref) continue;
+    const cleanIc = (ref.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const key = cleanIc || (ref.id ? ref.id.toLowerCase() : '');
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, ref);
+    } else {
+      const existing = map.get(key)!;
+      // Score both records to retain active assignments and richer data
+      const existingHasCourt = existing.courtAssignment && existing.courtAssignment !== 'Unassigned';
+      const refHasCourt = ref.courtAssignment && ref.courtAssignment !== 'Unassigned';
+      const existingIsRic = existing.specialRole === 'RIC' || (existing.specialRole && existing.specialRole !== 'None');
+      const refIsRic = ref.specialRole === 'RIC' || (ref.specialRole && ref.specialRole !== 'None');
+
+      let scoreExisting = 0;
+      let scoreRef = 0;
+
+      if (existingHasCourt) scoreExisting += 10;
+      if (refHasCourt) scoreRef += 10;
+      if (existing.dutyRole && existing.dutyRole !== 'Unassigned') scoreExisting += 5;
+      if (ref.dutyRole && ref.dutyRole !== 'Unassigned') scoreRef += 5;
+      if (existingIsRic) scoreExisting += 5;
+      if (refIsRic) scoreRef += 5;
+      if (existing.matchNo) scoreExisting += 2;
+      if (ref.matchNo) scoreRef += 2;
+
+      const preferred = scoreRef > scoreExisting ? ref : existing;
+      const secondary = scoreRef > scoreExisting ? existing : ref;
+
+      const merged: Referee = {
+        ...secondary,
+        ...preferred,
+        photo: preferred.photo || secondary.photo,
+        phone: preferred.phone || secondary.phone,
+        bankName: preferred.bankName || secondary.bankName,
+        bankAccount: preferred.bankAccount || secondary.bankAccount,
+        clubName: preferred.clubName || secondary.clubName,
+        residentialLocation: preferred.residentialLocation || secondary.residentialLocation,
+        courtAssignment: (preferred.courtAssignment && preferred.courtAssignment !== 'Unassigned') ? preferred.courtAssignment : (secondary.courtAssignment || 'Unassigned'),
+        dutyRole: (preferred.dutyRole && preferred.dutyRole !== 'Unassigned') ? preferred.dutyRole : (secondary.dutyRole || 'Unassigned'),
+        matchNo: preferred.matchNo || secondary.matchNo || '',
+        specialRole: (preferred.specialRole && preferred.specialRole !== 'None') ? preferred.specialRole : (secondary.specialRole || 'None'),
+      };
+
+      if (merged.compId && merged.compId !== 'GLOBAL') {
+        merged.id = `${merged.compId}_${cleanIc}`;
+      } else {
+        merged.id = `ACC_${cleanIc}`;
+      }
+
+      map.set(key, merged);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 export async function fetchRefereesForComp(compId: string): Promise<Referee[]> {
   try {
     const colRef = collection(db, 'referees');
     const q = query(colRef, where('compId', '==', compId));
     const snap = await getDocs(q);
-    const referees: Referee[] = [];
+    const rawList: { docId: string; data: Referee }[] = [];
     snap.forEach((doc) => {
-      referees.push(doc.data() as Referee);
+      rawList.push({ docId: doc.id, data: doc.data() as Referee });
     });
-    return referees;
+    
+    const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
+
+    // Clean up stale duplicate document keys in background
+    const docsToDelete: string[] = [];
+    for (const item of rawList) {
+      const cleanIc = (item.data.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (!cleanIc) continue;
+      const canonicalId = `${compId}_${cleanIc}`;
+      if (item.docId !== canonicalId) {
+        docsToDelete.push(item.docId);
+      }
+    }
+    if (docsToDelete.length > 0) {
+      Promise.all(docsToDelete.map(id => deleteDoc(doc(db, 'referees', id)).catch(() => {}))).catch(() => {});
+      uniqueRefs.forEach(r => saveRefereeToFirestore(r).catch(() => {}));
+    }
+
+    return uniqueRefs;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
     return [];
@@ -327,8 +452,23 @@ export async function fetchRefereesForComp(compId: string): Promise<Referee[]> {
 
 export async function saveRefereeToFirestore(referee: Referee): Promise<void> {
   try {
-    const docRef = doc(db, 'referees', referee.id);
-    await setDoc(docRef, referee);
+    const cleanIc = (referee.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const canonicalId = (referee.compId && referee.compId !== 'GLOBAL' && cleanIc) 
+      ? `${referee.compId}_${cleanIc}` 
+      : (referee.id || (cleanIc ? `ACC_${cleanIc}` : `REF_${Date.now()}`));
+
+    const normalizedReferee: Referee = {
+      ...referee,
+      id: canonicalId,
+    };
+
+    const docRef = doc(db, 'referees', canonicalId);
+    await setDoc(docRef, normalizedReferee);
+
+    // If there was an old prefix (e.g. RIC_... or REF_...), clean it up
+    if (referee.id && referee.id !== canonicalId) {
+      deleteDoc(doc(db, 'referees', referee.id)).catch(() => {});
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `referees/${referee.id}`);
   }
@@ -348,11 +488,29 @@ export function subscribeToRefereesForComp(compId: string, callback: (referees: 
   const q = query(colRef, where('compId', '==', compId));
   
   const unsubscribe = onSnapshot(q, (snap) => {
-    const referees: Referee[] = [];
+    const rawList: { docId: string; data: Referee }[] = [];
     snap.forEach((doc) => {
-      referees.push(doc.data() as Referee);
+      rawList.push({ docId: doc.id, data: doc.data() as Referee });
     });
-    callback(referees);
+    
+    const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
+
+    // Asynchronous cleanup of duplicate documents if detected
+    const docsToDelete: string[] = [];
+    for (const item of rawList) {
+      const cleanIc = (item.data.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (!cleanIc) continue;
+      const canonicalId = `${compId}_${cleanIc}`;
+      if (item.docId !== canonicalId) {
+        docsToDelete.push(item.docId);
+      }
+    }
+    if (docsToDelete.length > 0) {
+      Promise.all(docsToDelete.map(id => deleteDoc(doc(db, 'referees', id)).catch(() => {}))).catch(() => {});
+      uniqueRefs.forEach(r => saveRefereeToFirestore(r).catch(() => {}));
+    }
+
+    callback(uniqueRefs);
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
     onError(error as Error);
@@ -367,11 +525,11 @@ export async function fetchRefereeAccounts(): Promise<Referee[]> {
   try {
     const colRef = collection(db, 'refereeAccounts');
     const snap = await getDocs(colRef);
-    const accounts: Referee[] = [];
+    const raw: Referee[] = [];
     snap.forEach((doc) => {
-      accounts.push(doc.data() as Referee);
+      raw.push(doc.data() as Referee);
     });
-    return accounts;
+    return deduplicateReferees(raw);
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
     return [];
@@ -380,9 +538,13 @@ export async function fetchRefereeAccounts(): Promise<Referee[]> {
 
 export async function saveRefereeAccount(ref: Referee): Promise<void> {
   try {
-    const docId = ref.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const cleanIc = ref.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const docId = cleanIc;
     const docRef = doc(db, 'refereeAccounts', docId);
-    await setDoc(docRef, ref);
+    await setDoc(docRef, {
+      ...ref,
+      id: `ACC_${cleanIc}`
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `refereeAccounts/${ref.nric}`);
   }
@@ -401,11 +563,11 @@ export async function deleteRefereeAccount(nric: string): Promise<void> {
 export function subscribeToRefereeAccounts(callback: (accounts: Referee[]) => void, onError: (error: Error) => void): () => void {
   const colRef = collection(db, 'refereeAccounts');
   const unsubscribe = onSnapshot(colRef, (snap) => {
-    const accounts: Referee[] = [];
+    const raw: Referee[] = [];
     snap.forEach((doc) => {
-      accounts.push(doc.data() as Referee);
+      raw.push(doc.data() as Referee);
     });
-    callback(accounts);
+    callback(deduplicateReferees(raw));
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
     onError(error as Error);
@@ -413,20 +575,18 @@ export function subscribeToRefereeAccounts(callback: (accounts: Referee[]) => vo
   return unsubscribe;
 }
 
-
-
 export function subscribeToMyReferees(nricCleaned: string, callback: (referees: Referee[]) => void, onError: (error: Error) => void): () => void {
   const colRef = collection(db, 'referees');
   
   const unsubscribe = onSnapshot(colRef, (snap) => {
-    const referees: Referee[] = [];
+    const raw: Referee[] = [];
     snap.forEach((doc) => {
       const data = doc.data() as Referee;
       if (data.nric && data.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === nricCleaned) {
-        referees.push(data);
+        raw.push(data);
       }
     });
-    callback(referees);
+    callback(deduplicateReferees(raw));
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, `referees`);
     onError(error as Error);
