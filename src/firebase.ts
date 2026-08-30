@@ -1,17 +1,17 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
-  initializeFirestore, 
+  getFirestore, 
   collection, 
   getDocs, 
   doc, 
   setDoc, 
   deleteDoc, 
   query, 
-  where,
-  onSnapshot,
-  getDoc,
-  getDocFromServer
+  where, 
+  onSnapshot, 
+  getDoc, 
+  getDocFromServer 
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
@@ -43,10 +43,7 @@ export interface FirestoreErrorInfo {
 }
 
 const app = initializeApp(firebaseConfig);
-const db = initializeFirestore(app, {
-  ignoreUndefinedProperties: true,
-  experimentalForceLongPolling: true
-}, firebaseConfig.firestoreDatabaseId || "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
+const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
 const auth = getAuth(app);
 
 export { db, auth };
@@ -645,10 +642,8 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    const errCode = (error as { code?: string })?.code;
-    if (errMsg.includes('client is offline') || errMsg.includes('Could not reach Cloud Firestore backend') || errCode === 'unavailable') {
-      console.warn("Firestore connection initialized in offline-ready mode. Seamless local cache & fallback enabled.");
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('Could not reach Cloud Firestore') || (error as { code?: string })?.code === 'unavailable')) {
+      // Offline or network unavailable mode - gracefully continue with local state
     }
   }
 }
