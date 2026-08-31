@@ -1,0 +1,108 @@
+        {/* ORGANIZER DASHBOARD */}
+        {screen === 'organizerDashboard' && activeComp && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div className="flex justify-between items-center bg-surface p-4 rounded-2xl border border-line shadow-sm">
+              <div>
+                <h2 className="text-xl font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <User className="w-5 h-5 text-gold" />
+                  Organizer Panel
+                </h2>
+                <p className="text-sm font-semibold text-gold mt-1">{activeComp.name}</p>
+              </div>
+              <button
+                onClick={() => setScreen('coachPlayerForm')}
+                className="bg-gold text-ink px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:opacity-90 transition"
+              >
+                <Plus className="w-4 h-4" />
+                Register Competitor
+              </button>
+            </div>
+
+            <div className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
+              </div>
+
+              {players.length === 0 ? (
+                <div className="text-center py-12 text-text-dim border border-line border-dashed rounded-xl">
+                  No competitors registered for this tournament yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-line">
+                  <table className="w-full text-left text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-line bg-surface-2">
+                        <th className="p-4">ID</th>
+                        <th className="p-4">Athlete Name</th>
+                        <th className="p-4">Club/Team</th>
+                        <th className="p-4">Division Category</th>
+                        <th className="p-4">Weight Division</th>
+                        <th className="p-4">Weigh-In Scale status</th>
+                        <th className="p-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line/30">
+                      {players.map(p => (
+                        <tr key={p.id} className="hover:bg-surface-2/30 transition">
+                          <td className="p-4">
+                            <button
+                              onClick={() => { setSelectedPlayerId(p.id); setScreen('idCard'); }}
+                              className="font-mono text-gold font-bold hover:underline"
+                            >
+                              {p.id}
+                            </button>
+                          </td>
+                          <td className="p-4 font-bold text-text">{p.name}</td>
+                          <td className="p-4 text-text">{p.club}</td>
+                          <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
+                          <td className="p-4 text-text-dim">{p.weightClass}</td>
+                          <td className="p-4">
+                            <div className="flex flex-col gap-1 items-start">
+                              {renderBadge(p.weighIn?.result)}
+                              {p.weighIn && <span className="text-[10px] text-text-dim">Scale Readout: {p.weighIn.weight}kg</span>}
+                            </div>
+                          </td>
+                          <td className="p-4 text-right whitespace-nowrap">
+                            {confirmDeleteId === p.id ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <button 
+                                  onClick={() => handleDeletePlayer(p.id)}
+                                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-1 rounded text-[10px]"
+                                >
+                                  Confirm
+                                </button>
+                                <button 
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="bg-surface-2 hover:bg-line text-text px-2 py-1 rounded text-[10px]"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleOpenPlayerForm(p.id)}
+                                  className="text-chong hover:bg-chong/10 p-1.5 rounded transition mr-2"
+                                  title="Edit Athlete"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(p.id)}
+                                  className="text-hong hover:bg-hong/10 p-1.5 rounded transition"
+                                  title="Delete Athlete"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
