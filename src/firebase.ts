@@ -11,10 +11,17 @@ import {
   where,
   onSnapshot,
   getDoc,
-  getDocFromServer
+  setLogLevel
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
+
+// Suppress non-critical connection retry warnings in dev/sandboxed environments
+try {
+  setLogLevel('error');
+} catch {
+  // ignore
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -45,7 +52,7 @@ export interface FirestoreErrorInfo {
 const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
-  experimentalForceLongPolling: true
+  experimentalAutoDetectLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId || "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
 const auth = getAuth(app);
 
@@ -640,17 +647,4 @@ export async function saveAdminPasswordToFirestore(password: string): Promise<vo
     handleFirestoreError(error, OperationType.WRITE, 'globalSettings/admin');
   }
 }
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    const errCode = (error as { code?: string })?.code;
-    if (errMsg.includes('client is offline') || errMsg.includes('Could not reach Cloud Firestore backend') || errCode === 'unavailable') {
-      console.warn("Firestore connection initialized in offline-ready mode. Seamless local cache & fallback enabled.");
-    }
-  }
-}
-testConnection();
 

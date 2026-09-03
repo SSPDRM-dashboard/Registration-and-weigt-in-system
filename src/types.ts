@@ -48,6 +48,7 @@ export interface IdCardField {
 }
 
 export interface ClubReceipt {
+  clubName?: string;
   receiptUrl: string;
   uploadedAt: string;
 }
@@ -59,6 +60,7 @@ export interface Competition {
   date: string;
   endDate?: string;
   registrationCloseDate?: string;
+  currency?: string;
   staffCode: string;
   events: string[];
   genders: string[];
@@ -74,6 +76,14 @@ export interface Competition {
   poomsaeFee?: string;
   paraFee?: string;
   virtualFee?: string;
+  kyukpaFee?: string;
+  speedKickingFee?: string;
+  skippingRopeFee?: string;
+  feeModel?: 'STANDARD' | 'SPECIAL_PACKAGE';
+  packageFirstEventFee?: string;
+  packageSecondEventFee?: string;
+  packageSubsequentEventFee?: string;
+  packageFiveEventFee?: string;
   receipts?: Record<string, ClubReceipt>;
   publicViewPassword?: string;
   hideScaleReadout?: boolean;
@@ -130,6 +140,7 @@ export interface Referee {
   hotelDaysProvided?: number;
   hotelCheckoutDate?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface MatchAssignment {
@@ -150,3 +161,5 @@ export interface MatchAssignment {
   status?: 'Scheduled' | 'In Progress' | 'Completed';
 }
 
+
+export type MasterAthlete = Partial<Player> & { category?: string; belt?: string; };

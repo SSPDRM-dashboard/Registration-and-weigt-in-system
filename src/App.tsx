@@ -1,11 +1,32 @@
+import { AdminCompFormScreen } from './components/screens/AdminCompFormScreen';
+import { CoachHomeScreen } from './components/screens/CoachHomeScreen';
+import { CoachSignupScreen } from './components/screens/CoachSignupScreen';
+import { RefereeSignupScreen } from './components/screens/RefereeSignupScreen';
+import { CourtRosterDisplayScreen } from './components/screens/CourtRosterDisplayScreen';
+import { RefereeDashboardScreen } from './components/screens/RefereeDashboardScreen';
+import { ThemeModal } from './components/modals/ThemeModal';
+import { DeleteRingModal } from './components/modals/DeleteRingModal';
+import { CoachEditProfileModal } from './components/modals/CoachEditProfileModal';
+import { RefereeEditProfileModal } from './components/modals/RefereeEditProfileModal';
+import { OrganizerAddRefereeModal } from './components/modals/OrganizerAddRefereeModal';
+import { ViewIndemnityModal } from './components/modals/ViewIndemnityModal';
+import { IndemnityDashboardModal } from './components/modals/IndemnityDashboardModal';
+import { AthleteDatabaseModal } from './components/modals/AthleteDatabaseModal';
+import { PaymentReceiptModal } from './components/modals/PaymentReceiptModal';
+import { EditCompetitionModal } from './components/modals/EditCompetitionModal';
+import { AssignSpecialRolesModal } from './components/modals/AssignSpecialRolesModal';
+import { RefereeAccommodationModal } from './components/modals/RefereeAccommodationModal';
+import { CoachExcelImportModal } from './components/modals/CoachExcelImportModal';
+import { RefereeJoinCompModal } from './components/modals/RefereeJoinCompModal';
+import { CurrencySelector } from './components/CurrencySelector';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Trophy, Users, CheckCircle, ShieldCheck, Scale, QrCode, Camera, 
+  CreditCard, ChevronDown, Info, Trophy, Users, CheckCircle, ShieldCheck, Scale, QrCode, Camera, 
   UserPlus, Download, LogOut, Settings, Plus, Trash2, Edit, Search, 
   AlertCircle, Calendar, MapPin, User, Lock, Upload, Activity, FileText, Clock,
   ChevronRight, RefreshCw, Eye, Palette, Sliders, Layout, Sun, GripVertical,
   Printer, Database, X, Coins, PenTool, Home, Shield, Save, Check, Copy, ExternalLink, Share2,
-  Hash, Cpu, Video, Maximize2, Minimize2, Grid, LayoutGrid
+  Hash, Cpu, Video, Maximize2, Minimize2, Grid, LayoutGrid, Sparkles, Wand2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
@@ -192,7 +213,19 @@ const parseFeeToNumber = (feeStr: string | undefined | null): number => {
   return match ? parseFloat(match[0]) : 0;
 };
 
-const formatCurrency = (amount: number, feeSample: string | undefined | null) => {
+export const formatFeeDisplay = (feeStr: string | undefined | null, explicitCurrency?: string) => {
+  if (!feeStr) return '';
+  const val = parseFeeToNumber(feeStr);
+  if (explicitCurrency) {
+    return `${explicitCurrency} ${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return feeStr; // fallback
+};
+
+const formatCurrency = (amount: number, feeSample: string | undefined | null, explicitCurrency?: string) => {
+  if (explicitCurrency) {
+    return `${explicitCurrency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
   if (!feeSample) return `${amount}`;
   const prefixMatch = feeSample.match(/^[^\d]+/);
   const prefix = prefixMatch ? prefixMatch[0].trim() + ' ' : '';
@@ -234,7 +267,8 @@ export const getRefereeAllowance = (r: Referee, fees: {
   rate_game_master?: number;
   rate_technical_operator?: number;
   rate_virtual_referee?: number;
-}) => {
+}, compCurrency?: string) => {
+  const currency = compCurrency || 'RM';
   const tiers = { 'IR': 4, 'NR': 3, 'SR': 2, 'TR': 1 };
   const baseDailyRates = { 
     'IR': fees.rate_ir, 
@@ -337,13 +371,13 @@ export const getRefereeAllowance = (r: Referee, fees: {
       const roleLabel = (r.specialRole && !['GAME_MASTER', 'TECHNICAL_OPERATOR', 'VIRTUAL_REFEREE', 'None'].includes(r.specialRole)) 
         ? formatSpecialRole(r.specialRole) 
         : r.kyorugiStatus;
-      explanations.push(`${kDays}d Kyorugi (${roleLabel}) @ RM ${kRate}`);
+      explanations.push(`${kDays}d Kyorugi (${roleLabel}) @ ${currency} ${kRate}`);
     }
     if (pDays > 0) {
       const roleLabel = (r.specialRole && !['GAME_MASTER', 'TECHNICAL_OPERATOR', 'VIRTUAL_REFEREE', 'None'].includes(r.specialRole)) 
         ? formatSpecialRole(r.specialRole) 
         : r.poomsaeStatus;
-      explanations.push(`${pDays}d Poomsae (${roleLabel}) @ RM ${pRate}`);
+      explanations.push(`${pDays}d Poomsae (${roleLabel}) @ ${currency} ${pRate}`);
     }
     if (vDays > 0) {
       const roleLabel = r.specialRole === 'GAME_MASTER' 
@@ -353,15 +387,15 @@ export const getRefereeAllowance = (r: Referee, fees: {
         : r.specialRole === 'VIRTUAL_REFEREE' 
         ? 'Virtual Ref' 
         : 'Virtual';
-      explanations.push(`${vDays}d ${roleLabel} @ RM ${vRate}`);
+      explanations.push(`${vDays}d ${roleLabel} @ ${currency} ${vRate}`);
     }
     splitExplanation = explanations.join(" + ");
   } else if (r.specialRole && r.specialRole !== 'None') {
     baseDutyPay = stdDailyRate * totalDays;
-    splitExplanation = `${totalDays} days as ${formatSpecialRole(r.specialRole)} @ RM ${stdDailyRate}/day`;
+    splitExplanation = `${totalDays} days as ${formatSpecialRole(r.specialRole)} @ ${currency} ${stdDailyRate}/day`;
   } else {
     baseDutyPay = stdDailyRate * totalDays;
-    splitExplanation = `${totalDays} days (${higherStatus}) @ RM ${stdDailyRate}/day`;
+    splitExplanation = `${totalDays} days (${higherStatus}) @ ${currency} ${stdDailyRate}/day`;
   }
   
   const totalPay = baseDutyPay + travelPay + otPay + othersPay;
@@ -424,6 +458,8 @@ export default function App() {
   const [refereeLoginPassword, setRefereeLoginPassword] = useState('');
   const [refereeLoginComp, setRefereeLoginComp] = useState('');
   const [activeReferee, setActiveReferee] = useState<Referee | null>(null);
+  const [selectedAccommodationReferee, setSelectedAccommodationReferee] = useState<Referee | null>(null);
+  const [myRefereeRegistrations, setMyRefereeRegistrations] = useState<Referee[]>([]);
 
   // RIC Terminal Login state
   const [ricLoginNric, setRicLoginNric] = useState('');
@@ -684,6 +720,12 @@ export default function App() {
   const [coachEditPassword, setCoachEditPassword] = useState<string>('');
 
   const [showOrganizerAddReferee, setShowOrganizerAddReferee] = useState<boolean>(false);
+  const [showAssignSpecialRolesModal, setShowAssignSpecialRolesModal] = useState<boolean>(false);
+  const [inlineRoleSearchQuery, setInlineRoleSearchQuery] = useState<string>('');
+  const [inlineRoleFilter, setInlineRoleFilter] = useState<'all' | 'special' | 'standard'>('all');
+  const [inlineSelectedReferee, setInlineSelectedReferee] = useState<Referee | null>(null);
+  const [inlineSelectedRole, setInlineSelectedRole] = useState<Referee['specialRole']>('None');
+  const [isSavingInlineRole, setIsSavingInlineRole] = useState<boolean>(false);
   
   // Edit Competition State
   const [showEditCompModal, setShowEditCompModal] = useState<boolean>(false);
@@ -694,6 +736,7 @@ export default function App() {
   const [editCompEndDate, setEditCompEndDate] = useState<string>('');
   const [editCompRegistrationCloseDate, setEditCompRegistrationCloseDate] = useState<string>('');
   const [editCompPasscode, setEditCompPasscode] = useState<string>('');
+  const [editCompCurrency, setEditCompCurrency] = useState<string>('RM');
 
   const [editingAccReferee, setEditingAccReferee] = useState<Referee | null>(null);
   const [editingDistanceRefereeId, setEditingDistanceRefereeId] = useState<string | null>(null);
@@ -712,6 +755,12 @@ export default function App() {
   const [addRefereeModalTab, setAddRefereeModalTab] = useState<'existing' | 'new'>('existing');
   const [selectedExistingRefereeNrics, setSelectedExistingRefereeNrics] = useState<string[]>([]);
   const [searchRegisteredQuery, setSearchRegisteredQuery] = useState('');
+  const [enlargedPhoto, setEnlargedPhoto] = useState<{
+    url: string;
+    title: string;
+    subtitle?: string;
+    details?: { label: string; value: string }[];
+  } | null>(null);
 
   // Ring Match Numbers entered by RIC
   const [ringMatchNumbers, setRingMatchNumbers] = useState<Record<string, string>>(() => {
@@ -788,6 +837,14 @@ export default function App() {
   const [poomsaeFeeInput, setPoomsaeFeeInput] = useState('');
   const [paraFeeInput, setParaFeeInput] = useState('');
   const [virtualFeeInput, setVirtualFeeInput] = useState('');
+  const [kyukpaFeeInput, setKyukpaFeeInput] = useState('');
+  const [speedKickingFeeInput, setSpeedKickingFeeInput] = useState('');
+  const [skippingRopeFeeInput, setSkippingRopeFeeInput] = useState('');
+  const [feeModelInput, setFeeModelInput] = useState<'STANDARD' | 'SPECIAL_PACKAGE'>('STANDARD');
+  const [packageFirstEventFeeInput, setPackageFirstEventFeeInput] = useState('');
+  const [packageSecondEventFeeInput, setPackageSecondEventFeeInput] = useState('');
+  const [packageSubsequentEventFeeInput, setPackageSubsequentEventFeeInput] = useState('');
+  const [packageFiveEventFeeInput, setPackageFiveEventFeeInput] = useState('');
   const [feeUpdateSuccess, setFeeUpdateSuccess] = useState(false);
   const [selectedClubReceipt, setSelectedClubReceipt] = useState<{ clubName: string; receiptUrl: string; uploadedAt: string } | null>(null);
 
@@ -800,6 +857,14 @@ export default function App() {
       setPoomsaeFeeInput(active.poomsaeFee || '');
       setParaFeeInput(active.paraFee || '');
       setVirtualFeeInput(active.virtualFee || '');
+      setKyukpaFeeInput(active.kyukpaFee || '');
+      setSpeedKickingFeeInput(active.speedKickingFee || '');
+      setSkippingRopeFeeInput(active.skippingRopeFee || '');
+      setFeeModelInput(active.feeModel || 'STANDARD');
+      setPackageFirstEventFeeInput(active.packageFirstEventFee || '');
+      setPackageSecondEventFeeInput(active.packageSecondEventFee || '');
+      setPackageSubsequentEventFeeInput(active.packageSubsequentEventFee || '');
+      setPackageFiveEventFeeInput(active.packageFiveEventFee || '');
     } else {
       setBankNameInput('');
       setBankAccountInput('');
@@ -807,6 +872,14 @@ export default function App() {
       setPoomsaeFeeInput('');
       setParaFeeInput('');
       setVirtualFeeInput('');
+      setKyukpaFeeInput('');
+      setSpeedKickingFeeInput('');
+      setSkippingRopeFeeInput('');
+      setFeeModelInput('STANDARD');
+      setPackageFirstEventFeeInput('');
+      setPackageSecondEventFeeInput('');
+      setPackageSubsequentEventFeeInput('');
+      setPackageFiveEventFeeInput('');
     }
   }, [compId, competitions]);
   
@@ -817,11 +890,14 @@ export default function App() {
   const [ncEndDate, setNcEndDate] = useState('');
   const [ncRegistrationCloseDate, setNcRegistrationCloseDate] = useState('');
   const [ncCode, setNcCode] = useState('weighin123');
+  const [ncCurrency, setNcCurrency] = useState('RM');
   
   // Category additions
   const [newAgeGroup, setNewAgeGroup] = useState('');
   const [newWc, setNewWc] = useState('');
   const [newClubOption, setNewClubOption] = useState('');
+  const [isAIExtractingAge, setIsAIExtractingAge] = useState(false);
+  const [isAIExtractingWc, setIsAIExtractingWc] = useState(false);
 
   // Player Form inputs
   const [pName, setPName] = useState('');
@@ -1097,7 +1173,7 @@ export default function App() {
           venue: 'National Taekwondo Arena',
           date: '2026-09-12',
           staffCode: 'weighin123',
-          events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'],
+          events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
           genders: ['Male', 'Female', 'Mix'],
           ageGroups: [
             'Super Cadet (9 To 10 Years Old)', 'Super Cadet (9 to 11 Years Old)', 'Cadet (11 to 12 Years Old)',
@@ -1430,6 +1506,21 @@ export default function App() {
     };
   }, [compId, role, user]);
 
+  // Synchronize all registrations for the logged-in referee across all tournaments
+  useEffect(() => {
+    if (role === 'referee' && user) {
+      const cleanUser = user.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const unsub = subscribeToMyReferees(cleanUser, (myRefs) => {
+        setMyRefereeRegistrations(myRefs);
+      }, (err) => console.error("Failed to sync my referee registrations", err));
+      return () => {
+        if (unsub) unsub();
+      };
+    } else {
+      setMyRefereeRegistrations([]);
+    }
+  }, [role, user]);
+
   // --- NOTIFICATION HELPER ---
   const triggerMsg = (text: string, type: 'error' | 'ok') => {
     setMsg({ text, type });
@@ -1507,7 +1598,7 @@ export default function App() {
     }
   };
 
-  const handleUpdateEventFees = async (kyorugi: string, poomsae: string, para: string, virtual: string) => {
+  const handleUpdateEventFees = async (kyorugi: string, poomsae: string, para: string, virtual: string, kyukpa: string, speedKicking: string, skippingRope: string, feeModel: 'STANDARD' | 'SPECIAL_PACKAGE', pkgFirst: string, pkgSecond: string, pkgSub: string, pkgFive: string) => {
     if (!compId) return;
     const updatedComps = competitions.map(c => {
       if (c.id === compId) {
@@ -1516,7 +1607,15 @@ export default function App() {
           kyorugiFee: String(kyorugi || '').trim(),
           poomsaeFee: String(poomsae || '').trim(),
           paraFee: String(para || '').trim(),
-          virtualFee: String(virtual || '').trim()
+          virtualFee: String(virtual || '').trim(),
+          kyukpaFee: String(kyukpa || '').trim(),
+          speedKickingFee: String(speedKicking || '').trim(),
+          skippingRopeFee: String(skippingRope || '').trim(),
+          feeModel: feeModel,
+          packageFirstEventFee: String(pkgFirst || '').trim(),
+          packageSecondEventFee: String(pkgSecond || '').trim(),
+          packageSubsequentEventFee: String(pkgSub || '').trim(),
+          packageFiveEventFee: String(pkgFive || '').trim()
         };
       }
       return c;
@@ -1793,14 +1892,13 @@ export default function App() {
   const handleOrganizerLogin = () => {
     const u = cUser.trim();
     const p = cPass.trim();
-    if (!u) {
-      triggerMsg('Please enter your username.', 'error');
-      return;
-    }
-    // Case-insensitive lookup for organizer username and password
-    const organizerKey = Object.keys(organizers).find(k => k.trim().toLowerCase() === u.toLowerCase());
-    const acc = organizerKey ? organizers[organizerKey] : undefined;
-    if (!acc || (acc.password && acc.password.trim().toLowerCase() !== p.toLowerCase())) {
+    const orgEntry = Object.entries(organizers).find(
+      ([k, v]) => k.toLowerCase() === u.toLowerCase() || (v.username && v.username.toLowerCase() === u.toLowerCase())
+    );
+    const acc = orgEntry ? orgEntry[1] : undefined;
+    const orgKey = orgEntry ? orgEntry[0] : u;
+    
+    if (!acc || (acc.password || '').toLowerCase() !== p.toLowerCase()) {
       triggerMsg('Invalid username or password.', 'error');
       return;
     }
@@ -1809,7 +1907,7 @@ export default function App() {
       return;
     }
     setRole('organizer');
-    setUser(organizerKey || u);
+    setUser(orgKey);
     setCompId(acc.compId);
     setScreen('organizerDashboard');
     triggerMsg(`Welcome, Organizer ${acc.name}!`, 'ok');
@@ -1827,25 +1925,25 @@ export default function App() {
 
     let foundPass = null;
 
-    // Check coaches (case-insensitive username)
+    // Check coaches
     if (fpUsername.trim()) {
       const uname = fpUsername.trim().toLowerCase();
-      const matchedCoachEntry = Object.entries(coaches).find(([k, c]) => 
-        (k.trim().toLowerCase() === uname || c.username?.trim().toLowerCase() === uname) &&
-        c.name.trim().toLowerCase() === cname &&
+      const matchedCoach = Object.values(coaches).find(c => 
+        (c.username?.toLowerCase() === uname || Object.entries(coaches).some(([k, v]) => v === c && k.toLowerCase() === uname)) &&
+        c.name.toLowerCase() === cname &&
         (c.phone || '').replace(/[^0-9]/g, '') === cphone
       );
-      if (matchedCoachEntry) {
-        foundPass = matchedCoachEntry[1].password;
+      if (matchedCoach) {
+        foundPass = matchedCoach.password;
       }
     }
 
-    // Check referees (case-insensitive NRIC)
+    // Check referees
     if (!foundPass && fpNric.trim()) {
       const cnric = fpNric.trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const matchedRef = refereeAccounts.find(r =>
         r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cnric &&
-        r.fullName.trim().toLowerCase() === cname &&
+        r.fullName.toLowerCase() === cname &&
         r.phone.replace(/[^0-9]/g, '') === cphone
       );
       if (matchedRef) {
@@ -1864,14 +1962,13 @@ export default function App() {
   const handleCoachLogin = () => {
     const u = cUser.trim();
     const p = cPass.trim();
-    if (!u) {
-      triggerMsg('Please enter your username.', 'error');
-      return;
-    }
-    // Case-insensitive lookup for coach username and password
-    const coachKey = Object.keys(coaches).find(k => k.trim().toLowerCase() === u.toLowerCase());
-    const acc = coachKey ? coaches[coachKey] : undefined;
-    if (!acc || (acc.password && acc.password.trim().toLowerCase() !== p.toLowerCase())) {
+    const coachEntry = Object.entries(coaches).find(
+      ([k, v]) => k.toLowerCase() === u.toLowerCase() || (v.username && v.username.toLowerCase() === u.toLowerCase())
+    );
+    const acc = coachEntry ? coachEntry[1] : undefined;
+    const coachKey = coachEntry ? coachEntry[0] : u;
+
+    if (!acc || (acc.password || '').toLowerCase() !== p.toLowerCase()) {
       triggerMsg('Invalid username or password.', 'error');
       return;
     }
@@ -1885,7 +1982,7 @@ export default function App() {
       return;
     }
     setRole('coach');
-    setUser(coachKey || u);
+    setUser(coachKey);
     setScreen('coachRoster');
     setCompId(cComp);
     triggerMsg(`Welcome back, Coach ${acc.name}!`, 'ok');
@@ -1932,7 +2029,7 @@ export default function App() {
     // Check global referee accounts first
     const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
     if (account) {
-      if (account.password && account.password.trim().toLowerCase() !== refereeLoginPassword.trim().toLowerCase()) {
+      if (account.password && (account.password || '').toLowerCase() !== refereeLoginPassword.trim().toLowerCase()) {
         triggerMsg('Invalid NRIC or Password.', 'error');
         return;
       }
@@ -1964,6 +2061,11 @@ export default function App() {
       return;
     }
 
+    if (legacyMatched.password && (legacyMatched.password || '').toLowerCase() !== refereeLoginPassword.trim().toLowerCase()) {
+      triggerMsg('Invalid NRIC or Password.', 'error');
+      return;
+    }
+
     // Create a referee account on the fly for them from their legacy tournament registration!
     saveRefereeAccount(legacyMatched);
     setRole('referee');
@@ -1985,6 +2087,132 @@ export default function App() {
     triggerMsg(`Welcome, Referee ${legacyMatched.fullName}!`, 'ok');
   };
 
+  const handleOpenRefereeEditProfile = (targetRef?: Referee | null) => {
+    const cleanIc = (user || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const globalAcc = refereeAccounts.find(a => (a.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    const r = targetRef || activeReferee || referees.find(ref => (ref.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc) || (globalAcc ? { ...globalAcc, compId: compId || 'GLOBAL' } : null);
+    
+    if (r) {
+      setActiveReferee(r as Referee);
+      setRefereeFullName(r.fullName || '');
+      setRefereeNric(r.nric || '');
+      setRefereePassword(r.password || '');
+      setRefereePhone(r.phone || '');
+      setRefereeClubName(r.clubName || '');
+      setRefereeResidential(r.residentialLocation || '');
+      setRefereeDistance(String(r.distance ?? 0));
+      setRefereeBankName(r.bankName || 'MAYBANK');
+      setRefereeBankAccount(r.bankAccount || '');
+      setRefereeKyorugiStatus(r.kyorugiStatus || 'TR');
+      setRefereePoomsaeStatus(r.poomsaeStatus || 'TR');
+      setRefereeAccommodation(r.accommodation || 'No');
+      setRefereeCarPlate(r.carPlate || '');
+      setRefereeSpecialRole(r.specialRole || 'None');
+      setShowRefereeEditProfile(true);
+    } else {
+      setShowRefereeEditProfile(true);
+    }
+  };
+
+  const handleAssignSpecialRole = async (refereeId: string, newRole: Referee['specialRole']) => {
+    const target = referees.find(r => r.id === refereeId);
+    if (!target) {
+      triggerMsg('Referee not found.', 'error');
+      return;
+    }
+    const cleanIc = (target.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const updatedRef: Referee = {
+      ...target,
+      specialRole: newRole || 'None',
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await saveRefereeToFirestore(updatedRef);
+      const updatedRefList = referees.map(r => r.id === refereeId ? updatedRef : r);
+      setReferees(updatedRefList);
+      if (activeComp?.id) {
+        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefList));
+      }
+
+      // Also update global referee account if it exists
+      const globalAcc = refereeAccounts.find(a => (a.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+      if (globalAcc) {
+        const updatedAcc: Referee = {
+          ...globalAcc,
+          specialRole: newRole || 'None',
+          updatedAt: new Date().toISOString(),
+        };
+        await saveRefereeAccount(updatedAcc);
+        const updatedAccounts = refereeAccounts.map(a => a.id === globalAcc.id ? updatedAcc : a);
+        setRefereeAccounts(updatedAccounts);
+        localStorage.setItem('app:refereeAccounts', JSON.stringify(updatedAccounts));
+      }
+
+      if (inlineSelectedReferee && inlineSelectedReferee.id === refereeId) {
+        setInlineSelectedReferee(updatedRef);
+        setInlineSelectedRole(newRole || 'None');
+      }
+
+      const roleDisplay = newRole === 'None' ? 'Standard Referee' : (newRole || 'Standard');
+      triggerMsg(`Successfully appointed ${target.fullName} as ${roleDisplay}!`, 'ok');
+    } catch (error) {
+      console.error('Error assigning special role:', error);
+      triggerMsg('Failed to update special role in Firestore.', 'error');
+    }
+  };
+
+  const handleRegisterRefereeForComp = (comp: Competition) => {
+    const cleanUser = (user || activeReferee?.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const existingRef = (myRefereeRegistrations.length > 0 ? myRefereeRegistrations : referees).find(
+      r => r.compId === comp.id && (r.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanUser
+    );
+    const globalAcc = refereeAccounts.find(
+      a => (a.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanUser
+    ) || activeReferee;
+
+    setJoiningComp(comp);
+    if (existingRef) {
+      setJoiningDistance(existingRef.distance ? String(existingRef.distance) : (globalAcc?.distance ? String(globalAcc.distance) : '0'));
+      setJoiningAccommodation(existingRef.accommodation || globalAcc?.accommodation || 'No');
+      setJoiningKyorugiDays(String(existingRef.kyorugiDays ?? (existingRef.officiatingDays || 1)));
+      setJoiningPoomsaeDays(String(existingRef.poomsaeDays ?? 0));
+      setJoiningVirtualDays(String(existingRef.virtualDays ?? 0));
+    } else {
+      setJoiningDistance(globalAcc?.distance ? String(globalAcc.distance) : '0');
+      setJoiningAccommodation(globalAcc?.accommodation || 'No');
+      setJoiningKyorugiDays('1');
+      setJoiningPoomsaeDays('0');
+      setJoiningVirtualDays('0');
+    }
+  };
+
+  const handleWithdrawRefereeFromComp = async (comp: Competition) => {
+    const cleanUser = (user || activeReferee?.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const existingRef = (myRefereeRegistrations.length > 0 ? myRefereeRegistrations : referees).find(
+      r => r.compId === comp.id && (r.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanUser
+    );
+    if (!existingRef) {
+      triggerMsg('No tournament registration found to withdraw.', 'error');
+      return;
+    }
+    try {
+      await deleteRefereeFromFirestore(existingRef.id);
+      const updated = referees.filter(r => r.id !== existingRef.id);
+      setReferees(updated);
+      const updatedMy = myRefereeRegistrations.filter(r => r.id !== existingRef.id);
+      setMyRefereeRegistrations(updatedMy);
+      localStorage.setItem(`app:referees:${comp.id}`, JSON.stringify(updated));
+      if (compId === comp.id) {
+        setCompId(null);
+      }
+      triggerMsg(`Successfully withdrawn from ${comp.name}.`, 'ok');
+    } catch (err) {
+      console.error('Failed to withdraw referee:', err);
+      triggerMsg('Failed to withdraw from tournament.', 'error');
+    }
+  };
+
   const handleRicLogin = () => {
     const ic = ricLoginNric.trim();
     if (!ic) {
@@ -2004,7 +2232,7 @@ export default function App() {
       return;
     }
 
-    if (account.password && account.password.trim().toLowerCase() !== ricLoginPassword.trim().toLowerCase()) {
+    if (account.password && (account.password || '').toLowerCase() !== ricLoginPassword.trim().toLowerCase()) {
       triggerMsg('Invalid NRIC or Password.', 'error');
       return;
     }
@@ -2385,7 +2613,7 @@ export default function App() {
 
   const handleCoachSignup = () => {
     const u = sUser.trim();
-    const p = sPass.trim();
+    const p = sPass;
     const name = sName.trim();
     const club = sClub.trim();
     const phone = sPhone.trim();
@@ -2394,8 +2622,7 @@ export default function App() {
       triggerMsg('Please fill in every registration field.', 'error');
       return;
     }
-    const existingCoach = Object.keys(coaches).find(k => k.trim().toLowerCase() === u.toLowerCase());
-    if (existingCoach) {
+    if (Object.keys(coaches).some(k => k.toLowerCase() === u.toLowerCase())) {
       triggerMsg('Username already taken.', 'error');
       return;
     }
@@ -2483,8 +2710,7 @@ export default function App() {
       triggerMsg('Username, Password, Full Name, and Club are required.', 'error');
       return;
     }
-    const existingCoach = Object.keys(coaches).find(k => k.trim().toLowerCase() === u.toLowerCase());
-    if (existingCoach) {
+    if (coaches[u]) {
       triggerMsg(`Coach username "${u}" already exists.`, 'error');
       return;
     }
@@ -2536,8 +2762,7 @@ export default function App() {
       triggerMsg('Please fill in all organizer fields.', 'error');
       return;
     }
-    const existingOrg = Object.keys(organizers).find(k => k.trim().toLowerCase() === u.toLowerCase());
-    if (existingOrg) {
+    if (organizers[u]) {
       triggerMsg('Organizer username already exists.', 'error');
       return;
     }
@@ -2812,11 +3037,12 @@ export default function App() {
       endDate: ncEndDate || '',
       registrationCloseDate: ncRegistrationCloseDate || '',
       staffCode: ncCode || 'weighin123',
-      events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'],
+      events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
       genders: ['Male', 'Female', 'Mix'],
       ageGroups: [],
       weightClasses: [],
-      isActive: false
+      isActive: false,
+      currency: ncCurrency.trim() || 'RM'
     };
     const updated = [...competitions, newComp];
     saveCompsToStorage(updated);
@@ -2824,7 +3050,7 @@ export default function App() {
     setScreen('adminCompDetail');
     triggerMsg('Tournament configured successfully.', 'ok');
     // Clear form
-    setNcName(''); setNcVenue(''); setNcDate(''); setNcEndDate(''); setNcRegistrationCloseDate(''); setNcCode('weighin123');
+    setNcName(''); setNcVenue(''); setNcDate(''); setNcEndDate(''); setNcRegistrationCloseDate(''); setNcCode('weighin123'); setNcCurrency('RM');
   };
 
   const handleToggleCompActive = (id: string) => {
@@ -2975,6 +3201,69 @@ export default function App() {
 
     handleUpdateIdCardFields(newFields);
     triggerMsg('Badge field layout rearranged.', 'ok');
+  };
+
+  const handleAIExtractCategories = async (e: React.ChangeEvent<HTMLInputElement>, field: 'ageGroups' | 'weightClasses') => {
+    const file = e.target.files?.[0];
+    if (!file || !compId) return;
+
+    if (field === 'ageGroups') setIsAIExtractingAge(true);
+    if (field === 'weightClasses') setIsAIExtractingWc(true);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const imageBase64 = evt.target?.result as string;
+        
+        try {
+          const response = await fetch('/api/extract-categories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64, type: field })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Server returned ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data.categories && Array.isArray(data.categories)) {
+             // Add categories to the competition
+             const updated = competitions.map(c => {
+               if (c.id === compId) {
+                 const existingList = c[field] || [];
+                 // Filter out duplicates and empty strings
+                 const newCats = data.categories.filter((cat: string) => typeof cat === 'string' && cat.trim() !== '' && !existingList.includes(cat.trim()));
+                 if (newCats.length > 0) {
+                   triggerMsg(`Successfully extracted ${newCats.length} categories using AI!`, 'success');
+                 } else {
+                   triggerMsg(`No new categories found by AI.`, 'info');
+                 }
+                 return { ...c, [field]: [...existingList, ...newCats.map((cat: string) => cat.trim())] };
+               }
+               return c;
+             });
+             setCompetitions(updated);
+             saveCompsToStorage(updated);
+          } else {
+             throw new Error('Invalid response format');
+          }
+        } catch (err: any) {
+          console.error(err);
+          triggerMsg('AI extraction failed: ' + err.message, 'error');
+        } finally {
+          if (field === 'ageGroups') setIsAIExtractingAge(false);
+          if (field === 'weightClasses') setIsAIExtractingWc(false);
+          e.target.value = ''; // reset input
+        }
+      };
+      reader.readAsDataURL(file); // important for base64 image
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Error reading the image file.', 'error');
+      if (field === 'ageGroups') setIsAIExtractingAge(false);
+      if (field === 'weightClasses') setIsAIExtractingWc(false);
+    }
   };
 
   const handleUploadCategories = (e: React.ChangeEvent<HTMLInputElement>, field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs') => {
@@ -4386,7 +4675,7 @@ export default function App() {
       {/* HEADER BANNER */}
       <header className="bg-surface/90 backdrop-blur-md border-b border-line shadow-lg sticky top-0 z-50 transition-all duration-300 print:hidden">
         <div className={`${getLayoutWidthClass()} mx-auto px-4 py-3 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4`}>
-          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => role ? setScreen(role === 'admin' ? 'adminHome' : role === 'organizer' ? 'organizerDashboard' : role === 'official' ? 'officialScan' : role === 'public' ? 'publicView' : 'coachHome') : setScreen('login')}>
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => role ? setScreen(role === 'admin' ? 'adminHome' : role === 'organizer' ? 'organizerDashboard' : role === 'official' ? 'officialScan' : role === 'referee' ? 'refereeDashboard' : role === 'public' ? 'publicView' : 'coachHome') : setScreen('login')}>
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-hong to-chong p-0.5 shadow-md flex items-center justify-center">
               <div className="w-full h-full rounded-full bg-ink flex items-center justify-center">
                 <Trophy className="w-5 h-5 text-gold" />
@@ -5060,407 +5349,125 @@ export default function App() {
 
         {/* COACH SIGNUP */}
         {screen === 'coachSignup' && (
-          <div className="max-w-md mx-auto my-12 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
-            <div className="p-6 bg-gradient-to-b from-surface-2/50 to-transparent border-b border-line text-center">
-              <UserPlus className="w-10 h-10 text-gold mx-auto mb-2" />
-              <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">New Coach Token</h2>
-              <p className="text-xs text-text-dim mt-1">Acquire an authorization credentials block</p>
-            </div>
-
-            <div className="p-6 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Coach Username</label>
-                  <input 
-                  type="text" 
-                  value={sUser} 
-                  onChange={(e) => setSUser(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Password</label>
-                  <input 
-                  type="password" 
-                  value={sPass} 
-                  onChange={(e) => setSPass(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Full Coach Name</label>
-                <input 
-                  type="text" 
-                  value={sName} 
-                  onChange={(e) => setSName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
-                  placeholder="Ali Bin Ahmad" 
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Representing Club/State</label>
-                <input 
-                  type="text" 
-                  value={sClub} 
-                  onChange={(e) => setSClub(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
-                  placeholder="PERSATUAN TAEKWONDO NEGERI PERAK" 
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number</label>
-                <input 
-                  type="tel" 
-                  value={sPhone} 
-                  onChange={(e) => setSPhone(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
-                  placeholder="+6012-3456789" 
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Email Address</label>
-                <input 
-                  type="email" 
-                  value={sEmail} 
-                  onChange={(e) => setSEmail(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCoachSignup(); }}
-                  placeholder="coach@example.com" 
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                />
-              </div>
-
-              <button 
-                onClick={handleCoachSignup}
-                className="w-full bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition mt-4 cursor-pointer shadow-md"
-              >
-                Activate Coach Credentials
-              </button>
-
-              <p className="text-center text-xs text-text-dim pt-2">
-                Already authorized? {' '}
-                <button 
-                  onClick={() => setScreen('login')}
-                  className="text-gold underline font-semibold hover:text-opacity-80"
-                >
-                  Return to portal login
-                </button>
-              </p>
-            </div>
-          </div>
+          <CoachSignupScreen
+            sUser={sUser}
+            setSUser={setSUser}
+            sPass={sPass}
+            setSPass={setSPass}
+            sName={sName}
+            setSName={setSName}
+            sClub={sClub}
+            setSClub={setSClub}
+            sPhone={sPhone}
+            setSPhone={setSPhone}
+            sEmail={sEmail}
+            setSEmail={setSEmail}
+            handleCoachSignup={handleCoachSignup}
+            setScreen={setScreen}
+          />
         )}
 
         {/* REFEREE SIGNUP */}
         {screen === 'refereeSignup' && (
-          <div className="max-w-3xl mx-auto my-8 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
-            <div className="p-6 bg-gradient-to-b from-surface-2/50 to-transparent border-b border-line text-center">
-              <Scale className="w-10 h-10 text-gold mx-auto mb-2 animate-pulse" />
-              <h2 className="text-xl font-bold uppercase tracking-wider text-text font-sans">Referee Registration</h2>
-              <p className="text-xs text-text-dim mt-1">Register your global referee officiating profile</p>
-            </div>
-
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Referee Photograph */}
-                <div className="md:col-span-2 bg-ink/30 p-4 rounded-xl border border-line">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Referee Portrait Photograph (4:5 ratio) *</label>
-                  <input 
-                    type="file" 
-                    accept="image/*"
-                    onChange={handlePhotoSelect}
-                    className="w-full text-xs text-text-dim bg-ink border border-line file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-surface-2 file:text-gold hover:file:opacity-90 transition cursor-pointer"
-                  />
-                  {pendingPhoto && (
-                    <div className="mt-4 flex items-center space-x-3">
-                      <img 
-                        src={pendingPhoto} 
-                        alt="Crop preview" 
-                        className="w-20 h-24 object-cover rounded-lg border border-line" 
-                      />
-                      <span className="text-xs text-text-dim">Portrait automatically optimized and cropped (192 x 240 pixels) for your referee pass.</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Personal Information */}
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Full Name (as per NRIC) *</label>
-                  <input 
-                    type="text" 
-                    value={refereeFullName} 
-                    onChange={(e) => setRefereeFullName(e.target.value)}
-                    placeholder="e.g. TAN KIAN MENG"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">NRIC Number *</label>
-                  <input 
-                    type="text" 
-                    value={refereeNric} 
-                    onChange={(e) => setRefereeNric(e.target.value)}
-                    placeholder="e.g. 850101-14-5555"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Password *</label>
-                  <input 
-                    type="password" 
-                    value={refereePassword} 
-                    onChange={(e) => setRefereePassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Phone Number *</label>
-                  <input 
-                    type="tel" 
-                    value={refereePhone} 
-                    onChange={(e) => setRefereePhone(e.target.value)}
-                    placeholder="e.g. 012-3456789"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">State / Club Name *</label>
-                  <input 
-                    type="text" 
-                    value={refereeClubName} 
-                    onChange={(e) => setRefereeClubName(e.target.value)}
-                    placeholder="e.g. PERAK TKD CLUB"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                {/* Logistics */}
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Residential Location *</label>
-                  <input 
-                    type="text" 
-                    value={refereeResidential} 
-                    onChange={(e) => setRefereeResidential(e.target.value)}
-                    placeholder="e.g. Ipoh, Perak"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Distance to Venue (Go & Return in KM) *</label>
-                  <input 
-                    type="number" 
-                    value={refereeDistance} 
-                    onChange={(e) => setRefereeDistance(e.target.value)}
-                    placeholder="e.g. 120"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                  <p className="text-[10px] text-text-dim/80 mt-1">Total combined distance (return trip) base on Google Maps/Waze.</p>
-                </div>
-
-                {/* Bank details */}
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Name *</label>
-                  <input 
-                    type="text" 
-                    value={refereeBankName} 
-                    onChange={(e) => setRefereeBankName(e.target.value)}
-                    placeholder="e.g. Maybank"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Bank Account Number *</label>
-                  <input 
-                    type="text" 
-                    value={refereeBankAccount} 
-                    onChange={(e) => setRefereeBankAccount(e.target.value)}
-                    placeholder="e.g. 164012345678"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                  />
-                </div>
-
-                {/* Statuses */}
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Kyorugi Referee Status *</label>
-                  <select 
-                    value={refereeKyorugiStatus} 
-                    onChange={(e) => setRefereeKyorugiStatus(e.target.value as any)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    <option value="TR">Trainee Referee (TR)</option>
-                    <option value="SR">State Referee (SR)</option>
-                    <option value="NR">National Referee (NR)</option>
-                    <option value="IR">International Referee (IR)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Poomsae Referee Status *</label>
-                  <select 
-                    value={refereePoomsaeStatus} 
-                    onChange={(e) => setRefereePoomsaeStatus(e.target.value as any)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    <option value="TR">Trainee Referee (TR)</option>
-                    <option value="SR">State Referee (SR)</option>
-                    <option value="NR">National Referee (NR)</option>
-                    <option value="IR">International Referee (IR)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Accommodation Required? *</label>
-                  <select 
-                    value={refereeAccommodation} 
-                    onChange={(e) => setRefereeAccommodation(e.target.value as any)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    <option value="No">No - I will arrange my own</option>
-                    <option value="Yes">Yes - Organizer to arrange</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Car Plate Number</label>
-                  <input 
-                    type="text" 
-                    value={refereeCarPlate} 
-                    onChange={(e) => setRefereeCarPlate(e.target.value)}
-                    placeholder="e.g. WQY 1234"
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold uppercase"
-                  />
-                  <p className="text-[10px] text-text-dim/80 mt-1">Required to reserve car park space for referees.</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Special Appointed Role</label>
-                  <select 
-                    value={refereeSpecialRole} 
-                    onChange={(e) => setRefereeSpecialRole(e.target.value as any)}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  >
-                    <option value="None">None (Standard Referee)</option>
-                    <option value="TD">Technical Delegate (TD)</option>
-                    <option value="CSB">Supervisory Board (CSB)</option>
-                    <option value="RIC">Referee In-Charge (RIC)</option>
-                    <option value="GAME_MASTER">Game Master (GM) - Virtual Taekwondo</option>
-                    <option value="TECHNICAL_OPERATOR">Technical Operator (TO) - Virtual Taekwondo</option>
-                    <option value="VIRTUAL_REFEREE">Virtual Referee (VR) - Virtual Taekwondo</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* PDPA Consent Statement */}
-              <div className="bg-surface-2 p-4 rounded-xl border border-line text-xs text-text-dim space-y-3">
-                <p className="font-semibold text-gold uppercase tracking-wider text-[10px]">PDPA Personal Data Consent Statement</p>
-                <p className="leading-relaxed text-[11px]">
-                  I agree to the collection, processing and use of my personal data for the purpose of tournament registration, scheduling, officiating roles coordination, bank-in transactions, and accommodation/logistic arrangements, in accordance with the Personal Data Protection Act (PDPA).
-                </p>
-                <label className="flex items-start space-x-3 text-text cursor-pointer pt-1">
-                  <input 
-                    type="checkbox" 
-                    checked={refereeConsent} 
-                    onChange={(e) => setRefereeConsent(e.target.checked)}
-                    className="mt-0.5 rounded border-line text-gold focus:ring-gold bg-ink w-4 h-4 cursor-pointer"
-                  />
-                  <span className="font-semibold text-xs select-none">I agree to the collection, processing and use of my personal data *</span>
-                </label>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button 
-                  onClick={() => setScreen('login')}
-                  className="flex-1 border border-line text-text font-bold py-2.5 rounded-xl text-sm transition hover:bg-surface-2 cursor-pointer text-center animate-none"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleRefereeRegister}
-                  className="flex-1 bg-gold hover:opacity-90 text-ink font-bold py-2.5 rounded-xl text-sm transition cursor-pointer shadow-md"
-                >
-                  Submit Registration
-                </button>
-              </div>
-            </div>
-          </div>
+          <RefereeSignupScreen
+            handlePhotoSelect={handlePhotoSelect}
+            pendingPhoto={pendingPhoto}
+            refereeFullName={refereeFullName}
+            setRefereeFullName={setRefereeFullName}
+            refereeNric={refereeNric}
+            setRefereeNric={setRefereeNric}
+            refereePassword={refereePassword}
+            setRefereePassword={setRefereePassword}
+            refereePhone={refereePhone}
+            setRefereePhone={setRefereePhone}
+            refereeClubName={refereeClubName}
+            setRefereeClubName={setRefereeClubName}
+            refereeResidential={refereeResidential}
+            setRefereeResidential={setRefereeResidential}
+            refereeDistance={refereeDistance}
+            setRefereeDistance={setRefereeDistance}
+            refereeBankName={refereeBankName}
+            setRefereeBankName={setRefereeBankName}
+            refereeBankAccount={refereeBankAccount}
+            setRefereeBankAccount={setRefereeBankAccount}
+            refereeKyorugiStatus={refereeKyorugiStatus}
+            setRefereeKyorugiStatus={setRefereeKyorugiStatus}
+            refereePoomsaeStatus={refereePoomsaeStatus}
+            setRefereePoomsaeStatus={setRefereePoomsaeStatus}
+            refereeAccommodation={refereeAccommodation}
+            setRefereeAccommodation={setRefereeAccommodation}
+            refereeCarPlate={refereeCarPlate}
+            setRefereeCarPlate={setRefereeCarPlate}
+            refereeSpecialRole={refereeSpecialRole}
+            setRefereeSpecialRole={setRefereeSpecialRole}
+            refereeConsent={refereeConsent}
+            setRefereeConsent={setRefereeConsent}
+            handleRefereeRegister={handleRefereeRegister}
+            setScreen={setScreen}
+          />
         )}
 
         {/* COACH HOME - TOURNAMENT SELECTOR */}
         {screen === 'coachHome' && (
-          <div className="space-y-6">
-            <div className="bg-surface p-6 rounded-2xl border border-line shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div>
-                <h2 className="text-xl font-bold uppercase tracking-wider text-text flex items-center gap-2">
-                  <Trophy className="w-5 h-5 text-gold" />
-                  <span>Welcome back, Coach {coaches[user || '']?.name}</span>
-                </h2>
-                <p className="text-xs text-text-dim mt-1">Representing: <strong className="text-text">{coaches[user || '']?.club}</strong></p>
-              </div>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
-                  Verified Club Registrar Account
-                </div>
-                <button 
-                  onClick={() => {
-                    const c = coaches[user || ''];
-                    if (c) {
-                      setCoachEditName(c.name || '');
-                      setCoachEditClub(c.club || '');
-                      setCoachEditPhone(c.phone || '');
-                      setCoachEditEmail(c.email || '');
-                      setCoachEditPassword(c.password || '');
-                      setShowCoachEditProfile(true);
-                    }
-                  }}
-                  className="text-xs border border-line hover:border-gold text-text-dim hover:text-gold px-3 py-1.5 rounded-lg transition font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
-                >
-                  <Edit className="w-3 h-3" />
-                  Edit Profile
-                </button>
-              </div>
-            </div>
+          <CoachHomeScreen
+            user={user}
+            coaches={coaches}
+            competitions={competitions}
+            setCompId={setCompId}
+            setScreen={setScreen}
+            setCoachName={setCoachEditName}
+            setCoachClub={setCoachEditClub}
+            setCoachPhone={setCoachEditPhone}
+            setCoachPassword={setCoachEditPassword}
+            
+            setCoachUsername={setUser}
+            setShowCoachEditProfile={setShowCoachEditProfile}
+            formatDateRange={formatDateRange}
+          />
+        )}
 
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-text-dim uppercase tracking-wider">Select active championship tournament</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {competitions.filter(c => c.isActive !== false).length === 0 ? (
-                  <div className="col-span-full bg-surface p-8 rounded-2xl border border-line text-center">
-                    <Trophy className="w-8 h-8 text-text-dim/50 mx-auto mb-2" />
-                    <p className="text-sm text-text-dim uppercase tracking-wider">No active tournaments available</p>
-                  </div>
-                ) : (
-                  competitions.filter(c => c.isActive !== false).map(c => {
-                    return (
-                      <div 
-                        key={c.id}
-                        onClick={() => { setCompId(c.id); setScreen('coachRoster'); }}
-                        className="bg-surface border border-line hover:border-gold/50 rounded-2xl p-5 cursor-pointer transition-all hover:-translate-y-1 shadow-sm hover:shadow group"
-                      >
-                        <div className="flex justify-between items-start mb-4">
-                          <div className="bg-emerald-950 text-gold p-2.5 rounded-xl border border-emerald-900/50">
-                            <Trophy className="w-5 h-5" />
-                          </div>
-                          <ChevronRight className="w-5 h-5 text-text-dim/70 group-hover:text-gold transition-colors" />
-                        </div>
-                        <h4 className="text-base font-bold text-text font-sans uppercase leading-tight group-hover:text-gold transition-colors">{c.name}</h4>
-                        <p className="text-xs text-text-dim mt-2 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {c.venue}</p>
-                        <p className="text-xs text-text-dim mt-1 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {formatDateRange(c.date, c.endDate)}</p>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
+        {/* REFEREE DASHBOARD */}
+        {screen === 'refereeDashboard' && (
+          <RefereeDashboardScreen
+            user={user}
+            activeReferee={activeReferee}
+            referees={referees}
+            competitions={competitions}
+            compId={compId}
+            setCompId={setCompId}
+            setScreen={setScreen}
+            refereeAccounts={refereeAccounts}
+            refereeFees={refereeFees}
+            formatDateRange={formatDateRange}
+            getRefereeAllowance={getRefereeAllowance}
+            onEditProfile={() => handleOpenRefereeEditProfile()}
+            setEnlargedPhoto={setEnlargedPhoto}
+            onRegisterForComp={handleRegisterRefereeForComp}
+            onWithdrawComp={handleWithdrawRefereeFromComp}
+            myRefereeRegistrations={myRefereeRegistrations}
+            triggerMsg={triggerMsg}
+          />
+        )}
+
+        {/* COURT ROSTER & RING ASSIGNMENT DISPLAY SCREEN */}
+        {screen === 'courtRoster' && (
+          <CourtRosterDisplayScreen
+            activeComp={activeComp}
+            referees={referees}
+            currentRings={currentRings}
+            fitToWindow={fitToWindow}
+            setFitToWindow={setFitToWindow}
+            rosterSearchQuery={rosterSearchQuery}
+            setRosterSearchQuery={setRosterSearchQuery}
+            rosterSelectedRing={rosterSelectedRing}
+            setRosterSelectedRing={setRosterSelectedRing}
+            isFullScreen={isFullScreen}
+            toggleFullScreen={toggleFullScreen}
+            role={role}
+            user={user}
+            activeReferee={activeReferee}
+            setScreen={setScreen}
+          />
         )}
 
         {/* COACH ROSTER DASHBOARD */}
@@ -5574,32 +5581,50 @@ export default function App() {
                       </div>
 
                       {/* Event Fees block */}
-                      {(activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee) && (
+                      {(activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee || activeComp.kyukpaFee || activeComp.speedKickingFee || activeComp.skippingRopeFee) && (
                         <div className="mt-2 p-2.5 bg-ink/20 rounded-xl border border-line/20 space-y-1.5">
                           <span className="block text-[11px] font-bold text-gold uppercase tracking-wider">Participant Event Fees:</span>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
                             {activeComp.kyorugiFee && (
                               <div className="flex justify-between items-center py-0.5 border-b border-line/10">
                                 <span className="text-text-dim">Kyorugi:</span>
-                                <span className="font-bold text-text font-mono">{activeComp.kyorugiFee}</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.kyorugiFee, activeComp.currency)}</span>
                               </div>
                             )}
                             {activeComp.poomsaeFee && (
                               <div className="flex justify-between items-center py-0.5 border-b border-line/10">
                                 <span className="text-text-dim">Poomsae:</span>
-                                <span className="font-bold text-text font-mono">{activeComp.poomsaeFee}</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.poomsaeFee, activeComp.currency)}</span>
                               </div>
                             )}
                             {activeComp.paraFee && (
                               <div className="flex justify-between items-center py-0.5 border-b border-line/10">
                                 <span className="text-text-dim">Para:</span>
-                                <span className="font-bold text-text font-mono">{activeComp.paraFee}</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.paraFee, activeComp.currency)}</span>
                               </div>
                             )}
                             {activeComp.virtualFee && (
                               <div className="flex justify-between items-center py-0.5 border-b border-line/10">
                                 <span className="text-text-dim">Virtual:</span>
-                                <span className="font-bold text-text font-mono">{activeComp.virtualFee}</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.virtualFee, activeComp.currency)}</span>
+                              </div>
+                            )}
+                            {activeComp.kyukpaFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Kyukpa:</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.kyukpaFee, activeComp.currency)}</span>
+                              </div>
+                            )}
+                            {activeComp.speedKickingFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Speed Kicking:</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.speedKickingFee, activeComp.currency)}</span>
+                              </div>
+                            )}
+                            {activeComp.skippingRopeFee && (
+                              <div className="flex justify-between items-center py-0.5 border-b border-line/10">
+                                <span className="text-text-dim">Skipping Rope:</span>
+                                <span className="font-bold text-text font-mono">{formatFeeDisplay(activeComp.skippingRopeFee, activeComp.currency)}</span>
                               </div>
                             )}
                           </div>
@@ -5725,6 +5750,9 @@ export default function App() {
               let coachPoomsaeCount = 0;
               let coachParaCount = 0;
               let coachVirtualCount = 0;
+              let coachKyukpaCount = 0;
+              let coachSpeedKickingCount = 0;
+              let coachSkippingRopeCount = 0;
 
               coachAthletes.forEach(p => {
                 const ev = (p.event || '').toLowerCase();
@@ -5732,20 +5760,61 @@ export default function App() {
                 else if (ev.includes('poomsae')) coachPoomsaeCount++;
                 else if (ev.includes('para')) coachParaCount++;
                 else if (ev.includes('virtual')) coachVirtualCount++;
+                else if (ev.includes('kyukpa')) coachKyukpaCount++;
+                else if (ev.includes('speed kicking')) coachSpeedKickingCount++;
+                else if (ev.includes('skipping rope')) coachSkippingRopeCount++;
               });
 
               const kyorugiPrice = parseFeeToNumber(activeComp.kyorugiFee);
               const poomsaePrice = parseFeeToNumber(activeComp.poomsaeFee);
               const paraPrice = parseFeeToNumber(activeComp.paraFee);
               const virtualPrice = parseFeeToNumber(activeComp.virtualFee);
+              const kyukpaPrice = parseFeeToNumber(activeComp.kyukpaFee);
+              const speedKickingPrice = parseFeeToNumber(activeComp.speedKickingFee);
+              const skippingRopePrice = parseFeeToNumber(activeComp.skippingRopeFee);
 
               const kyorugiTotal = coachKyorugiCount * kyorugiPrice;
               const poomsaeTotal = coachPoomsaeCount * poomsaePrice;
               const paraTotal = coachParaCount * paraPrice;
               const virtualTotal = coachVirtualCount * virtualPrice;
+              const kyukpaTotal = coachKyukpaCount * kyukpaPrice;
+              const speedKickingTotal = coachSpeedKickingCount * speedKickingPrice;
+              const skippingRopeTotal = coachSkippingRopeCount * skippingRopePrice;
 
-              const grandTotal = kyorugiTotal + poomsaeTotal + paraTotal + virtualTotal;
-              const sampleFee = activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee;
+              let grandTotal = 0;
+              const isSpecialPackage = activeComp.feeModel === 'SPECIAL_PACKAGE';
+              
+              if (isSpecialPackage) {
+                const pkgFirst = parseFeeToNumber(activeComp.packageFirstEventFee || '80');
+                const pkgSecond = parseFeeToNumber(activeComp.packageSecondEventFee || '40');
+                const pkgSub = parseFeeToNumber(activeComp.packageSubsequentEventFee || '20');
+                const pkgFive = parseFeeToNumber(activeComp.packageFiveEventFee || '150');
+
+                const eventAthletes = coachAthletes.filter(p => !p.id.startsWith('STAFF-') && p.ageGroup !== 'STAFF');
+                const groupedByIC: Record<string, number> = {};
+                eventAthletes.forEach(p => {
+                  const key = p.ic ? p.ic.trim().toLowerCase() : p.name.trim().toLowerCase();
+                  groupedByIC[key] = (groupedByIC[key] || 0) + 1;
+                });
+                
+                Object.values(groupedByIC).forEach(count => {
+                  let athleteFee = 0;
+                  let remaining = count;
+                  while (remaining >= 5) {
+                    athleteFee += pkgFive;
+                    remaining -= 5;
+                  }
+                  if (remaining === 1) athleteFee += pkgFirst;
+                  else if (remaining === 2) athleteFee += pkgFirst + pkgSecond;
+                  else if (remaining === 3) athleteFee += pkgFirst + pkgSecond + pkgSub;
+                  else if (remaining === 4) athleteFee += pkgFirst + pkgSecond + (pkgSub * 2);
+                  grandTotal += athleteFee;
+                });
+              } else {
+                grandTotal = kyorugiTotal + poomsaeTotal + paraTotal + virtualTotal + kyukpaTotal + speedKickingTotal + skippingRopeTotal;
+              }
+              
+              const sampleFee = activeComp.kyorugiFee || activeComp.poomsaeFee || activeComp.paraFee || activeComp.virtualFee || activeComp.kyukpaFee || activeComp.speedKickingFee || activeComp.skippingRopeFee || (isSpecialPackage ? (activeComp.packageFirstEventFee || '80') : '');
 
               return (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -5755,9 +5824,13 @@ export default function App() {
                       <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">1. Kyorugi</span>
                       <span className="text-2xl font-black text-text mt-1 block">{coachKyorugiCount}</span>
                     </div>
-                    {activeComp.kyorugiFee ? (
+                    {isSpecialPackage ? (
                       <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
-                        {coachKyorugiCount} Ã— {activeComp.kyorugiFee} = {formatCurrency(kyorugiTotal, sampleFee)}
+                        Billed via Package
+                      </div>
+                    ) : activeComp.kyorugiFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachKyorugiCount} Ã— {formatFeeDisplay(activeComp.kyorugiFee, activeComp.currency)} = {formatCurrency(kyorugiTotal, sampleFee, activeComp.currency)}
                       </div>
                     ) : (
                       <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
@@ -5772,9 +5845,13 @@ export default function App() {
                       <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">2. Poomsae</span>
                       <span className="text-2xl font-black text-text mt-1 block">{coachPoomsaeCount}</span>
                     </div>
-                    {activeComp.poomsaeFee ? (
+                    {isSpecialPackage ? (
                       <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
-                        {coachPoomsaeCount} Ã— {activeComp.poomsaeFee} = {formatCurrency(poomsaeTotal, sampleFee)}
+                        Billed via Package
+                      </div>
+                    ) : activeComp.poomsaeFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachPoomsaeCount} Ã— {formatFeeDisplay(activeComp.poomsaeFee, activeComp.currency)} = {formatCurrency(poomsaeTotal, sampleFee, activeComp.currency)}
                       </div>
                     ) : (
                       <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
@@ -5789,9 +5866,13 @@ export default function App() {
                       <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">3. Para</span>
                       <span className="text-2xl font-black text-text mt-1 block">{coachParaCount}</span>
                     </div>
-                    {activeComp.paraFee ? (
+                    {isSpecialPackage ? (
                       <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
-                        {coachParaCount} Ã— {activeComp.paraFee} = {formatCurrency(paraTotal, sampleFee)}
+                        Billed via Package
+                      </div>
+                    ) : activeComp.paraFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachParaCount} Ã— {formatFeeDisplay(activeComp.paraFee, activeComp.currency)} = {formatCurrency(paraTotal, sampleFee, activeComp.currency)}
                       </div>
                     ) : (
                       <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
@@ -5806,9 +5887,13 @@ export default function App() {
                       <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">4. Virtual</span>
                       <span className="text-2xl font-black text-text mt-1 block">{coachVirtualCount}</span>
                     </div>
-                    {activeComp.virtualFee ? (
+                    {isSpecialPackage ? (
                       <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
-                        {coachVirtualCount} Ã— {activeComp.virtualFee} = {formatCurrency(virtualTotal, sampleFee)}
+                        Billed via Package
+                      </div>
+                    ) : activeComp.virtualFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachVirtualCount} Ã— {formatFeeDisplay(activeComp.virtualFee, activeComp.currency)} = {formatCurrency(virtualTotal, sampleFee, activeComp.currency)}
                       </div>
                     ) : (
                       <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
@@ -5817,11 +5902,74 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Card 5: Total Amount */}
-                  <div className="bg-gold/5 p-4 rounded-xl border border-gold/30 flex flex-col justify-between col-span-2 sm:col-span-1">
+                  {/* Card 5: Kyukpa */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
                     <div>
-                      <span className="block text-[10px] text-gold font-bold uppercase tracking-wider">5. Total Amount</span>
-                      <span className="text-2xl font-black text-gold mt-1 block font-mono">{formatCurrency(grandTotal, sampleFee)}</span>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">5. Kyukpa</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachKyukpaCount}</span>
+                    </div>
+                    {isSpecialPackage ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Billed via Package
+                      </div>
+                    ) : activeComp.kyukpaFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachKyukpaCount} Ã— {formatFeeDisplay(activeComp.kyukpaFee, activeComp.currency)} = {formatCurrency(kyukpaTotal, sampleFee, activeComp.currency)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 6: Speed Kicking */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
+                    <div>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">6. Speed Kicking</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachSpeedKickingCount}</span>
+                    </div>
+                    {isSpecialPackage ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Billed via Package
+                      </div>
+                    ) : activeComp.speedKickingFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachSpeedKickingCount} Ã— {formatFeeDisplay(activeComp.speedKickingFee, activeComp.currency)} = {formatCurrency(speedKickingTotal, sampleFee, activeComp.currency)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 7: Skipping Rope */}
+                  <div className="bg-surface p-4 rounded-xl border border-line flex flex-col justify-between">
+                    <div>
+                      <span className="block text-[10px] text-text-dim font-semibold uppercase tracking-wider">7. Skipping Rope</span>
+                      <span className="text-2xl font-black text-text mt-1 block">{coachSkippingRopeCount}</span>
+                    </div>
+                    {isSpecialPackage ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Billed via Package
+                      </div>
+                    ) : activeComp.skippingRopeFee ? (
+                      <div className="text-[10px] text-gold font-mono mt-2 pt-1.5 border-t border-line/20">
+                        {coachSkippingRopeCount} Ã— {formatFeeDisplay(activeComp.skippingRopeFee, activeComp.currency)} = {formatCurrency(skippingRopeTotal, sampleFee, activeComp.currency)}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-text-dim font-mono mt-2 pt-1.5 border-t border-line/20">
+                        Fee not set
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 8: Total Amount */}
+                  <div className="bg-gold/5 p-4 rounded-xl border border-gold/30 flex flex-col justify-between col-span-2 sm:col-span-3 lg:col-span-1 xl:col-span-4">
+                    <div>
+                      <span className="block text-[10px] text-gold font-bold uppercase tracking-wider">8. Total Amount</span>
+                      <span className="text-2xl font-black text-gold mt-1 block font-mono">{formatCurrency(grandTotal, sampleFee, activeComp.currency)}</span>
                     </div>
                     <div className="text-[10px] text-text-dim mt-2 pt-1.5 border-t border-gold/20">
                       Total ({coachAthletes.length} registered)
@@ -8602,102 +8750,24 @@ export default function App() {
 
         {/* ADMIN FORM - CREATE COMPETITION */}
         {screen === 'adminCompForm' && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="flex items-center space-x-2">
-              <button 
-                onClick={() => setScreen('adminHome')}
-                className="text-xs text-gold border border-gold/30 px-3 py-1.5 rounded-lg hover:bg-gold/10 transition"
-              >
-                â† Back to admin panel
-              </button>
-              <h2 className="text-xl font-bold uppercase tracking-wider text-text">Create Championship Event</h2>
-            </div>
-
-            <div className="bg-surface rounded-2xl border border-line p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Official Tournament Title</label>
-                <input 
-                  type="text" 
-                  value={ncName}
-                  onChange={(e) => setNcName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
-                  placeholder="e.g. State Championship 2026" 
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Venue Location</label>
-                  <input 
-                    type="text" 
-                    value={ncVenue}
-                    onChange={(e) => setNcVenue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
-                    placeholder="e.g. National Arena" 
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Start Date</label>
-                  <input 
-                    type="date" 
-                    value={ncDate}
-                    onChange={(e) => setNcDate(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament End Date</label>
-                  <input 
-                    type="date" 
-                    value={ncEndDate}
-                    onChange={(e) => setNcEndDate(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Registration Close Date</label>
-                  <input 
-                    type="date" 
-                    value={ncRegistrationCloseDate}
-                    onChange={(e) => setNcRegistrationCloseDate(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
-                    className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Weigh-in Staff Security Passcode</label>
-                <input 
-                  type="text" 
-                  value={ncCode}
-                  onChange={(e) => setNcCode(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateComp(); }}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                />
-                <p className="text-[10px] text-text-dim/60 mt-1">This passcode acts as physical scale access verification for tournament marshals during weigh-in sessions.</p>
-              </div>
-
-              <div className="pt-4 flex items-center space-x-3 border-t border-line/40">
-                <button 
-                  onClick={handleCreateComp}
-                  className="bg-gold hover:opacity-90 text-ink font-bold px-5 py-2.5 rounded-xl text-xs shadow-md"
-                >
-                  Create tournament event
-                </button>
-                <button 
-                  onClick={() => setScreen('adminHome')}
-                  className="bg-ink text-text-dim border border-line hover:text-text px-5 py-2.5 rounded-xl text-xs transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+          <AdminCompFormScreen
+            ncName={ncName}
+            setNcName={setNcName}
+            ncVenue={ncVenue}
+            setNcVenue={setNcVenue}
+            ncDate={ncDate}
+            setNcDate={setNcDate}
+            ncEndDate={ncEndDate}
+            setNcEndDate={setNcEndDate}
+            ncRegistrationCloseDate={ncRegistrationCloseDate}
+            setNcRegistrationCloseDate={setNcRegistrationCloseDate}
+            ncCode={ncCode}
+            setNcCode={setNcCode}
+            ncCurrency={ncCurrency}
+            setNcCurrency={setNcCurrency}
+            handleCreateComp={handleCreateComp}
+            setScreen={setScreen}
+          />
         )}
 
         {/* ADMIN CONFIGURATION - COMPETITION DETAIL */}
@@ -8715,6 +8785,7 @@ export default function App() {
                       setEditCompEndDate(activeComp.endDate || activeComp.date || '');
                       setEditCompRegistrationCloseDate(activeComp.registrationCloseDate || activeComp.date || '');
                       setEditCompPasscode(activeComp.staffCode || '');
+                      setEditCompCurrency(activeComp.currency || 'RM');
                       setShowEditCompModal(true);
                     }}
                     className="text-text-dim hover:text-gold transition p-1 hover:bg-gold/10 rounded-lg"
@@ -9388,16 +9459,37 @@ export default function App() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">Age brackets</label>
-                    <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
-                      <Upload className="w-3 h-3" />
-                      <span>Upload CSV/Excel</span>
-                      <input 
-                        type="file" 
-                        accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                        className="hidden"
-                        onChange={(e) => handleUploadCategories(e, 'ageGroups')}
-                      />
-                    </label>
+                    <div className="flex gap-2">
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
+                        {isAIExtractingAge ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Extracting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3 h-3" />
+                            <span>AI Photo Extract</span>
+                            <input 
+                              type="file" 
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleAIExtractCategories(e, 'ageGroups')}
+                            />
+                          </>
+                        )}
+                      </label>
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
+                        <Upload className="w-3 h-3" />
+                        <span>Upload CSV/Excel</span>
+                        <input 
+                          type="file" 
+                          accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                          className="hidden"
+                          onChange={(e) => handleUploadCategories(e, 'ageGroups')}
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="flex space-x-2">
                     <input 
@@ -9439,16 +9531,37 @@ export default function App() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">Weight Class Divisions</label>
-                    <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
-                      <Upload className="w-3 h-3" />
-                      <span>Upload CSV/Excel</span>
-                      <input 
-                        type="file" 
-                        accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                        className="hidden"
-                        onChange={(e) => handleUploadCategories(e, 'weightClasses')}
-                      />
-                    </label>
+                    <div className="flex gap-2">
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
+                        {isAIExtractingWc ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Extracting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3 h-3" />
+                            <span>AI Photo Extract</span>
+                            <input 
+                              type="file" 
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleAIExtractCategories(e, 'weightClasses')}
+                            />
+                          </>
+                        )}
+                      </label>
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
+                        <Upload className="w-3 h-3" />
+                        <span>Upload CSV/Excel</span>
+                        <input 
+                          type="file" 
+                          accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                          className="hidden"
+                          onChange={(e) => handleUploadCategories(e, 'weightClasses')}
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="flex space-x-2">
                     <input 
@@ -9890,9 +10003,104 @@ export default function App() {
                         className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
                       />
                     </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Kyukpa Fee</label>
+                      <input 
+                        type="text"
+                        value={kyukpaFeeInput}
+                        onChange={(e) => setKyukpaFeeInput(e.target.value)}
+                        placeholder="e.g. RM 50"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Speed Kicking Fee</label>
+                      <input 
+                        type="text"
+                        value={speedKickingFeeInput}
+                        onChange={(e) => setSpeedKickingFeeInput(e.target.value)}
+                        placeholder="e.g. RM 50"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Skipping Rope Fee</label>
+                      <input 
+                        type="text"
+                        value={skippingRopeFeeInput}
+                        onChange={(e) => setSkippingRopeFeeInput(e.target.value)}
+                        placeholder="e.g. RM 50"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4">
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Fee Calculation Model</label>
+                    <select
+                      value={feeModelInput}
+                      onChange={(e) => setFeeModelInput(e.target.value as 'STANDARD' | 'SPECIAL_PACKAGE')}
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-gold font-medium"
+                    >
+                      <option value="STANDARD">Standard (Per-Event Pricing)</option>
+                      <option value="SPECIAL_PACKAGE">Special Package Tiers</option>
+                    </select>
+                    <p className="text-[10px] text-text-dim mt-1.5">
+                      {feeModelInput === 'SPECIAL_PACKAGE' 
+                        ? 'Athletes are billed a bundled rate depending on the number of events they join.'
+                        : 'Athletes are billed the sum of individual event fees.'}
+                    </p>
                   </div>
 
-                  <div className="flex justify-end items-center gap-3 pt-2">
+                  {feeModelInput === 'SPECIAL_PACKAGE' && (
+                    <div className="mt-4 p-4 bg-ink/30 border border-line rounded-xl space-y-3">
+                      <h4 className="text-xs font-bold text-gold uppercase tracking-wider mb-2">Package Tiers</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">1st Event</label>
+                          <input 
+                            type="text"
+                            value={packageFirstEventFeeInput}
+                            onChange={(e) => setPackageFirstEventFeeInput(e.target.value)}
+                            placeholder="e.g. 80"
+                            className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">2nd Event</label>
+                          <input 
+                            type="text"
+                            value={packageSecondEventFeeInput}
+                            onChange={(e) => setPackageSecondEventFeeInput(e.target.value)}
+                            placeholder="e.g. 40"
+                            className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Subsequent (Each)</label>
+                          <input 
+                            type="text"
+                            value={packageSubsequentEventFeeInput}
+                            onChange={(e) => setPackageSubsequentEventFeeInput(e.target.value)}
+                            placeholder="e.g. 20"
+                            className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">5 Event Package</label>
+                          <input 
+                            type="text"
+                            value={packageFiveEventFeeInput}
+                            onChange={(e) => setPackageFiveEventFeeInput(e.target.value)}
+                            placeholder="e.g. 150"
+                            className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end items-center gap-3 pt-4 border-t border-line/20 mt-4">
                     {feeUpdateSuccess && (
                       <span className="text-emerald-500 text-xs font-bold animate-fade-in flex items-center gap-1">
                         <CheckCircle className="w-3.5 h-3.5" />
@@ -9900,7 +10108,7 @@ export default function App() {
                       </span>
                     )}
                     <button
-                      onClick={() => handleUpdateEventFees(kyorugiFeeInput, poomsaeFeeInput, paraFeeInput, virtualFeeInput)}
+                      onClick={() => handleUpdateEventFees(kyorugiFeeInput, poomsaeFeeInput, paraFeeInput, virtualFeeInput, kyukpaFeeInput, speedKickingFeeInput, skippingRopeFeeInput, feeModelInput, packageFirstEventFeeInput, packageSecondEventFeeInput, packageSubsequentEventFeeInput, packageFiveEventFeeInput)}
                       className="bg-gold hover:opacity-90 text-ink px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer animate-fade-in"
                     >
                       <CheckCircle className="w-4 h-4" />
@@ -9943,6 +10151,9 @@ export default function App() {
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Poomsae</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Para</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Virtual</th>
+                      <th className="p-4 py-3 font-semibold text-text text-center w-24">Kyukpa</th>
+                      <th className="p-4 py-3 font-semibold text-text text-center w-24">Speed Kick</th>
+                      <th className="p-4 py-3 font-semibold text-text text-center w-24">Skip Rope</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Total</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-32">Total Amount</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-36">Receipt</th>
@@ -9953,23 +10164,29 @@ export default function App() {
                       const stats = players.reduce((acc, p) => {
                         const c = p.club.toUpperCase();
                         if (!acc[c]) {
-                          acc[c] = { kyorugi: 0, poomsae: 0, para: 0, virtual: 0, total: 0 };
+                          acc[c] = { kyorugi: 0, poomsae: 0, para: 0, virtual: 0, kyukpa: 0, speedKicking: 0, skippingRope: 0, total: 0, athletes: [] };
                         }
                         acc[c].total += 1;
+                        if (!p.id.startsWith('STAFF-') && p.ageGroup !== 'STAFF') {
+                          acc[c].athletes.push(p);
+                        }
                         const ev = (p.event || '').toLowerCase();
                         if (ev.includes('kyorugi')) acc[c].kyorugi += 1;
                         else if (ev.includes('poomsae')) acc[c].poomsae += 1;
                         else if (ev.includes('para')) acc[c].para += 1;
                         else if (ev.includes('virtual')) acc[c].virtual += 1;
+                        else if (ev.includes('kyukpa')) acc[c].kyukpa += 1;
+                        else if (ev.includes('speed kicking')) acc[c].speedKicking += 1;
+                        else if (ev.includes('skipping rope')) acc[c].skippingRope += 1;
                         return acc;
-                      }, {} as Record<string, { kyorugi: number; poomsae: number; para: number; virtual: number; total: number }>);
+                      }, {} as Record<string, { kyorugi: number; poomsae: number; para: number; virtual: number; kyukpa: number; speedKicking: number; skippingRope: number; total: number; athletes: Player[] }>);
                       
                       const entries = (Object.entries(stats) as [string, any][]).sort((a, b) => b[1].total - a[1].total);
                       
                       if (entries.length === 0) {
                         return (
                           <tr>
-                            <td colSpan={8} className="p-4 text-center text-text-dim text-xs">No athletes yet.</td>
+                            <td colSpan={11} className="p-4 text-center text-text-dim text-xs">No athletes yet.</td>
                           </tr>
                         );
                       }
@@ -9981,15 +10198,52 @@ export default function App() {
                         const pPrice = parseFeeToNumber(activeComp?.poomsaeFee);
                         const paPrice = parseFeeToNumber(activeComp?.paraFee);
                         const vPrice = parseFeeToNumber(activeComp?.virtualFee);
+                        const kyPrice = parseFeeToNumber(activeComp?.kyukpaFee);
+                        const skPrice = parseFeeToNumber(activeComp?.speedKickingFee);
+                        const srPrice = parseFeeToNumber(activeComp?.skippingRopeFee);
 
                         const clubKTotal = counts.kyorugi * kPrice;
                         const clubPTotal = counts.poomsae * pPrice;
                         const clubPaTotal = counts.para * paPrice;
                         const clubVTotal = counts.virtual * vPrice;
+                        const clubKyTotal = counts.kyukpa * kyPrice;
+                        const clubSkTotal = counts.speedKicking * skPrice;
+                        const clubSrTotal = counts.skippingRope * srPrice;
 
-                        const clubTotalAmount = clubKTotal + clubPTotal + clubPaTotal + clubVTotal;
-                        const sampleFee = activeComp?.kyorugiFee || activeComp?.poomsaeFee || activeComp?.paraFee || activeComp?.virtualFee;
-                        const totalAmountFormatted = formatCurrency(clubTotalAmount, sampleFee);
+                        let clubTotalAmount = 0;
+                        const isSpecialPackage = activeComp?.feeModel === 'SPECIAL_PACKAGE';
+                        
+                        if (isSpecialPackage) {
+                          const pkgFirst = parseFeeToNumber(activeComp?.packageFirstEventFee || '80');
+                          const pkgSecond = parseFeeToNumber(activeComp?.packageSecondEventFee || '40');
+                          const pkgSub = parseFeeToNumber(activeComp?.packageSubsequentEventFee || '20');
+                          const pkgFive = parseFeeToNumber(activeComp?.packageFiveEventFee || '150');
+
+                          const groupedByIC: Record<string, number> = {};
+                          counts.athletes.forEach((p: Player) => {
+                            const key = p.ic ? p.ic.trim().toLowerCase() : p.name.trim().toLowerCase();
+                            groupedByIC[key] = (groupedByIC[key] || 0) + 1;
+                          });
+                          
+                          Object.values(groupedByIC).forEach(count => {
+                            let athleteFee = 0;
+                            let remaining = count;
+                            while (remaining >= 5) {
+                              athleteFee += pkgFive;
+                              remaining -= 5;
+                            }
+                            if (remaining === 1) athleteFee += pkgFirst;
+                            else if (remaining === 2) athleteFee += pkgFirst + pkgSecond;
+                            else if (remaining === 3) athleteFee += pkgFirst + pkgSecond + pkgSub;
+                            else if (remaining === 4) athleteFee += pkgFirst + pkgSecond + (pkgSub * 2);
+                            clubTotalAmount += athleteFee;
+                          });
+                        } else {
+                          clubTotalAmount = clubKTotal + clubPTotal + clubPaTotal + clubVTotal + clubKyTotal + clubSkTotal + clubSrTotal;
+                        }
+                        
+                        const sampleFee = activeComp?.kyorugiFee || activeComp?.poomsaeFee || activeComp?.paraFee || activeComp?.virtualFee || activeComp?.kyukpaFee || activeComp?.speedKickingFee || activeComp?.skippingRopeFee || (isSpecialPackage ? (activeComp?.packageFirstEventFee || '80') : '');
+                        const totalAmountFormatted = formatCurrency(clubTotalAmount, sampleFee, activeComp?.currency);
 
                         return (
                           <tr key={club} className="hover:bg-surface-2/50 transition">
@@ -9998,6 +10252,9 @@ export default function App() {
                             <td className="p-4 text-center font-mono text-text">{counts.poomsae > 0 ? counts.poomsae : '-'}</td>
                             <td className="p-4 text-center font-mono text-text">{counts.para > 0 ? counts.para : '-'}</td>
                             <td className="p-4 text-center font-mono text-text">{counts.virtual > 0 ? counts.virtual : '-'}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.kyukpa > 0 ? counts.kyukpa : '-'}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.speedKicking > 0 ? counts.speedKicking : '-'}</td>
+                            <td className="p-4 text-center font-mono text-text">{counts.skippingRope > 0 ? counts.skippingRope : '-'}</td>
                             <td className="p-4 text-center font-mono font-bold text-text">{counts.total}</td>
                             <td className="p-4 text-center font-mono font-bold text-gold">{totalAmountFormatted}</td>
                             <td className="p-4 text-center">
@@ -10303,269 +10560,1886 @@ export default function App() {
 
                       const handleChangeFieldColor = (fieldId: string, colorHex: string) => {
                         const fieldsList = getIdCardFields(activeComp);
-                        const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, color: colorHexœì}İVãHšàı<E›˜.llY™LBÈ,¦øk «º7O-È–°Õ)KI\40gÎœ³·³—s½×û4ûóû}!)$E„BÆäO5:§*±
-…"¾ÿß[rO6ÈÕÒ?şQ\CË·=çÃØ¶bgßŞ±BûëxvÔğö—ææ8t'<ŒÅw“~à!™ĞÙìÖâ2Y>-*'¸ÿÇPü:ñ$ôICùä×¶{M”¿òÉ™nŞ]áú[®}¯i‡Ö``õ<G3&ğwaÔYl…ñæ]ÃY"›[äN3§[`‡–]9a+râ]øÜXŒÛxeìY®›“¬O³Ã’¹œ«+§o{^pãØd“,‚kg±jŠş$?>·Â·úEn·,Ûn,c«ïÆÓæZ[}XxİßWnÒoo‘jM¡ƒ¯4×e_;¡ñºÆ¡sëÚu®¬‰7*G»·¡ëšDú—mECÇN?Ï^÷ƒÏ=şişL|Û±›Ş ?a‚‡îÀc];s;š¯ã­‚ñg?ÓÏºªÅŒF9ö>¢{$”¥bN÷Š4²Ÿ?¦ÿns3£J{šğ³kÌyF:‘1mÓ°öøé‰Y#gsa7WáyaoÀŸmÙpšÓf§µNzAh;!ÿ§ã®-<X›O†p”áœĞÍĞ•u’ ˆ‚°9­±ú±{íl_õà”	ÎİÀoZGìIhÑõö‚ré[š—¢\Mx³+Ï¹%D±{5möœøÆq|+EÍ>¼ƒ.èfSÌ'ŞÏ÷ê–îÕÈõ›7ÍvÅœ0ëûĞÿì„±Û·<qú8‡!ü‡ Ø¤ÿ³İ An/£!`È'xY©|¬Î@çüØéŒo%W o4{€YÙã@ğ;aßŠ<šş'ÄÄ×ÆO¿"	Y·ğŠá€`Š…-.!ø0ùıë|ZÅ~®À†V)¬ùî’-ú%®9[Ÿ°zq¥€ëÏø¢®İÈ©„¼!µˆö"sìSÏ²ï/ï«v°<×ÏìO:Ó®ã9 §-êğ_ºjcø¶Ôì ¡|`‚>¼é, ÚøKó&´ÆÕÀ]9g¤x®ï$dƒ 9¹¹¬9tm^(Àzå3á©½I~å8¹§cX®&2Ùe»
-· ”¹ö-ÙúŞÖ7»ÇsûŸ€½RîÊ(ı!¼¥ô˜ø×d¼¸d2™H«ÔÏ üÉê6Qoµ}7\Üğ&eÜQÓ`§2½Bì­|põ¶òÿş×ÿ©>œ¶İ_×1ZaØòI“tæv¦vpãÿNõÿÎíT«‰^w+$Û;ğG([œaíÇ 	ÿq¥j'ï>.(	‡AàÈ‘ğß¾7éá¿V<DR½O%Ì‘[(âßÿöÛYüµåú0H#ß@²S+ĞéëEt­›zmy'Qª-|Wò·¿‘ôy(“õ §ñœ«˜²F7Í€
-`àr)*JÙ—Né.§O]y8f2:]±"bùÓº Ìµ´g JÆÓfxJôTö¸
-ú“h#˜ÄxköŸ1ÃÓc7ö`Eô5Éç @Í+^cOùA.àù,l0°}½Â~œaDİyğL¡;Â’NëN
-âª‘ u°ñ3"¡© c JÔAéR£Pzæşæ˜ 	ª¾ãóÍ[¿V|M1–@ñuMî29Ç~ÜF[>«ƒ`¥)¢ÑÂÖÙáƒ¦èş²°u¸û I¼÷šâÖƒİ8xĞ]œ£ûçÍ±Šs¬Öš#£W&ƒ´!t<­D¢™TbÅ˜iú#¢’ƒà4áÑX›ë'f„&y©‡À¯
-Ô‰ùÊ"'ØøKşJ¿Ë_§”…”?\Ñå”ü(Jôé«m9ı6•dş°»¶ınõ3Q¯jI·[I ”·ÂÀÙéÿ{ÖÕÄó$p!Øf¸X^RaÇÍ6ùø|c£yãô>¹q“B3º±âşjÔc'üuC7ê×„¢R›šŒ^¬ÒDÄ.…¡èej'~7K	¶ 0¸¾Ô&ôUA›‰mŠïDµ…ÊxXğ™(Ff
-qeXªÄƒÇğ‰Ú·\´ÎL«B"ÑZ²›ĞG‰,‘Ùír¶FnNPìY•åœ¼aÎàdßd–?$ôğÏJbŞ¦ºíÌœŸ; DÓnæEB}01ı$ÎL¿€©+f¾¿Ôïy}»å®ãQ¤Ø¶«í•ÕŠ}ükVx4î¥`¦˜I;’Á²hk8EU	yõdäo“Ğ¹“ù¾m¾smáŸ #!(+À€k×¹)Ù#ŠÂ…7Ø Â×DjÓüÁ!š„WV? š 1Éä‹qó%“G¨¡¦wsN‡iópË^èš’87_”¤â2oD†ÖìåXÚz›Œ{èšÁw"ç#·‘
-í3Ã}˜ç. Üâ¶ï:jñÉî7Î¬ÑÀy›)’ä­eœ%qW0µWçµº%ÆUuºLÌëèD :|µ½°…şaòœ C•ìùÔN'_•n ÷wÉÎöé.yº}òãş99İûyï²s|t¾½´w*±…)E[~¾Ü[³º†ŞĞÇ 37?vV:­µ_+ råe»$Êp`Ãò°Š;‚ `ÑŒƒf/$Wa0j~üC§Ûítv~¨„ííÎj§ëğİ‘;Í+@Ş–€Ñóî£1°Œ©y;øz*[Àk9¥)îÕ‹ İl\?rĞÏùüKïã{Ò?X*MAš¿»#= Ğİ§ı‘5p6Èå$ôÏË»_º$÷÷*‘Ët5=ŠråÈ½…o7G/vÇŞTáñ{-ùVBKË»Üh(=ÿÜmîŒ‚Ã ÿi2>ñ¬)lÒ¦Â¥íÚÈYÎl¾|ùêÕâ²tÊw0êğÃÛ‡‡Û»dûpÿôÃb0Ês0ø§ÛÛäàÃáÉ‡S²{ºışøèLq5‡ã-Ó œ\ c+ÄX‚%Åp ïálÇpÏ?M|„ÕFg½ÙùA5~ G<Ş`û`O1æÆA¶²ƒ§?àd}ıÓ@1Üğ%»íN»Ù^kvºŠaÔªeBÃ½Œ™²ÓÃqOP=ºçx1Cı¡M¯Å$++ä-#ûÉfdDgSNCåé“–‰ËğF*('…ySØÉ-ÌÛˆà/ØÛ²è?hW¡xúÏ­GÿéòWáßåä5~¶¼Às
-Éê(¶Š‘°rêôH¾fw,ó;·”ˆAè"a© J)N—Ğ€!¶n};ÕÕ‚WÇ1kº1°8æİ˜.Ôíè­òAë0H.ÒÉ%=œûùòWTú²s‘İ#tÔ9*yãoÍÈãŒARÖ)p³¢Ì#M€D°ª´íÜeÀßºr=à%+ª«D_jÁ;3µJr…FRµYSTõ™n†w.°9rêÛ°ù£~òóóa HríZìø¾Oÿ »W©±‰n/úFÌ½šI²ß†‡&65ĞUêNH½¹b?`>îv'Ì;ªç\,À’^í»Ïı „¢	*1ø²>ïª£WJ0{m73P…Ğ„‚ˆnƒ@ÛÌ›„	"RâòØ †Zô£_ÜxØX<;ß~÷®	0ø=n%ü–m.ı~zC.Ÿİ§œ}?nä}#ïTYfDti™tÚKä{²z?¾½ÖìjJ¬F©m*3(İßo‰bqD“”k	'Pe'Ò„÷©µô2y@=_â€3Š¤aaH-ß\³È‚Ğ$ÂòÛk*6À¾>l”?xrJE2B¯ìğH¤†Fğ5I€3gú¼r&ƒI÷Eˆ‰ÏÇo¬%úbº5zÀÑIßâU>käP]jxäÂŠŒÀŒª³Ë¶WÓKÅtRÊn:[xWYŞğ2dWÙ®ÒYÙ¢ó"q%	ñ°«:Š/1ô$´_¡Š»¾_Ã*¬öCsæ–‹~õr¼éè¶iMâÀ Ä”Ïlf57Xô¬{Æ«Œ5Ô½ğÈHó@d¡'À£~Š(t.şÑOè-5Ä4†«HâBŠ©Y6|,8š0Ò &›]©R!PİÉPHe€áê×ØÔõõØêë± {,ÂµÂ¬òÈ¹è³@m…›8<Ğ"4 Ğ¿n˜Í"ÁL ïŸI¹àïƒÄZõOè1oô(ê®OÉwÏĞ¤˜yÆdrQr·IüÉ)ßxtâ1@ÎŸ{ìÀ#àS$ñ¨èdç5°HÔ6“X(jUyªZbNÕr¾¬Õ6Ç8Wäci™°á`R×Êå’­i
-İ‚ùSÈ7¾ƒHRÃêÒm‹f—Ní.ËuZ%nO¥Mh/Ó35|Ü¢#Ó™Í©A­¨’"$4á!
-ı jÿC#wÔìR+fWŒÍÑàN÷á¦€oŒËÕ1Ô#)b6e†ì^àä5ñmU¸D"WR&¸µcÅÎ §u€Se96FÂªVg.ûª¦•°›¼¶v}gôÚ*çwB~(Ìßıû=®˜Y~´°õõÛ«è#Dü~kak÷øí7„>vĞ{œÃørZOÓ2QXÄü?¶ B
-›dÓDÒÓpıÌM7M¬G¬6ŞL:Ğy~Íƒ2“TyQĞ0zübe2Eq"¼O—¦ÙÎçTR¹.©ñğM¶°Ş¤‚`˜Ş¨¬‘•]«Ÿİå¡ü¾$F³Ò62¡zV7SRp“K³HÎÂÂ<D¦ŞHáY:İ,?ûù½¹^ÆÓŒ.‘‘÷Ï˜åR[A,aHĞæİj·Æ-osá°†öÌ3M­pàú›wW–¦mš'ÕÔc¯"T•ÑÔR@¡ın6ãÎóç‹¶ÂŠ¡ŒßF“‡q½¯ÖÛÀ¥¦»¼µ•ê´HŠG½Ùä'jäãœ˜é÷h7=à¢q¿æVÌ²àŒ­’çĞ*‹–IØóãpJN`†ÿò«bz<Y
-W8²<AV›å]^9,–	¯n±AÚ­—ëøjg}×â€ØîÀ-Ï›`ñÀÉİ ŒÎ'
-|ßñZ4÷…»Z‹¦’¯P,3öiÜ/5´‰[VTÌªœO2“lmŠ”ëË‰4½adó`Ì³R§î6o=`—²àMU•¬¶*QDM3šµõ³M “xËû	BòH™­2V-!Ÿv™`*Æ³Ş:¶”¯Ó¼˜ˆÜ¸G0£õ-ÏAÌòm‘§-?¶sú²MynD«­ÕÖÈ-é¶:İõ…%xÓÀ''»ï —Gc×£ÕÙÌ@z˜˜JÆ [Ä°˜ù€›1DıµÃCÄ‰Õ®éCÇ<}ÈgŸ–ã Ï	PÒ`ÃOÁ8qÚ¨UŞ’2’ª3¼”_ˆE+î‚p`ùğ²á¹ÕcÄväê
-I¨-LŠÀW0¡vˆ7Ø>2“êK.Ê³pV/§ÏyÁüŸ” “|´w@†kåš­ÕÊ5{!Ë «LÓe‹ÉĞ*øA8ÕÊ“¸{¨ÑZ
-ô4ºéÄ›Dù'ŒÇZËWÒ´mÛd”®`DÎ (S• d9DJöŠ[—l÷šlŸcUÕJ^{VÏñªé•i¢İ;„Oœèõ
-YúLu–{ŒÓÉ3¹n¢>IÎ@J¹ş‘Ÿ‰·5Œrû)•Â8áæ‚Óâ’4yëúd»7‘¯Q’YU	‚²“Ûæ*Ê·İDë¿Ø­_E™ªô×/3§°“re/t`£)¤S„œr¸ÀÛÌàâ+9dEv`¾&ÊN`õ‡[ô}a”Âç5"‡–q¸°%~ª5Í©så„Íş¨uóÏû' şìŸÔº‰èÂı§Ö‡rÌÂÿ£öÍ»ÕÒİ¨.õ•"è1“s˜À¶Bv¼Iïów|ÒhŒ·ÍJŞÏ-çÓMàÛ€:ˆ•œè×L jPyeñBERîi|—ã»jË½ØˆàT 0&oY4o—v"pÂ0Õµ±™bª¨í ^ jûö’övf»ö
-/¤"™å#_2Á³»]¼[~pÓXjÅÁMØ„?#Ø@§Ñ|±t©JpdKSıÊò™sûó@İık,)§¥¹Í9Œ1»Ñíc°êW–L|´²­‘f0ëõ‘ç (Íóµ•yÂu›½‡yÍL5ªùtjíªC;flÃ‚ L9=îı³ãäÄµÙ¥M*rè•Ced];g™öx°„ğn7äc«ÕÔËå‚U QIà]T¡[‰v*GŠ˜ÍT›1z} œ°²Éˆ4àJJG©a„U¹IŠÖ¾âf]$±ÃZ‘¼
-ÅÒúïİv©¬VBy•6×ÒBeŒî=k•z'/|3sY™÷h/¨£Æ¿¬«Æ§©™èí6?®µYaö¨òh¿z1[õ—/¡ñÏ¤î'p`†š³kú…w¾'Õ¥iÍpòFâ^”–-5r6£<Ò.Xs5±‡®í¡eO¤du¬*/a›_–òÆTJÊ¦M,¶@wj|ÓË¨“ÂN/™k{&VÈ+4ŸA¡I´«Å±l›ñ*şŒ–tjé/‘ƒÃ+Gö†n™³®R°.j*Á`Ë9OSé€æ¦ÒÅÜÔB&¢’š¬U”AÈhMZJÓ}Õªj×	±ì2–ÙUÉ™Åæ•"ª’`¬öpIvrI—›¬ö®Èêü4±4W—°èøÎ…ÕQÈ\Ÿ7@x‡ğ_®äTeÈ{ÂoÛì<šy.Ü^*ğXÀÆP·@³Ó)r[UAMÁ·óhKWÒÌD“CZUhNt&õÍâµaş<‰³XÿèášI¼ÊÔ²ö)ÔÍªÅòÒ,Ã-ñğµš¯-ª¤”d•r£Ùa[Âê‘m.ê_Xÿca=#šhÿ“†“¯·ó¢¨$šĞ”êò—5ˆ-pàÄ‹ ErFAXä
-ö
-‘Ã¢Uÿ€y ÃcÅZú˜˜òÌõAZ»q@óc2âj3›¢IëpvOx‡¢£9’“€!4µf²¬ô,;Ùœ[ô±eÑs«ZÏy ÜÀãÜ‘‹õòğ‰‹X´Á‰ñK¬N˜=ËIx"úô‚1Py‹ŒÛò–Óea?/°èRm7„›¼)Òcx	 %0g¤§QP•ëÛÇµĞ…Q_`y†ì]y +×¹WhŞƒ‡÷/¸Ñ?…+`ı	>}ñn o§ûvã’>€OóYÆ9/z9^u¤¨vqiKL½¥°ª¯crã‘wĞÚs Ë€ëÀÉHJm,òJ{0ñØ½u¼SÔ£6È*ºqÉ=(ÂCÇo`~VÑ3(:‘ì ‡’ƒ°‡LÍæÛØX´ª_Ğ9Z)m’ËİãÚ>zAUÿ‹g9º›~¤F§Ğ¡Æ¾ÆÊÇÿa5Ûnş÷vóÕEó×•lßÅâÒ}kì.0+|¶†7õ‘´TµºÃh†VQµá„¡ùî¢¹„šÔ‹ï,×Ã2¹A*ø
-àg
-Ã6:×L´<#€/{§Çï;—éº ¥r©8*‘Pv*åô‰¶ÓÊµ¡S÷´¤"3ñ§¢÷ÜnãòZâÅ4Ò»áœÔü°JbRsjuxÄĞ.Wƒ
-vŒ‡Å]„Ì³Tt‘…*TQpwÙCjBŞÁôä´…q¥FŸ<n®çô'¡ê._\Ù«S¿c›Ì(£®0nL¨0ì ¨tz¡ŒÆt¢Êç`şIâ	>'´W¯R?NuQiU§EÅÂÑÃê_¹ƒI¢9Là³ÄJŸµÜÂyÃ€T(~ÂR/ÃØ jÁÈ&.ãğckª2ZhKY—¾ÖE¥¥¥ŠÛbıârmân[(e\Ê §ö‚F²æÓC²BŞºO@¤(wxÖ9Î)A™qm^*À}§E@-½1ğî[RpPre«Â¶Ó%ÑH0æ¬åM=/)‡‘—‰Ô`OÉ,¦M	{”Q¶cª·mÒ$ {}iÜÀå÷N,=jOJSsÚİ0½8²bÄ”/7Shü?Ô'M1WµZ'cşj2êéø8÷Zs„T¦õitÑ¾X×ôv,ù¯Y—öÓlÆá^˜t™ğY7M¶>.º¹Qo+£jñšÅq’­œ0öš?€š›ARŒ=üsêë¤ª}­’=Ô?|)<YGDA›Ù¦ĞK)ëíØ£ùã
-›÷	[¾lADtyb,É%GØ¦‹Îcğ>ñÂ|3CùK÷‰¿$—a€tƒÁğ‰Ÿæ[A˜.å0İ'“\r„mºè>‡á?!Ì7ƒ0”Ã¬>q˜äR 0‚ÕÇà0|â'„ùVf•r˜Õ'“\r„mºX}Ã'~B˜oa(ªç,Áû	eˆe€Ğ=z¤I¦~B›/6&Á…ç»˜„wö–zÑHã~øépé	u–1vÆ›íV{½.zaTË³¼ùc˜8ûgA2ê°Òú»À3yU£
-/Ò°Ñ5^Á»*È=¯ª"ÒåÏÕáÜm‘]2°‹!©“™b½ÂÓ¬w‘½†îUds±÷yUP¾HöÖH¹0Dâ,)“„fÀñ$Âª±’*:ÍòQ$GW¿7ııq¥ıSÒØÇÈßb±Âzò-ß…J"Îo« åH	‚´xw‰”‹¢šŒóGVsv™‘tvIˆ6¥©nXUâj&’Íç~©f×¤"Œ´ñš/‘^w?µf—6®°*•¡âç/‹tG€tGOøö |óßü'|+^ß4¾¾!{wVÎl‰ş„sú±*œ‹ç¢'œ+^ß4ÎÎ‡˜øä<¡›~¬
-İâGD·ø	İŠ×CĞ­:CÅÈ&5t©‘@x-›d.Ú1³‘í1K²É1Kğ¤¯~ı
-ñ¹Óú´„ì®ã9À•'ê¥½”ÔË~Dêe?Q¯ÂõMgøùÚ‚pJŞVh?áœöRá\?RT)Ì®Ù‘&ÂºÂõMc]bùŞ÷› p”OX§½TXºıÇÃºË#>a]îz’Ô3Iıg7Œ±#CV.öïERS’C+Š±
-ôáÒ\*Â5€7ºÑ|<&<ä‰®oZ|È4åã1«õ„†ÚK©)'yğ|DÍ¹ô¬'¤,\ß4R&â@Úáà	#5—
-#¯Ù.^ğzÂÅÂõ¸’¾ñ*ÍàóÄß­¶È™X—çX¨ËsbM±’-ôh‹'•õUj‹60ïq‰ÙñµÆ.Hùï*)ÙTì3S°jêeJ¹$T+à;¥#3Q©dâ‡R¦o‰*i*ûÖ§(_â!–’Bñ’¡İ§ù#ö	uÈCPGQPWay%Ú%Ç¬•fÒÊXkëªÎ,éÀ¤,ĞÕCÓŠ(¶Áà¤Dgµzpš	ßya08Éî¼ªœf@v»ƒ³Ì¯îËvåğ|K§Õ®¸%ccİª‘g+†¥qÙ°Ù#1¢´Sµi\§êuÒ*ĞI½å]£eR_×èéÔ/Ñ1z~Îh¶_23…Ùş•4ªÊÍ´+kâÅV¿Œ°L8ÊÒ¶[®€°°0Ëí#k]`µåª	ô‰sÅ±jhDë¾†='=â|ÁÀWU×å6ëùç>¯l<¦$0,eábv?ïÏ£X¨Zp8¥{µË÷BÉtˆç¥.b-ß3‡êjdm#Yhoä”júÒ	k$“ÉtÎU!]k¥kÏjúö ÕÑçù—Q*¤†]ÁG´LğÂúĞIà /v<Z®ö}`CƒC@6r3}f‹œİˆX 0»€0Ø#€6©ËüóÄ‰¨îœÃØe2ñ='Š(«Yé~ÖkÇÓBıØØûÊõy—JEÛ8¯/™ë©y€Üe”°JƒÀÉ­Ğ±”ˆ(‘»µ¤—6ñXœs
-l±Ï‹çZÁ¼Ü±óG
-—ïC„L\Zßñ¼ \&§A0"kín¾uúŸ€z"duºñ÷cÒ%'‡-µH=»øßeÅã¹¿Œ<Æıÿ:lvÛóJ­U§†Êkz'whTÃGö3Dæ 6¾Ò¦®é;Ë.¦©NB¯¦šZ!jT!Ì\QFpj Mm†q<6VVp²PìÖ Zo– ÛšjÄ³#Å|_ƒtbu—Àl‚/èmbï$®],¿ŞØÔ(Û£
-Cê¸qF®¿¹ $OìÒ •&.lXùÅ8yì•†`s `“7Äô¾
-ü{ JYÂ>\úâ"¬ùˆn]Éà´!¼X•3©Ìâºúmş
-Së`úº}¹LZ8Ä´ñ/Y¦óD.\ÇÑ¦K„£¹@ ®æ?sÿÜ3krLwÖ©Öè  ¶ôwàî ­Óa˜Ç"£ê1ñ)Ä[=ÄŒçä<˜„Ø8¾İ"wàÓ?ŸZßî—w´ıªºß`/õˆ$ÍiÁœzŞ0Ø Ü(§ë1í?Õüã¡ÅÛş5 ì/F;AœB×|úÛÈ‘7.ÆNÔb»¤eØÄ†ÃÒuhœŒ³rJaèòˆœø8ìÙ.Hø±…n¿]ä•DvÇwV÷lâœ&O†@FêûÅOA±µá¼JŒÆïºheí›­â­å2ŞÌ	Ñøœ]¦±xÜóÓ4'·±x~j²İA0Š,Çpô˜°ÑâyJ)Ò \ºï¨îQ£3¤º»T”%­òF¶Æ®üL…ß2$ ¡z‘·¨b4zeş<Ab†ñô»EùK^ÊŞRN	9eKrr)•*µûNşB…uÂ\º6]•;^Ü¤ŠwÙÅ—˜Jùºï—B‹*„À´ \Œ¡fûI¯	“;^$1ĞWš}sMÒ;]e—t|Ò	>…t6È™c…ı!šÔÙùïİº‘¸;²•”×†§6qg@H«°%'ÏzVÛ*ĞÆõÂ¿ò>î*ë]GeÇ–¸’(	‚J-BC»¨{JzĞ¹@w92í¸ıôÁÌ@Å
-¥ù_W³FxÍk¾¨œ$—vÜ$ù@›Uf#©€©lÍ©¥©Vs:_+ß5Ò›ÜGl´|tº¿£±äqå0œ8›H¥½•GÆXÄ[‹¶ÕT*%=h=Ô„,¦æ"Ê|•9¹d®ÌI“(<ø«•ïĞì’‘uÛ½ K]Wh>Ó¦5Ar‚ÌÊÄ¯»†^‚d–ÿyâ„ÓÏ&²I
-'ÜŠƒƒàÆ	w åK­8tGêfÄlº+×~í`Ÿå;[ì»†¥àa÷#DÒ¶ã›Äjá‘ãâú}ob;Q#[¼ÆeÎ'n”MŒŸ¤íYsçÅ¥ê'jo×,'tb `Â‹şíoÙâT·aìâ'lìzËsüA<¤nÛºá|ò4G™î&8ö·Ö¶ NX2ò¹”_!ô¶*(ßEõ&|QéËŒ¬qĞğ[ä¢»è;jMEŸœéæƒ‰{ıÈZ6…q>h"3s z)Õ&“H¡/	A*æDLgbªHÌPˆ¨ë\¿yÓ¤r…Î‘!ŸHÙåºr&‰+‹vŒÃ‰ßÉtaë.£÷&É(ÒG0H‰€¢q'á+/u4¹€BP,,éÓŞXmZÃuUµå;­LE–AW\§Ù>m%È`º»0>ÊtFÔUò_POU$ÕzŒdŠó’ö¦‡˜œS&§ê›KŞä*ª‰pîU*szèâ·­r2ø0b„ª]C@¦Ü¦•›°"h7¹ªm]âU°{i{7qq2±ÀXÇP¥SˆÊ¿¤{5Åû\àÚºÅP© j©*FÂ¥T»êÕ«·€ªQ•ğ¢‹ËFU9Ëô”²*@ò~©!=°bò˜ÊİİYZj+Ù?dJ¶‘ş\Éò5ñauôğ9iâÊT˜˜ŞK¾«¸›äã¦âûK´I6]éDT+ü5Tşº¯ ê7dñÌñœ~L¬Ôó`¥5óĞX Û2Og[‹º	7„	•ú*F4 Òs#õk±³rÎ–fÓ¤Ö
--JÖ5VÓo3º]#5c6_Ev§¿"?¸Âg‘\é·È®ò]äú/r÷˜ø0r7˜ø1J7ø2r÷Ôğgäî3òiäî0òkäî0ñmän0öoàep_¢a T.?  RyB%,Ô•ß¡1«J*¢t¬ØÜñFå@hÃÙ¤7rãÍ»TŒ;³®¼w¯5ÄÓDçÔjgn2SiÏ-4µftPWV¢A¯:85¢ìEÑ™]6ÕµK¥hQÕ±ĞÄ>[î£$„Y8Bî©ÊÙÉIÎLk†=zÉúu0¦&¶‡HĞ¦³7Šg–^¯°Á5æ;ß•¨%óİYfÛ9{+)½Iğı,ÓîïHj
-’|?Ëtï·÷.·ÏÎ÷Nsµ¾Hãıái’Rá³YösoçÇ£ıíƒ‹ã“½ÓíóãSYY#Øßãy=ñçıÓóğ¼Ó½w{§{{¥‚-¤ñóéŒÏz½ÂP»"ÜKCÇDtÇúÀãJmÉ{¥Øµƒ¹)ú¦Š25Ì¼jgşä²êÂQ[Àx¥Û6Ìş@ãsZŠæ$ô³6ğYÔ‡º‚;Ê4Jür=¹j™ÙÜ;4Kd-á…]•™´­hèä(«˜œWC5f‚áÓ±İÉˆú§nš»md(¤ºY –Œ–šµ€¹5–Ïu$\*G,Ğ›ŠÎÜœú47å©f°ä«Üw4ú ¶bP ƒ›’5Båóh~hŒ—;Qvh@…à?cN¢ˆšŞ—¶yÛñ;Ûê±¢¿£^ø˜9ò‚pÏê¡\ác6+í:·I@‚Hd¾äÛF¸,éK$oéK}¿™MÜ¢#N¬iù^t†…­\şu†-şÅ‰å1Å¾|ÿ}yö"¸”^¥S¸§ê¥®jÒçMkhºšÕ¦²è×0jeV¡s<1`Ã7b¾æs*Ú…bÜíLA·z> ‰»Å­
-ÀÆbm•…­»2ºß×Œ®•eàÆhPüˆ"î•›$Åe
-ÓJM\¦Á´O'B|O)ÜÛ‰$®ìÎ@Bu¾(Ø1{ğé!¹“ÑV §ïÜ[Çnt—æ†g W„æØ“Ó»¿á.Š¼ßu£‡[Œéû´æü	Ó„Vô“Õ0™cY9rx
-Pü1}YH	`™çÎüÚ*ÖÂå»¿¤I€«…0‡t‚‚ À<^%áğĞr}BcS˜#OˆICÄ†´(BeZ¢4ñ%{x³‹E^M‰Fôor‹1/)¢Ø
-cWò2×küà„UL„2š³Lª× AÖ$abÉÇç«8p€U„R0“Ã¼‰&–dÔìX^‚6pâú°›®	{@­i0‰£å|	*K³"ø“o¥öqáş«@Š
-l¨”lUÑÜ‚ @rCkgÒÈãÆœ ú¶móS‘ûŸIárµrR‚L$ıÒWÛù ûµ|±œDëF
-¯ØuÒCäxW€K Dô‡¸Qô3şÌdf€—ÓÎ(|+¡¶0l)èª­'5Nå:¤Ê\^	®Šl«0¥eğoÎŒX×–ëY=šœÛqÆXqÉ	Ã Tû€˜§m~»²Bönû@åï°ì92‰½n½èV‰Tw:–:Ê&ù¨XÌÛÂ2ü‹F\ø—º/ñôLâ¿±ñïÔ™øÓá|VÍÉ½tt:æ~Ã?E~Îñkü‰$YıÀ=;šGíX!¡Ş:º<ká¿üù$ùÌ‘~¦İì÷nÇåºO8±¦Sú~ç¡ue²oÒÂ´âw¬Ö¦x•ï3Å©*»øW9°Ó†‰vŒ_U˜JÄÛl0a—z•ğÒhJuñ³Æê~#êô<«fşòŠuÃmİº1¹°Lí0˜«(6b=u ënÈ¯ÒìqO>›ve[;k/óâïs/¹ÁàÌĞ†,LÆñ]Ş5Î÷Útx4öÜX@“{PóDê Hn2<¦„ÃppDBcºnÔTUPUÌ†LQ"õçƒ³?·@1÷¢–Xqp'n|ä,h™–v ‚ö«â|®^~®^|ºğUšHq¨"¼oógßô–aq@YšÉÌº¹nB©Ş¹Cï¾äÎº‹íƒƒã_¶vö.övßï^<»³ú˜ÇµŒÆ-4|IÓ7.š,ãbqé¾…¼ú²ÎöŠÂG&ø{ô%¸¸Aä¢I¿ïDRßéwºÊÒ”¼è*xá‚±ÕwãiSôÂ}…"ªTfÜn|/°lsun+‡”to%Ú‹JR­“]*F¥¡0eU»ÓÍåĞÈõ9}}5™z
-ÓÓ¹dtËT*E¢ZN±TT½¡ù=©%³µ«l%¹9™Spd§Ù:ª;ĞÂz›4™:q‹ìùÀŞB4f¶lÌ|ÃˆÊÉîi¼eB1,os-ëF8è¢ôAö¦\Çá-c,O•[y¤İâY§f˜[bS5¤ìQ§€Ù¢‰–Ù<ÏGNšû£Ğìb$ÜJÃ_ÊK€ÜRĞC¢t±q.UèĞ*¥HY4Ê
-A=æõJ<œeTŠ`ŠøÿA™t¶©ò¾r&’ÆO8éÒ<f,Ô^}B`9C@ÖDÑ#÷ÁÊ©Ïe‘¢)eµYO…ª†ÏIªúÍá}O¨Y‹P½m>çÁÛ²¨§‚ßB•m\ƒ|¯ã^`OÅ%PPyÂÿĞ•’ÁëÎ\¡œ³J™LwGDqšdÂ2a¢0É]’ˆ±ËÄ¶\oz
-ç‚¤OÜè%ùeRè‰¨@Q= C8p'äxO„0 õªÕjAº(Jš¶\;¢Z6æ³3‘T¡Š@°x¢¿ÏÄ´š2Ê»,MxÓ|‰ÒD;ÍnÂ—EŒm¾Zoİi±³$q\ç˜ÑëÚ€å«¢Ëoä$
-û›É­÷ /1~JSF%LwÈş	zuú@ğE•ÑÂ¥õ*¯ã”Î“jÅg$#¥˜’ªàèÂÀª\İ‡$ÓK</ã;
-)¨áSPÙÛıµ¥‚9B:.æ bÍ‰i®tØHL,8ªRÊtcè«–sTÃÚ9ªìíUée6­)¼©òše>]8ŠÛO]w™1ñŞ¼Æ™Œf¯³“!
+                        const newFields = fieldsList.map(f => f.id === fieldId ? { ...f, color: colorHex } : f);
+                        handleUpdateIdCardFields(newFields);
+                        triggerMsg('Font color updated.', 'ok');
+                      };
 
-/ôóQZ0J¼Ç-à	Ú3$³}ÜZB’ôÉ/”êÂàô˜$ÆÂ‡?‰{ş¹¥Ød¾êVn´I¤k:IÅ]Ÿf°ôU²y·€æ"¨“tşÓÆ]ÁH}OşFNğÛœEº:UÜ +çgÚPó ç:5"ª’a’+©„[ˆe¦úŠš·ìÊRd¬hê÷	O”Ñ·“J.^mÆ¹¤Õr"E%l5ºtµâ”¬ü.z´7RsÇ&a%xîıäù÷f°n,7&Q–¡u¼sC'ŠƒĞidÏÕf×eWwêc!}Ü§°nI:[çğzlìHÂ\–'òmVg¦v] jä/a¸"tjëÑéÉ_¥CJr8M' *Â£õÍ’r–—áİú®IÂ8£Q‚‰ı’åy¤Q\Øa	uD4'>Ë	ü @<»K02	Ç„ğƒãİ÷ûGïÉéŞŸ>ìŸîíÒ‘Gí‘ã,Ş_Vvc–o²~±0f©”m¬$5»q=Jm…—T2SÌÌ_ÊXy3,&¼Ğfh[s½İNÙ$ıb­&£¤VÛYˆMúe·mü¼ú¼TYJ—ÊŠb.Ìºğ¬ônÛ¬ìgş’Í_&Ro!ÇvzAõ—ßFA¤ø¯ÿø×ÿ$äš¤¶)hŸOøIŸş¿I‚"æ®ÊxË®Ê%ÎÁ¬iq¡zJ*ÂJŠ.™––ÄG›Ö‰¼w(35½Xª£ĞÊôÙB¤ÕàEU¶›/v“õ#e)`5TW
-ºw²­xcÜ¹ãMÑh‰õp2}íŠ®¡úœéor°Ëƒ+[0<ìØŠğ˜ä]Îz.ÿşoäxo¤‡3ãK™Zæ~†v€bP¶ìºk3Èv³.gÆ-Ñ–˜	J™‰ö°:h2+‰$+³Óeãxé<BUÚ»±WÖfyË{³#ü¯ÿøŸÿR¢Û3=ÏæT}Í„•`{ğ_5‚Í\,39jK+ÀŒK¯(™™\LŞ\¸èy–@h&:Şæ‚cŒ£%~@—¢uŞLûÓÌr}©İù.J¢º–™0ç{~âúy§@—–F¡€üì:7ØõÎ;¬Ïƒ¦Eë–	¬Ux*»"'æUl@L²BCİ”ßw2c\)ÅKQëÎÇ‰ †ãT5’Mš ²6Í0í‰Ôf Ì¾!g ªûÙPê2›µ¿[2­ÙíK´Ï›®³üUEñçr^Í®iCĞÑ4úyŠ]Moòú£,‡¥++<Œ5Š¹í{½Pß£Ó–»ºt
-¹G°İ´ZZUâA4”Õ½Mûç6*·i$œ>Ô4OÃbŠş%ær©XÜÃÈbAÄiã¾MÅ‚0ò¾›èÔo³c7î2Rù™7!C€ç*Aø²Ë¼ßeva à;´ÒçNŒÂÙüŒßšêX²B_{’ùL{1”çÿÉ™bÀîLn¼¨)¼õÉ™2IwQQ¤Cu1ûşØ
-#Úr€şñÎ¬¸!Û:C>­ÎX;j°é—’ó'½ÖW×—]bpø‰ç`Ø$ƒZ°,Éf1ÈH“_º<5ùe(@*|D‰*y‡d£L­ÿì*ChJªK…/qÃÓğHîÌÊÅŞëBïå×=q<8¿"üF}kìÔà9¾²éi‰xåÍ_Ñ`í¶Èv$q^b|C"äe!ZÈ¤Çy&Àdåì^ÃP…27´,lıthn¿2‡‘²·ª¦Ò¹	Œ.¼ê*]x¯JĞÎdQš‚ª¦åâÄËÔ,ª-±š¿LA>úógÌ5ùò£1Õ¹²ÔÇf¨uÙ©93}|V:G®òhlt6¤&R{Şc’¬g<wâ`È-Œ†™E&—Ñ“1©èz§ŸB*€¦,MÙˆF&(rOêpä/À)ÍÉšqQ`ê^¶ooZqÀíi”/¶?ö¦şªbÿ•$oµM(6óÙ¬jÄ¢‚¢ğ|Á¿æ}›æ§D-§p˜(ó™±ú¥É~Î— H¬X«ØFÒØğ„¦N”6ÅMCÓ=Cô¦é’\"±
-™^ê.;
-jø9Ö™ß´àÚjìb~á%Gğ]D‹ğ§ÑEûb½}¿ô¥\İf<BÿÀÏ0|ÇÃf24
-}0S·÷Ú:O>ÖöÀêf¹ö¦I*µKrË§€?b‚åŒm®›²PòZüĞÌ²Z3y‹¤ŒÖ4¶o6^û`u'Qx>¡“
-ô!±¾À&¹æ“„­kV~æZ*²¬»Œ4aäĞŠ‡-€ÿF{™¿H“t––“Ìy*h’ïÅ¬KøÄŞ£Îa,K,Nİ,"3åÚ±eAiUiˆMwSà2¡jšâD-[NÜ=´ûa¶Q9"s'ÀÉ}EĞÒÃŸøs!ğ'x	Î¦¿=¡©ü2GÓïMÍÅiÓß°Â«÷=‰ 3829ñü«¦`Â:ó’ÅX'‚tH˜ü¶'Ú–\¿D€“ß·òM#ğX'‚äpv,$OhJ¯oMù†ŞqíIÀ¨OŸ>#i—®Íeƒ¼²#Ÿä‰ôü$„2@ş¾…/…ˆ×æ<^bh@ÿ„nß§7²%Ôp‰×Ç›áLŒCãá9ã\»Æ9‘ºÎ9<m›WçP›ø;ËZœn”‰ÏÒ’ézëz˜‘ E%\±Z²à••Y}0ƒÇ™áÙ¡ƒM‘“fĞFøfŠÆÀ“úCçìÆÌIÉÜÑúª-øYë…©š‚ÙÄ(EÌ"#¯7Q¼¬hÄ“K8ksq¶{-›5|û|¬õ6šo˜Œ™[“£Š¯İ¢øŠå¸ïğèîgˆ?ûŠQà0\ODüû„a3¹ğQâ¹~Ï²`=Qp6IPß§xåeÁ/.Y™AÈ™ŞXè[J5o‹…}áö|ñªjû*~®_æ’öA5©uéY=Ç3Ëu-÷cÁÖ˜De&ÿÑÄWÃ
-×ir{/¸5Ãv:Ú±7ï¾û.l¹~ß›ØNÒ’Í|TŒÓ“¶‘UíäëDœ´úx¢sµd‘·N7‰6x†yÖ»aÒ[²9æÉñŠŸ ¶Føú`.ë	ÒeN·fÎpş¨5 ª#¬…æ‚³Yç#ı…ä^3´3ôîQ7@²ÎD£ÚHÏËİVƒİ<+R°¡Ö'^”>çÅ8
-heb×©#R)‡T¦`¤yÕu¡· íºC7²Ôòsb/'‘¥îÑ¿¢ê¢…4g„·˜©‘2"ßÃr=O1‹…xec¯Ì†»Mˆo@T	:µ’d…9©àÍÖùR±ÎÈòÑ Ql§clŒ0m^ÂªãàÖ§=}îÉ	³|»é²[´» 9­¤%„Á;|¯N7â4EoÈen&Mña–.i­)òd¶]w%›áDZôûR–Rˆâäøœ¯«úî
-²Í#,‹ÉL$Ç‰«; |-%îúå†£]Oã¹Tª´ÌİŸ©¶R“Ï8¶¸1ïÂ`”‰©µ’\#'Ş‘nu½$w1Å=é¬ÀúSòŞíl½v½÷úrYİ|Ñê–ã?$åVn†  ¤T9^Q6¾~ö»™Ñæ/Î|­53‚_Z„D³œAR]kXÖÂcmıQğÕº!Ğø ))˜¥$¢àĞ&œ8F(|8`_¼¢•»¬JQGV×p>¨frÚ§Î(0(1azÚLõUw¿¤“«Hâ½â±0¶Å”Í?aoÜòOò–¼ùùKc
-_ä€k~¼[ù#áÍÄÉîöÙo·OwÉW²ÇİEıc^©È¥—]+ö+´i:ë8p”BVz©Wu©¯İz©±=ñä¿¨`é¸Ôi×öÜúdÉÛ¨£Ñı;nJ‘¼LÒˆb+Œq\NğhäV—äOwaíÒ––Ü€nG%”²­BŞyPÕx¯Üˆ«€¬ê6*µúóŞ·^ÚjéÜ	G®oÉZ‹Ëåù×Ãn‰2ÁU¯Gà2 ß H§èËnÜ$œùKÓmST”øÅñ@ùq–ñ•[ä.½švŒ¯W†]ÉÛK/ˆÄğ3ÈL Ê²‡î£ñ›¶§vŠó¬/ø“š,J»å]Üë”TS30£b.QÚe÷ß©†|µõ€³YB·_˜{SŞ}Âû÷fÈµõ3˜;õ§Àïïßá]S$Íg9u"À
-?d,Lf¿ı¬wõœI—Â„ÊÂ8Õ3¾åfËÂŒ©ÕÕ|–¤­Wy"ş‹á\¹ã…ÙòfBSº¤U^å~ÛkiˆO°ü)CæSÀ;Pü­îÄ;ÜüY„HÑ*Z=‹Øy5?‘ØqVXí;«ölÜğ°ĞI\¹0u*ŠëI5K¹S.xT©Ö¬!;íŠUQxŒXƒSÎÔÀË"±”w):$+-˜ÄwKÂ–Tr±¥÷‚A0‘ºòÛüc¦i$e©^uõ/¹ŸÁàx›ïè}o¬#ßT	û•¥™¡¤*0ó3ê¾Bòùz¥ğš;×ÍÅÎD–‹óñèVe†BÙ~=\UÊJ¦‚b	¸""F5+»‘kÄDBòò˜T…®Jß´,ÈMú8ˆEâìi ]c«“)|E@ûâÌ?Z& DÌà* ²‘7Âıìˆ³É?±û-ÎMÇŒ€$N»ï$Ò¥J¾”}YbƒĞµ	şA,ÂPj{#ûØUÏ0ì±SZ€-K=8ãFåÑ~Ë¶Ùkc³Œ+Øg©5²ÆŞ£”YY’ıS@[k¤}Q£VZ@#Äûjwe¥Úğ¨ø›:7ÑŞG¸Xn$Ç?UvàdÙ>èÂùğôÖ}[v£ä+Ú­°nÑ“S˜5>9ÓÍ;şXeÿ£\·ÏæªĞ>£XBCËóËiGkM_OaO4†Ö°“÷õ+l§SÛ‹“õßÄzjëí½ÍuI°ye­­ê®©ê¨©22•ì%®ß¼i¶}µ1u¯‡k2šSpA³ˆî¤Mšà9g‡ì³x„ášæ9FùÅ]ªÑk]2EÃÇİ¥àı”·]‘qŠŠş¯)ÚWX´8#'´<;×á5ù.kòš€ƒ8Ú ³+ƒ(»iäÀ¾)OŸì*/ 0½Mô.İxKöm ¼}| MZgnµ·Fï¾ô à®0ö€6:ÅP0JÃ[Xmy™Ñ9àÛøã¶‰gĞyíø§Òç¯µõk4DÈ$sU®7_ç]0Ä«
-/§™w¢vÕ^Æ‹à¸úÃ<¥-Å¿Vš¿0Û‰¿Yıuê°Á5ÌBïÚUåô™&7‹]¿Ï@¬£ÛM»zgäY”ÍwW¹—*¸…–Ş«Ô-°úÌİÑ¹ŒDMÏ u·«O®Œå§ñ–Fı¶e6r‡–íU]µ«:j›Mö ^0ù›Rpö¡"ÇÌqV“rÔ‹‰ø»¤q85©áÏ5		ëïáÁÆçb=€ÿæèŠ9-Á‹u¸H€Ñ¼¡EFTkD®˜øÆ.â&‘††¦ËA°<§E›fĞkïîâ;¡‘îÓ}ÎmrÍÕï9G2¾Fv<ŒŠg‘Â)³ĞÒ „N»*x€¢gĞKP†ÒßQEGÚÜ˜PÊŠP’ª 2[S<cÄ5±ò¤Ä•;Q8µp&ë³ĞØJPGÚñ_¯	ª
-è¶°L ı &øZÌÀÅ_¸hèj-,“Š}Øg–ı^…^@ŞR]€TÙ¥ªæÌî¼uôMêûéd³ıclêr__µ',»òõ‡“¹ÄÚ&•}ò%“YÄšæ³\f©[eˆÍB#í±¢r¡îßµIaÃl«Ê6¢Á¦Ü"mÚè´â‚ìÖ©s†'ÙŞä&K&6hn’Müs¶]¹‰¯g™¸‚û”ƒ\.%Ì“š“1C?Ş
-9]w'Ş$*t0¡}xWúğâÆkùKR¸iX“ò'É‰ÊBÙêZå=ÇÄCÊ>Úª6%&N’~à5ÑÜ“T¤àg8¦N®£ qƒd®“a!„?¼)±ûVKêê(½¦©s/ï
-wíuE¿¸ñ°±x¾wxr±¸$±öhİ|/Íİ|âF°`:I,İšAx¼,‚ªÓ0îtÅ%>s2_ÖÙw¤`.sğõĞH[ÇÅ·°%¸İ³Òd'³{Èın& UHu’šÓ„à,¥ÑîõÖ_‚	±B‡x'6Ê0q$	¤ãØ2„Æ_èh”\˜† c¨ÚTq¨FöTÅ ±Ä*Ï!S'n*!’ã78I2%,%„~Áˆ™²¶h7JD¤ï^K‰•Zˆ5í‘96¯@­%ñ´IX½€â®Ü×	 g‹¥W¿eK±fYÀÌÁYÀÂ±ªTÊFKzq¾¦µääÍEøGŞ«ÄvµDÂvÛw0"i#…ŞMíË´Z-¾N]i×Ş —ÏDvíûü‚aFåÙİ_ê¦gÖ«’›_{Cè`Ëíx_— W¥G½vœˆwêıSo­6Ÿí«æèJvòÊ;rÆq¡§HO™Q«H;¿»`
->©!I)¸ÖY©Ë²›÷€—]±œ—’ÉØgQlu}Ú#Ú´@„\œU:Áä"¬.^
-/\IioÉQp£9Õ‚¬”X› oúNË ¿M9Û¶%Q¶J™r&d=®0Å;G$˜0}UÁMš–"‹RZù#9²®İ3ŸœMzÍs«•BûdóÖ¾&×ÊÃïˆŞq52àSè–§TÆv ÑºÉ³™ C?<¯g…º
-5†¢Rš,—0«×XÄxşE¥Ş[pMšÄ¡ªQ¥ÊtĞ-4^Ì0}–<E_CÃ¨%şK~bº»rŞK±tc±ûl¹PàÜb–êÅ3Ó[hÇá”`
-yN¶= (´uêâ;22wÑ,ŒO”#~&¾Íïà¬iP'à›ŞDk·&•÷Ñäº 7púÈ¢‚Ù‡îğv¹Ÿ2³bdi ZÇ?øıÆ±+º÷ÊÒñt
-…dÒh¹n!V•–jåxÍN*ªŒ'^¤/$¦YµR¥ßBe¬ZRT7qÑ!{ÕÏhkÍáèA›ª°]’™B3ı¢+æhæÙo"Ó•)‚œpè¨¢ F±H\–ôv‘¼˜‚°îM:ÈÄPéxBÊ`ù^’·˜¬M®Šâœï¤<Ta–¡ìĞ%å=ÆÿqÅ@ÂÑG©¯Ò­.Ë…(Š†JÊÑvo2ò%¡JÌ”7“	ı&Ü%Š‹µŞş‚uq‘rÉ_*ì¦iÂ;pÀ„S_¥´+Ùy×É³‰‡Ø|V2¤Ë¹@CĞ9°¼^4{!Õ!€0Úî h¾Zoƒö`5#LqÍ/HKÃkÓÌ°\>*c¶Ç¢ÄÕ”ÔIÎÉìE9}Øü¸ÆZq£&Ä3yèÚ Ä˜¥1áFƒ*Ó$~²©@sbÙv—á	Ô ½u©q³Mh/ø÷¦¹Š*'ü/‹ŠÏñŠ7	q¶”Î"å£ ­GM MÏ¹ŠñÜar‡†2Ëª}¦b›(*Šd‹U/™š£I|RrÊ×ça0Nó„ó¼ôƒä"eÜô«¼oS¬ì‘±9³‘j¡ lW:u"ºzßË&…]$bZ@OVëO#Fódúî£“Š$Î‰'@'\Ğª\D<	Bx&f`PvÍ°0S‰‰z³Uêqa‚›&miviùwNÑ€¾•3k
- P)=¤áë•P>×÷0%dJ ¹+¥ËÃŞèBÜ_»£.7
-û›²I•iGxY^\¼)-à »¯Ü…eÈş	zÅJ»}Üœİ”•…Nx€¤9İ\ğƒfò•:¸@I
-ôacÒ¢‰+¼"'@¢š¿„—})Ğ•*Ó£0™œbeuïØ| ¹jÁƒXµuêÁ§Hõ œ¥V¡âbFX¿ï_™âº¯«í¶…W’9:ÚæRvæ¥ä®„ L¼“®
-ßô (	.ğò?¤gÙGñÒ’×¥	œ|°RÒl_Ïê‹º¬ `)Û‹Rõî$á“ıúØnuÑ¯br›®ø›Ï“Íé¡ëO§d…¼‚X+¶
-'Ÿ(Í8ùƒ! ìã8¦1I°³Tµ[cÈ{èÁ —ô?ú¡ıßÔå%g‹4aM¤	ìe’R^˜ÀËYv˜ğEš#¦Oú’-°œYÆÀ4WMxd’„V?ÔJê™âÕò€]Ù›õõŸNwÛ9ûù=¹¶@´ÕŠƒòÆ†T­"‘ûŒZ[»YëÚñ6Õº}h+¾.ÿ°BCÌ?ï`T¦ô'¨µN¼Ç´¡·Ó}»Q­O*<¾¾àxêÀ1Àÿ½òÓ™S‰ü“£÷­V«ªTæ0yçÁşÈ8­88ñğÜerGÆî­ã¢÷hƒ¬’û¥V<tü ¸õ!ôLÂD<´
-[Ãœü|w‹–.Vïm¬ç{…é8	ğ\œlŸ]÷1á'Ò…‹&Z¸X\ºoıÁeÅS‡pd¸lö¢ƒi)ƒ†¦æ^‹æ|`æFõ–e‰BÎÆ€.` ©‹Ç'ªÏ‘g8·cĞØ-ƒ¼UûO¨ªƒÃEØ”Ã¬“h˜¤&J™[ÃÄ4ùğj.»	hÎPµ#½÷$=Q	ÅÒVw‘˜÷’*LÀqSGÙe>hßÈŞ"Yue©ñíTØÌœowOÕRª&B
-#˜¶¦}Êì“uKº(\q÷NY–ÛA8\)§Rx™Å´JPÖ²îzJ¡„ºáx?«/2#‘[!X©àp½ÆeÚÈ"ëfPtñÒwÚlı
-Ii./~tº¿C&XJá‘_£ú¾øëîÀ¢aY„V4|ä¦¿øUIRñ‘_\Rñ‹oÃû€<¢FËü$id¼IrÚ=ùéğ¯Ÿó…D>YÔm‘U¡m	U[}}ó«bPUQÓ®*º¡;Àš‡˜ñ‚\Æ9WÃ´éÖhAS8mIÃZJóYÜCÔÔmÒ›’ãp`ù k†I}‚+’üü *3i·†‹Õ†\Èƒ.RÏUR®‡~Q®Ö“ëŠ¥ÕKRÒêÁşeÅ÷è'ƒÔÇ»ï÷Ş“Ó½?}Ø?İÛ}À¶Ï’k¦,¤3C’ÈµX£kµx”Väı%¬4¶¦„¹VmÁ¤+áû'gJ~bÇ£óª¶;	“°ÏÑÈRe1•/ÙD0ì2Ó]ª½­¼¾ ZFsáæŞ ª@Ğ\Ê©èZš[ÿë?şõ?ÍšÿTQOİ³x})©Q±Ps*‡SÜõé4ÂÊª×ğ“q'5M—ôS®À¬P]wˆkÃ¥%+£ÁcxÂW¼’TÕø$"¶‚û¬‰_ĞqØÌêbÌG.å§6X,F^mDå¼ycº„{<…F´êÉúáÏK£ul¨XÁİój_eÔŒ©zÈgÁÊÿ·¯+w°9gKùî2…@ãahYˆ#¨…–§&Ô?õÔ0Şç#/ì´a lg_¹Ò¡Ïj§UrITy'†0Å~äÆ^ğÌ¥Ÿÿÿ   ÿÿì}[s9–æûş
-Xã-Qİ"%Q¶»J#Ë¡›muéÖ]5G)E¦%N‘Lv&eYÃQD¿ì¾îÃî¾mÄFÌOë_°?aqH ‰[’”\v+£»,’™ 8À¹Ç4ª :¼*qœªÛ<P—j•İK4¸U)viˆu)+'¬ªzùEô	1e”Æõ›4•”¯™çß#½‚jœ•v¦¥¥£h”‚o#èeôî_ÁW0/rŠüxqàÂĞƒNæñ
-Î€v±Æ/~½èGÃßœñ)ìJÁÕ7L’ø9È0!*şG%òõf#ª¹‘ôÓmVrT“DbmÅö€$³Â}À3#µHgÔı=/À/è:ö†ª-9Ç›À£€'‚Å|JŞ$	 p3®ıÏô­†Q‰F‡öes%º¿Í<×è›9Ú¼ ˆˆl¿¿g{—RâK
-“º.#èÕKxåá/lRÂÊ~¬Ó(~GÎFÉx¾ó¥ I;ÊL?%ãÏÙ~6ÆÜÙ·“ÆÑoàÿó Ò‘§q¡&r6Ú¤æ‰D§/ÉeQ(ÿV•,–eökñ·³f'”$p©F·ËDTO^&É˜ÿzÙ¼*÷2E¢áÏÛl™ğRØËD¯T½L$Œ´e"A-	±LÜ†Íó»ğo~ş}Eµä8å.é;À>Ë_ßüŠÆ/%ìY*.{Y…Ğ5N¦9¹.
-sÿ…báza‚Ê»ô0¾Àclaë-Lk†©ä/t®©šâNâİbÛ è["nCçJ)À<ço¥•ºP>)Ş¯ù9=%Eœ!CM«8ÕUJŠr™Àïª¯…6ar­ªR–¦üãV}{®·Uğ@JÙ•ìÿVŠíŠ»”N˜ T´Ë[n6dx(Ïósğ“ŸKÍ ËÎ„ĞŞÂä7øv¨LnMÂÀ#ëÙªàùk¹WOHfT&s»°wã™e2_²ƒ½î^/ëôF(¨ ›ÙÓL&2®ç–ÈÏ=u&.V«ÇÈÏKEò¨É#»SÇ	~¤5ğJÒOèƒ„o©¨eîw)T[óÛÿsæ²°Õ:ƒ£œ»1N^÷>ÇİZsÉ[ÅBôT¹Ú·›'2¶ê—ZIÎĞ´•”Fv§3|%U–xo+YÈc_p%e|Û/µ’4V[Iidwê8]+äé±ólt¿Ù>Úÿõhû¬½ßÂ€„7 ¥Eˆ~A6æÑC{÷íñÁîöá¯'§û­íö	ë¨w®ÈÉBˆ“yuõÓA«ıvÄc²±Ÿ|ÂéC8üs£ëŞ¶C¡’|¹í`Î=‘o”ÈzTaëu nˆrÄ‰®›¹“GGëÃ}Ô4e!DNØÚÑÀ…F^›tÙ6ì:ö_ eT£
-I®J³9&Bi;ïm=¼¤ïƒ9NB¶ö+r¾ÒÆ7——µş|•üxD0·á3yÊÉá©F]N]F!n÷rÎ»;êõãè2–»ÕÃäA²ºM<èeÊIUºÔóÀT‹ö¥/L±'ŸâtÜ£<óŒ*,ƒˆ2›ÓP×{µ‰Æ~ğIæÖ»/=Ñ0šeşÆ;ÓsŸ96oj@,“óƒ^&xÎÂ£]_C`-sZÂóóó¿â!eÄµ“›á’ÛÁ4Ñó2ø°NmŠµÖ£&<!Ãø»«ğËœ2L¡6X×§­9™§ª]Ç:7ÖWÙSO}˜¸ïÁÅS%[O63õ¥•6àòü:NÆñi_õ2r!<]=Hb#1Ÿuôzt	8Ú)Ÿî¦„Ï*ã­‚ ‘5Èk¨–NFl©.¢>0÷ŒèÁú	a{UV6 ,şzÔÅ5¾¸E¼W¹<h¯ŒäZ,‡ÕÄíX)£»çn©f‡ş/Æoº³Éş Sd$?ÎmH™ÈÀ†Ÿ§ôôO`­$Â]ğ]vR ÊTt6– ×
-:[±)çŒšh¥e)¡ƒqp°ÜÈ`jñİDà°X«˜½;SÉHÂ¥£FïÜq% <NwÏ ëÇ"†\z_ÉÛlvoÛúò/®^rÖ ¯£Ò¨`xüôv¤sÌà¹ùåä]‹ì½kÿB¶ÏÎŞí·Iûdoû—{Ö~
-ÏAh0H†‰ì€óıK-'dõğ#K²ÌŞ;©õ„€¨w`mK*@Al/$tÓ’¡7Dv.ò¬%£_BªA±Ñ²àŞ9ó ª’¿ÿí9¨rîİõøM†0k»I
-Ñ}¾î^Æ!’§=(CºÃÿî}gnr÷7H^=&?­À¬•¼	{E^‡òQËãú‹gì‚›™ºK×æ/›„ÊFG½aoÊD!ît4¦şè~Hq Š=èº§ùÎ°ª{³5 cù¡ÏV!ÎÃwâû·
-›İ¢0ó,g@¸€3ì¨¸X¤œwth™ZÅë¡ñ:Æ:ƒíÑùJŞr}XéumlV©›7r¥Î*3“¿,=¤Gìõücãø-¾}9I†G‘'ı
-éS|Ê0o=¬€­i¥@™¨„+‡Ó¢Câ*i„vj8rïåJcÊVÊÁÚ8–ÖÚ:Û´¿ªĞıÆ5zl2CCØñ.ÆâckÉëh	uØx
-Dõ¯à>ÜÈ• ç(ø‚â®(êi]ü„Ùš2®N%‘Ù,úú‚I6wñ@¶!Ô²ÁA˜¾€UAâ}¡çAIsâ=|J’×äqÇcÍ ÀrÖŞ>ŞÛùşm¿;ØA®Ñ«gväD5öZŠ¹>ÎÅ-éÉ[zFè¦qDj…n¸Då¾gsÈ'İÅ•‹„EİÎÜE_kŒÁ«tÀÈ 
-ñã‘®j}÷
-rbH­u°»ÔÈ«¥ñ pàéÿàî¼ÄÜŸ–¦%I	fèáe{·”è•Ãsî7T/>U¡ƒü2n6õ‚ë‚ÏæSğÀXşÄUÕ ¿<kR±ÊxG½Ä7ŒRè¾F¾ZâaoAßòk¬ö¿³8J©Š€e- ù×(¢ÀJ#fo79Å)Â…Õ¦z&ƒÁ\Æ>‡½£ƒº©ÿÉ	ÒÂgÃ–ò ,h öë¡ßôä‚mö†£ë±ƒ Æ·#~Fº(¡á„ŠÓ—¯¡<f~l¥|™ Zıë‹F£ájŠC‚¦¸ùÙ«ÿå:No]ÛŸ$WIOO’X”GÒ¨Å–ØÀ.œç‰¸°#yrgúõÈ(eù"¨WA*ì\gr‡äzŒé‰X{Ì:";
-¿S¥“] ÎW/Š&Sgx•4¸&ï)·[\†r£œ+ÂÎ> V¥lÉ§‹…0¦ ÑÖÜ|ÁP7‹”ô‹»066¨Pş‚Å³J şòYfPI9_z˜@¶´«R»ÒÒ òoáXE³üÑ:Õjf•÷ˆ»[ù,vyÌişöHuU´Mé)"zd
-äuİï–ÎaÄC9•ìg(eoå|¸˜Š§—
-cx%tşe	ÇÜÉ Ï–õ½…ÁˆŞ…¥`72S$[H$·S,4a¯àËl7RO®½1‹KÅe` Íá½	{Nñ ä}øg—¡ue…œ10£ËÈzevˆ…e‹jó·öœù]v¾s]ƒ-‚õRÛm-¹0—Å Ğ¬´>
-fùÎ]ÈkæqHæqzKğ0šÓ£éF3dã¸sEÉ(xp=ìu¸_KİGb¸ÔÚÛA+”ÆP‚6xH-¼]Ø£Ãù©×:y¨_†ß¹BôÆ—|[‚E˜¥°yĞ~{Á½JÿŒè¾Ãú:P€w ‰?Xh
-½gcóãù·Ü” #>èÂ	%ÅÏâqí½Ø^¯ ¹Dèòç¦ø\,=û,¦>~ÈÏ›„v]µèó¡aÈ[~lëV[O´Á7®¢¬†×%÷´²æGàvÀƒ†¶ÿŞÍRI?º w—v†°Cb'üÇø~o-b’òFq8ÁLõ“47h›ëcäÚø"¹sU~W†¢Ê(ş¼&†!VMG{¨b"êğ‡Ó©©©©©ù@c²òèÚÛùà
-2Öâ4êwóñåÕ!ÊßV¥çœÇú“ 1±Å´¡®ÓQ_Ì$ÿ¤TúÒ;N7ßrfI$.Üiö©êXƒ®TµİZ¨ovc¶n19CÁºnöÖú¼úzWğ9ÕWCÇŞo,Í#äüUIäK¬›¨±ˆ2+TFhù,‘øÎa¾+Wi,4U­SJ»yX9¥€·Ó"FL±CÚäÉà(‚¤ıa|2%y9(ßÇhñ•¬	_‰öS{å‡U55¥a‡)5™c@è:•¢ŠŠöS
-¾l°Wt¤gA6ÆTiú>ìx¾Z@aiu1Ë§Zõí‡×ØIg7'/•?‡!W}^gA©<€ãòVO@v4SÂ?F!»1ç£‚K"äL‘ÜEƒÀÅÃ^†%)PW.…kÂô{›wßù!÷‚Ûƒ[²_’’u·AøAá¹..ò~Ã¤¨ô3N“›8İ¥çUm©Ñvú×İ˜ÊÊå>å—¨BÜW^!â!ú‚ÒÓör¤8åb A<pÕš(%!9‡•š!Ög¡wÏŸï7ÇÛLÁ·ËÖXM;’Ä>8Áûÿp7eH~e~m¨›¯òà¼¢?ÙûGú¾Ú )¥Wp¡g«J˜Şsáóå)AœiU4Åà­÷²Ü˜Û¶]\ÁZaÑ( ”a—·­‰“óR€J!&V	G)Âsø}:AfU!Ê®	çw¡'EÁŠßq&î÷F
-¡É[>R Hóã°êØa~(Ëôa™^9€ ¸4ÌÎQ†é[©u•ô(]pqä•d?RÃ#«„F×DÂé‡¼òJàSşh/Uoù^Ñ[èşZËÓ6DèIåIço®‚=Èëç+,Â)]šçÇÌ¹/Lñ7Nš„R¬>¹˜Sıí¦šĞ ÕOí¤âYæÇ )u–¤ÃD¶ŠH¾êPáå+½x˜"˜_“J:	¶o2ğ¤èÇ¨¤‹öÂ3bH–f ø§ê“_İTÀ³~àè‘¤$;„¨×«…ƒãHª¬m Í„‡™ûÕİ;Ú§_Ÿ_ùÙ9*w¬dEBÑ8‘½^~ûB!KÂqµÊä9Û
-—­¯gÅt­İ
-¼Ï !Ùê4¶¶»]Ôì¢>ÏN8Š$WÊs˜ª¦Qğ>•V¤bâ‰›1ùDª5’¢QùõÂb`;Û	dÖ.
-Ë¹"5úijìBë _p>-”òc8ÙÜ÷4ï3(ğÆ €Ô9€†ÙÏÃ»iã~yJÂ
-ywÌòŠ÷÷‡’;#oO÷ 2ÜéÉÉ¡õlôåÃ1{äµE\‘BOÊ¡Bô`ŠR’Øé]OT‚Ó#%¤»­óÈ†Êwó‰—Úà•ÛMUP4ş‰Íìº”Û÷è¦µÀpú«Ù~+ÛíMğ~R¯µö¯K|®=–Öü>—•ô¯Î:æ–Ÿ¼Ï¹Cì‡µç™º¬ß.Š1*lÀ˜ïú|5ÜË;Ÿd/“§ørEÿ¯ú‰¥lµç®lµ@±àZ"›,Ä§ºm6M6FhŠR˜ÏïÉe¼8ÖŠ\è"ÖôImy~I~<	™6Oã:M’ D$¥1gW¿¹ª'ºhAh*&Ï/:-« HÀ5ÑaáªüõúÑE?bç¡p£!®v#‚ÓšÅ?`dbél(ycäuTpAo~[ÀkzÒÒæ#¸À hL7W­€u¯V†_İæ	«ZáUÿ)€´8X»¨}İN™I”½…w1 42İi|ÙËp.„Œ¤%<vóhu†ÅÅœÄŒ:@æa¡‡Y#(Ëà8Ô&zC³mû–RÉ˜™­OÃƒ±r¸·>UqĞ•>®«á÷ÏÙ`‰úXâL c?w¸ïòX~Œ.{õ§÷éWp;‚…7èöé|ÀóôõÊó¬;2¯¥!Û^úîÅªâğ•¹X¸s#Ô=Z½ù0‡ætv˜ª.Ëàô¶™œ ¥ò«Â´ş*iŸå^+!’Ìæº’í&÷æòTß ¢·Æ"­}
-h°VöÑTôÂTó¿Tœ`·C5§CpV&wºZü3Ğµ©¾0šÉ´RN+@†zÕ¦Š&3¼ıïûÏ©4¡Ñà@sË@ÅñTXª*·:<–Å¢k¯
-Ló¹1ÜBDUÌ4'%X—4VúD›51¸Ÿ©«ƒšGfÃ²¬ê÷îSîÑ~—}J˜"Êì¡õƒãúîÛíÖ›}¦^‘½í³·;'Û­=Å6:ÉRƒYÓ^g/Ê®. û¡T&¬ÄñéOT¦ğ¤ğP(WåÛ8ZŞ‰†#£[k¶3øinNğS)ù8	±³­£íEngûÜOšĞ'p PÄ³Ë+z.“›ú÷Ç …mh…‹şuÊÆÁR½ëñ'ú~O 7R‹g$ª½*Aö>z_‰»¼(¦ãßëk&‘+ŒKYê‚–S>À:¶¦@fÌ!çCœ€|•{@l
-‡~ëç-j/éjOóŒªò‡Sm^5íğN0C-*D[ÛÇÂæÊUÓ:–0·®±”àü hJä(F—X„À6Ô)«ÏŠÅ¼B…ñ‚šh-ËV@Ë–É G® 3É2KYóìÖîõ¸Óo‡ş@©Tûı^°Í	(q66[Õ,–´)j·´s–¾Ÿ¤ä;z¬CšUBNé\Õ¶¸rœzDqœ±#Ä^‡f“lè+4á‘
-âd0ªY¶n¶Ódtuë¬;\„ôØœ ›N¡…v8òM'Œºè¥¶Ú·J€7v»³ãÚæK¢bàø\}¹õp—I³½j°¡Ú[§£Ö¤˜¨ß`ÊÇ›Ã“íC”IØPá[õÆ¥ ìù	:\_<F3O‚ïÀdu„ñKíÀ%ˆ)Û¿ŒÓ£ì²v¾İéÄ”î÷âaJ—æp°©„5fq<h®Ìó–äm´R V’zÕ€__ZÓİRã|™,Æiš¤îôf–søä­¿dñ˜uVcSO1¤›Òî4µ5¥
-th‚E`Z0@ãè˜H2’‘3JëM36’ÉD]yôçkŸq n ±Q?ci‰OŒ´]Füæß¿”©–ŞÔ1TÙİKKhÃí¸C6“"¾ 1´ƒÑ?ù‘`Êe`1‘T)î Q…˜µdÕk¬áì|r°Ó/°&¾e·Ãq‡f`ˆŸ09óĞºã®x :§ÈÇB9ó}¤@×µ{wC·¢%×!“‰Ší™ô€}ÇÉGÆ}ı«4b!]òt"nC!1 ­ÓO®»¤#È¿}G@ò›}ÿ›—Ó²OU2ÒÒ{`¢ü}îjU@æ©"˜Q×™XG¬`%$E9a>è¦ïÓWkÅQ¿eÁú°×‘üØÖl¤I8£©0võûèl‚1ÓYXy‹=²{£Êğ–Wğ_‡€şrƒ"ƒ˜¸<ü(‡¨²Ë¯0Õ´{q´Msyte³éAÙ´ÑÇ(›U©Ã² 5Ù"–&_@˜¦sÉ&%ßœ™C¸1ñì‹ËI«°ûX­aFşBWD,/X6-Ğä,¬]ÀH§ØîÙa+}$¢ZPßq«–vÔ8{í&ã—Ú·º.Æk2ìDeãš )”‚U²õë/ Yÿ™9úûù*ÑßMÕñıŒƒ‰»"Š-"ÖCªÒ[ƒ<9(,t\6Søóğ¶°Š]sù³}çÒGr¡õdMÖN×Iâ0E}“{ »™Õ.¦“¼Bó?k­•ã–3<|eQEšj›º`ÿ}¿x àC‹Ç­ÅRÊ½ê!ÃğSÛŠßŒ*|}mÂ÷·»è01]ìvÑÎcR;k­´çµÖHkÚ…~¸Òô(µŞú¸Ô|©…ÉC©8§£³ğ•N»Öåè}Œ†òÕ¥Šqí¼Ï"¿Ö„“l€’Áö9Û?ÜßmŸ´¼Î6¹Œ¸^:
-´
-úl‰	¶	¦äå^§]p}£˜ìÌ$’jxË¨:®û –÷G!cæïÊ.&#q…Y?‘a)¾³•^ÊH&¡|”AÿøyÌlˆFJ66(s¹¡r —$Y­Ô@åˆ‰Ëˆ”¶’oTÌ{ÁªU§(¾#•é› &ù}¾:ª”.ÁÉH”MÑëtK¾cHÉáæ’9úäÎ ùº§ßi¯ô-ö{c“›ÎAi,1~bÕÅtP"Ãù‘ô‡#¶ø3æ¦~DÆ_å[ ®Ó”½s%ÚÂ‡èÉµó cê·véomƒ´ 9–2Ş“w­6iœµ÷Ë²àÄ)² ±Èì¤YY!oãşH(áé$ÊS$ïE9àDê•H9m.ã±H‘z¤gıdL^’ZFÿ¥GşA÷ÕGó¶øŠòR“po¢FpïˆÆ•Ôñ­7ı5Ï©ºÍËiõv—ÈV?é7›†ÂGú¤Lù®»’£è®”æªçASq2™¿h"4?aõÁë®}Ç@bUŠajã´&ÆØP@}q”ì‚¾ÚØNÔ†ØSiîËWÅê¹’Wd%ÛS‹]©Ä¦¬[muWŠ«)±ÕV<Ğ÷–¿A¥œÖÍ³>´`TƒÜù¡¯X>8`¬\ÓÅBíJöŒOCÜbŠ¦‚øgËD-†Á#ÌPiãõÕú0”Şâª˜†alk¢¦+´nn!‘zöu!·íÊÆÏ´àö´?CQ1tlM²²¹“ô}%ÕB‹ª©eÕ&çqã²ÁÊX×ˆü‘¬ù²³òxºM“<| cõVĞ*WÛU¨RZü1¾İKn†Ñkì7~‹oÏØ‡¥[tÇƒ±‹¼Û)µ`™/íµ ¯ºèÃÏHDZÃ0#¢‰!IÛ¬â ×®Ûi_Ó½ÊÖ(1v9‚™,qb`ÿş¥c¼fŠ(+Ş»©¯¿7Ø†rŠÒ=ïŞš`}:îrBALQ ÕG ³QûtD0ÉU"5”Ü` ^¢¦ó%TÒêoë?¬Ú+ğM_‘•¾¶k½äî…¦;¦YüğetªãbMôÎµ¹-ÑßÿÏÿi‰æ]´½rvò¢•ë&¶s÷M×Ç”
-K÷MÎéËÍ$	yDNû×Sû0ñ_®69÷2 ıîı  ãG%b±EˆYw»!"°xÀr¨W$«)¨iÖáJnztYÛÄºÅ³Ôêîö4·™?0T<Ì”HÇCTè¶éš’ªÛÈµšç†aÑøD[)bL4HĞúˆø©c)×XKŸğ'P¸Ş¼0%äzAæ‰´áŠ6æ…ùô²Ë†šåï Öœ±¸är¹Àã×h\²ì
-9v>ãÃµÈÇ^š¹”]ö‚tKÖâûF£‘7ó¡?ÕjÑ2¹o¸)°QfôÒvhEZÔyEš”¥¯¹é„áÂ9†‹à1\L5njdƒ¨³	qRnHÈëQ7b«~çœ¼Ş€×tÒì»Z?“½uõŸé?›Ò’çöRÒûã}[]ÚF¬â/ßRï{ä¿ò?ysÎÉ‹·ƒ{ìıQ4¾j|ì'IZë‘µÅ%ÚŞU¥>i´Ÿ`N©¾˜“÷½îb‰„hFëbV|Oæ¦ëñşn9Şı,³&‹DŒz;yİƒ\·$küõ=G«JYÑuvô¤ëÀ•³qFiü	ø· ]ÖzÅü¿kü!÷ aùTôJ¸K´*™<0|s[|L ¹¿K¢NšdĞ)sõq52oJS½ª(‡Ë\#Ê;$KRMu<8Lê¹Ã¤f^üä‘¿İÒ•=\Óš-‡Şá7pLO,?6gş|¦[«y³¼|:?_ˆ5pøt@#BpÂÜ.o-è¨!î§'3jaK[ÒZá/\òBÓ—z˜5ıÎ·`-ÙàŸhâ;qğ9Ô÷Ær¹ÿÜÉ·	v.øÁ¥æ@NgW½˜ÎÖl“—öT4MˆJšŠ€BSñîƒVŒR\H®s„`	ö"†TÇòW¶­Pc£m3‡ó=êc(9!ÄS±_Á)ğ‰â×Áö$^z×fÖQÄS ƒÖ¹éò'Í`ÜÁ9e¯‚†f´şm‘µ´Å»\Fp+P{PåG3±Ù§1cA#†M8[…]¹1w/¦ª#€iâŒzñEıˆrn£?\!&Uü£oåíµ?ÜøÓó;·ô“8¤2P%;r¨á.w¸¡*XrÓ £^:¨-¾î{ÙUåè0A¿HR²}xÈ4$Káv¨H%@/‚û”e¾Z\òaFä—Næªÿ1m®oh.á
-Àr’Çâæwjä04¤Ëeó<ÄeÉF ~Ïëum@ær¡~ùöª_IŸïxİj<\²-™‘´¾€ñqJÌm™äa1\•îĞ¼ìÖãqªøUî’£$eˆîÛœ:?Ÿƒ_MÏWw¯âÎo»½´£ãôUõğsÖğ;*~öc*9ÍÃ“âõœe÷ÛëŞ¸üŒgbíÉÇâƒ“ïÈ) 9Øùı¯mêH—^Â³‹Ê×…{YRM|`äZf#F…fs5é–:¸Ÿ.WqRt¢´›
-_B2ú™R,cnvòw’K´{ SQ>—I¥ù‡¦#Ş r&ûÁÈáèù7^ñÕ·%üº™õ‹mŒé3»8»8A±É9Ã§@ãÒÓÉeŒÂ6<¿›ô³šA _&Ê†³!³—$¥¡Ó€2cpk5­Ò¼ƒ¥îJÁÍª@äÃa¦p>5_ó?úG?äZ`Óº#Ó”Àoúóu÷n	ê¿9UÿMÿM_ÿã˜eˆ¡·5l&7­i ím_ç)zvO>®¬î6uúS¯'t† ªÂ+Do|Ö²jÂ~ÀŠFÎµÊšj×¬ÜŞòkñÃ¤¼9kpóğ¡òZåjiÓ×ğ*™¤(ß®£ÁY_òº¾ÁU«üIĞƒİÂUĞAH¬àêjó*Rz§I¶¹jÄú÷Ã]È×DœÂ×å³Áó¶¸z•ÊµàšÊØ_&£Ã9WÊ²lzxZPÚ+Ô–ç1g»9?¯Q…ı¦»’ QÑ ËÊÑ‘U3¼‚ÎH2D‡¥"$¤1ÖY“<v‰Şû×8¶iä—È‘U‰â/ÙDAe‡ä£`1!
-ãp D‚°ĞŸùhû¡ï2—ù’æ7<–A¾BËÊøÍ'•×êÇJÃGyN>hşUB#Â§„³õk”‚§Áo®É/9C˜m¤›oä’áFÛ’ªõÉ\ŞpAÆ1üªÅÊ]£qg½’qç™0î¬– ÍR^DåZğbi¥¸UŸ³†5â–]\™b©Ê+$Ìy–óÛ˜ª…(KÆ§*erB|p8pfñ5á`¦aÍŸ*Ê•÷ÉH1Zå~<—3Jì#øB©­'-%x¥^şÄú”9BÅeth!éÏ“‚Ûi”©EAªHy#ó£¹ğŠ¬n')·ıÃøSÜ'“å8±Öym—‘L×ólŞÆø¨ïµø(ü‰±:¤_#S
-ùßšÃ.
-ÛXÎè½ä-%•ˆ)Şğ.pÈIõWhæ3\röó&?­­®Ê²×ûŸæ©Î°ñM¯;0{ŸïÉî
-ÅU¡ÖFq1i‹¡BÍâÊ˜ıR·ÿÂ$¾¼êÇçq.vÃóË¤xı] ŠT' 
-‡|õ“NÔ?£"vt7 ÙˆRqí<6ô5ÙxÊ‹ÜQìÏg'Ç† Cw`^!TLã3\T…†Cšõ;Aƒ$Áyä;³–ò\)á¹ùı	Ïtæ°SŞ†„²¨6 â&qšp½¶¡a[ÚnkÉË0\)õ¦%¦ö¹Î3 æ™=ĞLTÕ2dèÙ¤’2å–^–ãKa€ÔSsˆ):ˆÈkô…Z#t©‚ä|Á ›Wáé®bëªÚiŒ¡,R”Æ9¹”jÏ®ÈÉ%5İu¦ä+ÉçîèÿŒQfÜ:Î /ÆÇJ…©ä¹’¼êâ¼8ÊRïÊ²ü5¢‡
-°aWcãù•U^˜»±pæ¹°ğS¤Ü&„‡šl`8¢å™­†¢%ÃÄç22éš'óšıV<1Ã¼qøøJÌÀ†Fåân…Ü_‘yFRÑNÓ€hªâRê£åFò§±lE)se:?Ğ¬ïÕÌp¡ÛCB×N–ñŞ—e£iÑfiò¡àÔÔ³2÷A†RErÈET=y-‹=rdÑÙt!K—¥aYXö+“A²/ßÆXêÂÂV½—-fœÔë¾êlò51 eÖf½$…R†É<r•¹T®2‡ÂÄ=ğÿI;ºVª¿Rª¿DêD®Ú6Ø
-se¸–Û³W¸Sïóë2š:ÒÜ jğÊ£&R]&Şµ‘rÑ'Ğ Ôaš‰²fóVIx|Ô¼¹ş+JŸ|³Š	›Á¯O-)Vÿy*	kÿQ!	Î—THJñ_·JRPx!ù¤şu©#*ã~pu„MÛı(#÷»$³ª"ÚÄ?ª"÷®Š¨3>u¤`Ñ¿Seä[W=Ö5Õ£ù¨z|uªGó^Tæ£êQ¼ßTªGó+U=š…êÑ¼gÕ£ù¨z„ç÷£z4¿	Õ£iP=š_·êÑüBªGóU{[’yªÍGÕãUæüTæ£êákïŞTgÄÑú¨T×?”Šõ³© »£k[ –i±jííyÇb©‰ÑóÒA| (ßª&¢ÌæW§”hAùâŞt¥—G%d8_PC1Â"|ÕJJ‰ìÅ%úÿªyh­E™Á{Ñ]dfÔ`Œ+ñ¨ÆÜ·cšö9è2%&ÿ¨Ñ¸Ú»7æùqƒÛ<*7Õ•›Ñu:êÇóĞmØÚX´÷ÂÍYÇ)ğ—æ¥ßğY’Õiâ¾UíFÌãW§Ù( >Ü›F#zxÔfB†óµ™ÖÚW­É¨d^,ˆDï_•£óó‡Ö^ÄÌİ‹ærïë2£ÖRšıGå¾5}Êç ­(LûQSqµWIS™é¿¶#PVşrõ{ã[r0ìRU–òV£+#„YáÈ:Š"£ÁQb«fĞIÂş#Œˆè¨÷Ù[çD<ë ¤dà–>UQBZ-p|Í¥5z\Z(‚gñ°G§|ÅÚÜ6×m~á.ñ~î$.wYóY}gÜ––Œ_kß-Õôrµ@ĞííÈ¾jí¿Şoíï“½ƒÖşnû¤õK‰¤élwÚÑC°åÂ&”\4ip6¨Š$ö([Œë£nLY„f`Tgq”v®Èwä5®¬µº›İV`¬sS¦€Ü ·¾"od#3ğ†>°4îÓ÷)&œ?Ò.nê²¡"mò÷·•ËGBt‘%ıëqLúñG8TÆÉˆióæf]0C~p!RˆÂÍQ9‰r‹eÀ:nìRÑÉÖ’€ê°fşr§·¶´!„ ?ò“5Uµ2–ù‰)`e‚R£~ı*Kæª’¼âÆ“1OŒqÙì|)ˆw]!¹èzlCÁuÛŠ%c[ØHÅ+œbÁWÊ¼JŸ+/P„Ø_•&£~a5Ö›ù„%­•ƒÖÂÖA‹Je0 !¶õ+6rL9†F§{şŒ>Ï#×¬øp›>Ü†‡ÛiDgŞóx!ûÍZ[jjNjE,ÆLjeÅ$VÈ.–yö­õ4ÅğTM–H»UâÜ=;j…©oVèÑ[’N}2ìß†’¢é7—DfnDÕã½^J[MÒ[ÒFÌÖÙ%³t€ûôoVû3H`Ï|vòŒ1¼ÌX‘~A(ñ½Ü_ÅQ×êğy±XÍQQœL…\e%Ç©S¼+¢Öà-üy`8«:‚¢ÏæÊøjúñl…G¥©ÙZÒÎ,m	Ó ìğÙš‚º¬f³5“cpÎ8Û£í:³‡Ñ_Ú»¼‚ŠÆ€§¿ZÉ¤ÛÂ¾i.’î­<º}é.¨ßşGnN`.®¸Û»¸jæŞÇË+Z¶ÛöÊhşäz`¢çæ¦Æ89Lnât—nâÚ’¤£+B½zš¶h³+mi‹ÖYn)›ªC·½VšNØÑX²F’¦™JNù6/6£X:xQ$ùv¼IÁ—)ß< 4ˆI³Ïò€<3Y3<*YÑÉ+R{R.ä„ï`ªÿ¤Tw›»¥J”Ô§gö9ä©LÍß}'­FşšrµtçŠnPñm\«EËäeĞ¨Ø-ï&Àß®]ˆ–œí±j[K~³2å}²)Y:R,8ÀA7e€o?˜ó¸«”ÓÆ`(ú,3#}¨ïcjï¦ş=¹¢ÿ×óX$u;°u>3=…-”] ôt•Œ òÀg³7¸$YÚy™?{G¢şø¥bÎ/ËcWìŸäâß¨ÄYïÀÊ*ó°À,9iœ&ı^çöåÂ0©ç_cøÃ†}‰t®¢t{\[	¤Š¶· e©Ä%èÙ_Tä¾ »ö7(¿T¬Jx<‰]ó
-Å&Œåİ‘¿ÿí?9i«ô¤T%jeÜõÆ•	ÍŞVß’QS6>—3(¼¸•ag,deŒ<j~¼M6HÉÍDÁôcx]‘ú¾¦§¾«¯-§ÈÏûÕOöê*¦Ş_ı>wDPµªQc&yJ–œ(†L/neˆ´Pmo¡±@sŒrG@èÕğN¹ô“DûP‚>x8!y”MÁLªzTá˜ÆxY9n£r˜)Â8Ì¿JáSX5MšÍÂ)_ó›øH¢Dêïå(*¢ºşÑÏ ˜	ºÓûñã9ô…Î!­A„zaKı<KÃÌ"mZûf~7K7ghÜX´°eør†.´H@°ü+_ÌÒ4p•ƒa6BmYùŞğïàä+eU­˜•¹œU}Í[u.Áax8îƒfI”ÙŠ
-şÇá*ğ³¢<îƒÿ¦Ş|æ§¯åëw%DeÌ™%ä¨cú¢_Ô¥Ñ”È=ÊH4¼ı–©Ş,Kñ9ù*Å©]õ âõÂü—ÔÎ(OïFiwiæ{°K9îÁ.©å‚ÈÁ°N·¥ÖYšmïQdÔ
-!J›^R*˜¥Õİ³*7íĞW¿Åé§^ñ#;ÉŒsğfûhÿ×£í³ö~kaëD2E]ÀYŞ÷íñÁîöá¯'§û­íöIKÈNèà£J²M©ƒŸZíw´y»¼°õS/ƒG®²|Ïb“pì‡ÚşÑ(NOÁ^—ÊÿôP9LX¤Ëçè¢ÀÛ‰ïÈGKuHñı<w8CeÁX+³`‹°Â@¢êVŞ/m1ïëäh»½û–ì½kÿBÎvßîï½;Üo¹ÃŞ™¸sw¯ûq:÷È÷ªÑìÏ§Œf§t‘áû‚Û-ëxµîó¹ã·2„°½€ğ&Û|‚|[¸<:dí’Ë‹aÑD\—ƒşuã>ËíÚB›+Wë–_F¥­L9­êÂŒÁÕ‘‡X‰˜úôŸAYwèÀ˜ò@†¬ò+–‚ÿ§tÑ@ûØïuÆõäc9/•HÊµgÍ•QÅÀrGs­n¹M@ÌKèŞà´n°zÉr†C´ìu7È9nÎ_ŸNöè–i“›Ú¬°
-¸ü_}ßìl.ÚŸŠØùÑÓÉ@Ÿ¨şşG²¶ºæîù:…„PÔØ×İA\VFgzïÌG'…Ê€<éuox‡p4>²Ó~t§@M´¡í~ìô†dûju=B4!}Xñ¤ıããö4î*İì^%ôå~{îgxgû‡ÛÇoNZN2ôÂÁı|ƒu-÷Zu]ïxOÕ}!—~°5j…FŸ™W©dûÅí.x(i?|fı„¹lò‰†‹N	ß"Ó—=È„ç$”»Ğ“¯şw®‚€_–æGŸéIˆ±åR¬yÍcCä)B½åğ;í_g†cÙ¡„GìnC,;‘!cÖ~ôn®°³ªZ6ky—ÊÌ¶ Èëœ“›y¢õÁaÕßã`ù#)T	ø»MqSb£n±QF¹¶J—DHXY_%öíàšeÆ–Œµ¸Ç¥-_U¾é3Â»K~‰ÇFeéMg£T-ÎDJä³@¢º]€“^Ä—ô¼ÌXïpd³«²\Çt8úí‘O%ºÀÈ<ü6€ƒµKİØ^Q`îs ~ğ¶Yí‘àÆÅíZoVk½Ú:ü
-m}œëÂàí%é‡v RúÑ€[Z_Œ&¬‘]Ğ6Ø?€n1‘—’ÓäEÜO ‡Rïø*¦Üjc¢%˜ĞvÀ”–€¥&rÊ²Ÿ8_*o\¤ P¦©TeÎ—xYZ¿ei¶—‹yù„ï$I?†K~oe¶9q°€ècRâÌ­âÛA\²aè*¾lõ-Ûõ]Ë—¹[µ7şˆŞ™¥';İğ0dG6°4`kÑ¼á‰C XÊ¤›í)ëqsFÔ``VIQñ3&ó@jÃèÂ˜"ëg6Æ~ªÈa<¼5Û"¶¯øÃ¼>*…­ÉÖUcì_€‘ˆ¯1×a¼zaÖŸ@ˆ²
-a°ëç#ÎÕ à°ÔÀˆL¡D‡Ø+XØ0û1"#o;Ôi#Ü69„@/ª¹Ê!GïW? 2ËµË0–RBk5P±BŸ2Š.hq r¿,i°œkÄº{“
-Hƒ`ø£©T2ı’İ/GTşëraï©¶y€³>¨ã­Š¤¶2AŞét(«rÅÉ"ÉÎ!;X½³ÊÑqá¡qzp\aq•bâÂ¢âÂÍüÁ½¡¨CÂ£&B¨ÊUÏ-‡â©ŒÀu´GI–
-3J07|.Çrçw­³Pn†»¹¦æİÌ‚dº¹İÓñn/íè¹ÇÍ4”l	Yüç(R:ŞçHº$İ)²®ÿF·QÌ8Ká<,è¾°ì™ğÅ’+>¬*>¨‹&ß}o‡šÎœtn£¯'B©
-tu/Ê×ßç°–ËW å\¾¼™«JO~"ñä Ş53§•¹,8¸ÇV>ÎRØ©¾ĞDÍŒ¢ÊÉ¢aUş7îû´]ö6Ìä{(€ÜÚi”]5«XC¥‡­fNõ®¹`Üqëh2Åt&’4«ow™RB„ÿ€î—Ñù§j]ñ±É‹<ñºû%Ã´ß{}Õ#aJU_¢hG?dóB¤zîh¶$’A¶•-%Šní¾ÛT@Ì¼GAKyuBS=JüÌŞ‹X›¨—» Ã9D®zèuæ"ÍÜ—™S[­ı½ûZdÅwokÌí\sZâ@4Nn"åzîç^ºÒÇuÒ¿”>>çkáÇ“wækš 5¢“Éà"H:+rHm·åKÅÄúµ†¨–Õ‹¯=•ÙcN&uÄ3?fÇª	N^Dµ¨±4ÕBBÅV™]¢2€6KT\¨YàßT³bø ˜KË"ƒ½B¬¦ß¶f×µEÌõ€òÃvU;¤ä*¨k_òŒÒœ¡_Ã!¥ùñ”úr§#ãµÇ3ªt×7vF5¿øÕüúÎ¨æãõ»9£ª•<£ø=ó>£d»ı|)HÅ©VÇú>Ï*S€ÖWp^™†ıxf}±3K£éÇ“K¿ëœ\RÆù\Æ:•_ğèÒC?¿‚cKòã‘õÅ¬YÊ‹ıYSß0]í%Ã×†÷™5õÙ9m·Éwdÿ_NOZmwöiüy”¤ó¯·ô˜u:UÖéiÊN‡™’NÅ¶Ç ÏÜÅññYşı}'î#U‘¼sH¤X(Ã*ÆÉu
-u¨duAÏ‡˜ŞAI#J»”~/Ò$êÒùO‘m:“/×}ssÓR2nà,Ô¬|ËÊ­,Õ+ˆ€ĞÆ½cËà*B¦ç”¶§10±G+†™‰c#AÔœ‡¸Üç:3ù	¦s_|åüÿıßÿñßÉN"ÈšCüõW ”ïÚÛû?ş|r¼wBvßnœŸ½=8]¼#õ¢” ´N Rãbìéş7‰ÎDí¤(.N’ÿ ?ÅÃëÒ-ŸàK~»—zàål…ÊVHÌšyÉF5©ªÈ÷±Áõ{Qúyó Pö J¥Ç,Uş=|ñJÀçä=~g¼nnù¶»çjö•8ÿ×áXCqò¸Ëğ¹ƒoa4T„zZTªÌ«NæÉNKÿ:<'ôˆJ5íyˆìõJ`¯Ädâá9 ƒ?ÕÑ6™©oñnC#ÂëeaŸJ@jÅt’’¾Ïç6ÃSY|<Ïƒgÿu¸èÇz§MÀhç§(é0e…k>!ÃèSï hè@{#dh›”«mzÆÕğ¨†í€œ¾›ŒzTAûù*gÛ£ÙÉù#?	!ç`7ïî‰;)<˜ï<`b¸‘ÃTd/tL˜^‚ÏfÖ+ŒÃ˜~«\ÆëTHL(¯İG	¯àË™x/‚
-xÉ¹á¦:HŸ³åômªqªŒpúá¸ÅiIã¦¤d¡«qV›Ü¬,s3Ï»@›1¤Ì2ºÄ¡rÙÆ–3^‰±ƒ@RÌVº¸Í{£Û—’‘Zë`wif»ò¦Ä¸±]3™Ù0±¡]:ûôìs/lçc…ÜØ¼-57ÖcIzV +Q§z>¬«v·+ËÕÇd³(àmLÛ8j–© &ÃEÀ@K;³d¿_%¦\^w%/·áOàyY!ÑÊSVsÑ…ÆmXÜuÇì•ó†ôúìí~(¿\qÒJf"û€hOÉF16ŠïÎóBÇ¹¼;CrÁÈYš‰†¿ÍğxHuI|ØƒøG|µ
-ó1U,Xy}_xvÔAaIÿŒn²—“çwÚÜ5‰}ûÊBWoõ{Ä¼Éy]îqh7>°E‹wúCËÚ`³@)–«#`Ş¢Ê`e8l&ÌÒ¨–†M”§cäÆårBJx}N[êYI¥ÁfëÄ@„Ò¤ªüıö¥•è
-è$€¾Á›4+“v€Š[l¤ùÓx’LãšÒÔú»ìj%õ¬½}¼·}xr¼OvOŞµÚ…uòà¬İ:Øy×¦
-Ù9Ùní‘ÚáÁOû¤ı8Õ‹»N·YRôÚIÖIA|E§ÊëLÚëeà“/9¨4YxrÎ%Aô¹~Ä³úéæC8FN>öÆíäg4ÈÓS}±½ò l³Å"‰òf^¬ân.\_#~wıÙâî;×2tÉ%#È"§IŸìDiI—/½GåZÜô¯4îG õêE¹5÷ÕÇ‚sè}%ûÌ³òBŠŸ
-˜2ªÜ-ŞéSê‰1!”¦¦4‚g®Ğ¬p,ô0ûĞÿHFLBÎ1€ä@eãàúœ|ö{CÊNÊoã?ƒ«¾7xNÇùœK‰Òa
-–r~g²[Ù¶ºå(	ô…1:¹I£‘Í€ã	èGß4”€ÂTh¨ÀÇö¬İX’o°Ñu?³×ZÇ#†Ÿ*ìØ±Øuf¼0 #“’Öõo›Z_Pä…·—ÓŞÅ5XR+¾¤•Õl^­¹‰”io—°Ù¹ÕéÿfûJZı*V<n2oŸ9Øò6W®ÖŒol²­gËNaÃÛ0[ÜÃ¶IàLé¯TÊ1»ß" âMãaB#kÁ™$ÌºüûßşÓS;°ö™}€—\ˆÍMkÜp0ïáävû@¤pey<nSÕÓ¾|¢×ô¾·—ÂUE#¯†hø€Œv[—Ø§}R
-Œ3¡ûñ;rÌWà¨)»*sÁ=ãa—äZwã†áÀ–‡Ò%+‡n–Lc²oR7õgß³n[Ü¼5G¿¬x½¤DYÒ¿ÇìW•Œ ÅÆâQr”ªò§RÊQñr*o4ægò;”•Ù3¹Ó[³æRŠ…º5ú£55lÓ¢M@Ù§BÎ(å …ù\ËqD8JÓ4¢<'vS1Ñ#>Œ³³¸¸¤oy`)0ä$J”(Ò„!#ÇåØÁşÅB›vk‡ÒehÜ€¯{cÂ™;¹¼¤"ì›ãv´†Ğ”'óu!VÔH2†‘ÄˆÑ”Ñ×,(i^ñLTÑ1Î°4`ËªQQ)w˜¡W¢cı>æïÒ»LMQİËğ-ƒÒ$º…³›œ¡
-¯uD®°PÀÍ@Dw4÷2B§‡ŞFÿ¤„À"ÚÊÂÃè–nİ7à¬DÍŒwêR(ÕYã”‰(Œ“cõ¼8‚ÀÜéáÅ³Ñù74w†Í¹©z¾1}sÚ¦Ó•Wñ£ ˜­ò½Æc¸—3B—qó¨GuºŞ¿ÇM'÷Í£ é2oEŸ+<aÔtí›G nxÓK¥/mœ‹ûŸ)uÁWŒÔÄkOEgÁ§¤2ú4—˜0š˜%TÿÄe÷¹fFĞûHj5,µeÔñáå³[¦½Î"èm×Yœ¾j 1-û¹7¾ª-Rş×Å¥%k$åŒôjĞÈ^”]a—µ¤‰ûTÃ†‘à@XïLVÄ0u’+waİ²{C»h±Ÿ\ö†ÖfLÌOïÓD£=Ÿg¼ó Hã‡ÉåÉõ8<6:t­_ÒøLB"\AÌÑkT›ClÒ5Ï”`Q,Î$Åë°L¼o6ã•Áé[ÜéÀõvóJ˜5ì0\q@WÎ-õÜCA™KÒï_D)ÓrªñûE*“-.ëÑÒXí~
-™ı¯®8wÀdU-*¤YÅ]ëÜ§'NÎANáğ¯š¤RZ%emò½ªíÈ›+:³Ì33LĞÚ`‘Ü	IKc1`V×œIš‡€M–/KónE°¼OÌ-›…{‹Ù4Íß)"ªÏ®¨½İgá†Ä`›ŒMKbm#»‚YÎÊ«zÉVm^A	µ¯³Œ…FÜ•û©.c|/hb7ég5å]ss¡^h¡6{”™:¨‡¡7³ù[&ŠN[¶j+“^šÆûY¹qXàïf!çÂ*Y³
-Ñr¥T`¡d‰¡xQ}"—Ğá8Sv›ì· H¡Ib1Õ6
-è›¡ä¾›5sï
-ú˜¯óæ´7ı7í«•‘ü%yp‚±Ã}b‰RAÉ?-Ú8%÷?üÎ=ÍzÑTg‡K€A;¶±	A,`E.ceïã[ø½ãÅN ˆ£~’æ.9³2wq/’;S.–4 • •¾ÿ¼&:Wª:I½çÃ2±4
-ñUÕ‘4µ‘4Õ‘4ïu$V:•ÇÔŞÎ‡$—¶R†¤ å—Àô ùcó¥<ÂŸíˆm¤PÖ ããŸÔáI_ZFg:¼Ñôî8zCDLQ¾iš˜ØiÔíÑİS'õò1M¢‡O½HŞñƒJ£+@¦à(uÉã†šçyŒLQûÊ-SÌˆÕ5 Ë@~íÌıbUè"åÁ_ğ0(Hç±Ó0œ©@³C}04¦TÆ&äá>M÷i*´Ç*Ì#ìG
-p(ÎX9H¹&.Aä4F_b‚t½Ö¢3äĞ[áÏP’°l±Æc= ôXí¡{saS¦Ïï”l[f•˜I<Èìğ‡í˜Ê©áªÿ°ê!‹&Æğ¬1…uµ!h‹0“qg…xFH/V-½Ù<*«ÍB(¾Ÿ§šT¦Î²<¦ïÍáO¥Òtx|è÷7²ç­8ŞÒ5‹îdĞLŸø9­äÆ…ÿî?¿ò3¨i0æ‡kƒJ¿Zw³“B‚d*çÿ‚»#_çÌœÜy¡Ÿ˜XÚËXâÉKRr–7¨B>¨-±PŒ¾¥íû·$½ID ÛJXúRÊXºJfæ}øÊdúúpt`¯–É:÷dÂáÙã(ïàúN™°ÊM
-óX=2R2™j›vKYq•.€`c7±ë.¤N}ŞûdSœÊrh`Û‡ğw*ÖdvKÏ«ÆêÚß@áiøcğ(à|{¾ª‹RÜûÆ¾Ì­}a+æBˆå­t£ì*î*QyÛ7ñF;aqy³#¼½aı¦Î§ €=©LÎ-ÑÃ2Ï¬ÃU*â±ù~x:Á#Ğy˜×„Ÿ~À¸i+‹V(+ÿÌ}4¢ Óëa'ÛC¨µiQ÷>Ÿ$J«AV•ébxsAyvØl°Å›khÛ“Ì¬©)³,¦WdŸ4YÖÈ`ƒ}aqé¸¦¤Èã
-~ğŒ_V¢1O¸;lP]$6‹ÏA’áÕ•Ü2Vª6şX§¶ÚD•ä„+,›t9’ƒÍódÎ"9|ìµI«ÔõÜ5	ş°=b†FV#~ï:ÙY'e^¢|Q¥Ì²Ë{lÓ$Y,ºœâ)é°"á3´|dÀ’ÍŠà@2§zZµ'–˜(õ¯÷jóbŞáÎ/d…¼;Ş>;;xs¼¿—g‘·'‡{ÇoÈéÉÉ!O>,!_ÖÌq= WlC—ÛëIÙï…“3LÎ1€»¨ÉÈº{AÎHĞçˆ‘$îAÔæÅ-£:he¤e	â…ØT½¥\·¡Ü,¶¹_şjÖeİªü(o7õj†]âséÑîşj ¡’ÖfÕÔ¼ĞIûòº
-ÖæÜ”dÇ2u%cêØ¦6cîè¢¾îµœ±$´ş¼)ùä„<¹èhêvµâ§p›«8kÙÃ˜üc·ù¼Ëâ4SG‰	–.ü/×yé¶¨jVºa´¶ì_Ú5˜©,æÈNòS Ïá"oéd-ù4Iúx.6v§/¢:ıÖ5]—ÑsŠRÏ¥H‰A»mÁÚÙ&,Ÿ¢^ÒêP÷Û»-ÑP·Î±‹áı[İD=D¿ÅàœÚjÒ„ÊƒW1$x6Èi?âHãäüÑÿÁ/œ‘üá(£†ã¥,ha3±o“óQãCa )úBiã{ÜÄ8Ñ\J–JûÊ>C]ßgöÂLQlØÖY}E!r*/{¾´„¼’ÆÒwó(&zK2ä!¸l½Ï³ €¬á;ætW‹^Pœx*aŒå…±hXì,KjWcæY¿ô™‡“”È‡%YÃ¥Jğò*Úx¡ŸM9oTp×Öƒ¤ŠQOá]…Õµ`7ùÀ¯<†ˆ‚­dƒ’}GE€	(šjğc)ÏV”¢êU‘ã‚Š•£"ËPaŸ~7J’AÅm&¸Ú°/M×5>yN%šù"®2“yFáÓkÁ|ºYxçÖ„GØQ+Ã°‹oå™X²
-Ç¢˜ÚOºÀÊ
-š&q·T«‚„sºİÚ?n“ƒã½ı£ãƒö/äl—ê¢Çvd›QÌâ€Nù`Ø`mNÕ^'é@`/ÿ…Uß~9Ñ¾¸3ßÀÒ½ğÑrça)İÌ¿±¶u®”¦égõŞ|g/'üõ×áøå¤ø[½Gd•¼œˆ?å;VKônçğ`—üt°ÿ³u®/¨¨ñS/¾Á…)0<èCÌÌû'Ê_rÄ¡Ğb%#ÇÛ8B¿FÜ1&áß“RY¨À áº%,)UÖ\XÃ¬4Íÿ·‚®dÕ½9f§Hd¯—bé÷ò¡fÖZC60aµ!Óc8Àî"œÜdø L³ì,Y_ù¹HÃP’¢=Câ$Cn@˜’zËñp"4ŒkŞ~}"5_Ÿ¼^H­`¡'ÃşíRp®5¡ó÷‡ æ³à½(í"ÏR0¸ÃòŸfŞã,;bp fô/£!é¹I8µ2»3µÂ9Ê>Üç[˜«bXŠÚd„l®ÈY±¬	Òá9Ê]õéLÊj^‡nJJ_ôÈğª÷RÒG¬H–§û	”5ğQ]ÄıäÆ\¥Æ"¡ÌéäO–ÃaHˆá‡Ä|ƒ	ˆ§er°·LÈÛ½¾ğA’0^:$É©şè$ÿ  ÿÿì}ë~ÛF²ç÷}Š&QsDŠº9±Æv–¦(›;ºE'3ã_ö"!à ”eE?=Çy”ı¾çÅ¶ª/@èHÊ‘áCbI@£Ñ]U]×Y I=È–!ÊCZJŸ7³°şœ’äš¹•1J$‹P19uÅg´b«Ñ”7À¢Q¾Ë5€åZ×§®jc¡Åb¸”Ê®¥"WVk	ñßÿ¥±LQş²ğ[¾òGÜÉqX™©ÙÚjÅZBYçS‡2âVÊˆ‚(Mg¶vådŸ$iÇ®qÈm»n-)lHá1•Ûêß4\¤ÀQÛfJoUq™Š•´F•F-,aË±æx‡ŞLIøÂˆ]èÇ¥>…>åR` ûÁiñÄ1»AÈ©§k¯º‡fønû­ù´2 rûX'¾Õ÷½É²ƒ„—Îı¨ôËø3EË!bÜ•WïN	ƒeZ…iP=Â±8İ0}·iE¨Ò9ôäÎ,~\ş=+ºqS“\:¤«¯µ ,-¹€Ñ-ûél˜Òºq‹ĞÛV/+¾›xÖ$»Ú¬‘ÆQD¹Ÿ5€åACr)ŠP#æ^Ğ1â‰§>1
-“ÌÍ&öá‚şˆ¿ä?İK?·£¡éµü¯Xé9v›³§5•^Ë–ÿµNşßÿ%‰bwÙ#zğ6cü•}»g©Í¨Lo•Á4Qù^„j‡Œäü7pZÎîqÙàç‘g¼š±©…4oãmèÀNz™¦€Ê¦°C÷úå¯½áÈ¯ñ¹w§?6b?¹çËæ[™?ß„U¯÷zk‘çµˆójË–x¥õ¿ØÂ8uz/š³í³Vû-iõßwúÉ'~ØºxËò±NÎ[Ç’­{—Œ£›Ô×BDC/ÌKºÒŸh%Ø"õ&ù­¾ïO‚„š(]‚5ŒÁÀ¸¯cTí
-~ZÖ¼ö€æ(h±Ök˜=”Ã¨ßûÄş5®¿¾óqüK©P•;ˆVNJà62[>îG¶ù¬Ğ¥Ó@õe²p2ÃŠÃ¯éáÌ‚ÄŞJ›jB2ŸÓ' xmf’°ÛJ?RÆ§Òš~X@:ÔçUÅpW8ÏÃÑÍó†Ú¨bCd†fÌUû”cIÊ²&xbu¦“î?õcL¬ç$”ùk²É>ìR/¬ÏPÀîGqğÃ-fÚó&õÙ±:wÂä`#3ğcØØ £»I¯ú—:ßIÙkr¡—vµ+/LT-gç	+{(«Ğz{Xæİ\ªóép—ŠŞÅâıİÔ.g‰µ×h¿¸µTšŞ2· •#tšë[^êòƒ3o0æ\EqÆ/‰p¦ğ\j²†O` jJ}^¾¤Ø€zœÄdoÃ†ÍaDíÛ¸ÃF3™á3Cû@ùÉ¦1\^yÁ!bøh)Jºî½3P¢@îˆ·JßR/ÌI‹“"ƒÒŠY;…ªìPòît…£Ö˜.Å8[SªÎcZ¾jhl2k%.ñReò~şùæe!zf¤Ë›ÚâøQîÓ7–Qÿ>Ùê{]ß{ÎèMóÖo
-oU­OÏSŒ–[ÉòƒŠds3À‰úP¥! xE¢ Ñ‡+%æíjBòºÑr'E¡Ñ)"\PøLŞÇªIO<·M—ræ ı¬ñ.èCL[ê.–½“æ*¼¹ï„ÃAÜebïiµTê“:“á¡äcD{ÍEÓÜİ©E€=ßg‰dF’‘‘ŒvLöç#É…~Ú\e¼ğArê’êL=òT
-D”?.ï	¦-MEí±?øµÄƒb¬C¢%iN`ÙÉÉpXş¡ÙäRÑd9•.$ÓÙú,—\€ñ?®’t²	GÖÁî	?!—%œVö’…pÒ9‘áOÚ£²Ÿ†YÑõÅØÃd¦ƒc¬ÑCÏÒ‚#f>á&@(0úïı¢§cVß7oZş,ğ]°»#£HÔÎ²xÌ™ôU}ûKû>²DaÑZŞDĞOs4}Bº5•ª²ìTY)))}j¼gNNÊÎuÃ™^_Ö–h1:èâ´Àï}±5Ş3NÅî !¡OSoë˜úóÉ·LuÁ
-ÀL¸è
-,‚Ù-Š ĞŠ1®ws£¾Á÷=ÌybºÉ&ÆçÉÀ£îÆØgÑı?ÿ™÷ûÀgşügl²A£øzXOÈÏcPZ[³¦õıĞš€J]Ï|)r„!Ü€Ä
-æ›"ş.™„¢ÕòlªÁ8À VBÑ7ÈéWğ2^kÊ|9WíG£RmK£>bcä)EeoS˜Fsx£/Ìsöª†`_“è«©ˆ©ÊBt)­›A\Ì £;2|‡`ÌñÆ æ©“«ÅÁ(˜’ÿ(ıaKÿAÖÌç¯Ãïj¨Zt‡´0L1¸é;jX³?¢s‚ÿI_$Î&wãQâï#«¼$ştıw½.¾(šÂú×>Â‹ÍØzs‚9 º	[A+İqPz‹ĞVHAü#A#Œè(‰	 öÿ}(yï;éH@½‰'­øä[u?Áë,	òJ–Ó²~Átùï?VÃÊ=Ÿ³\K2È!šíµ@z‹4CV`vYóå÷†˜wk»çf+j{@™Ë'ÁeH¾R~"eE59}QÄ,Z
-“FÂÕ©eâ2œVx¹ÖR¥G¨œÈ©éˆWxƒÈ_¾œú˜ä¯)küa­S0£éÆM³G¯¥;gà„ìÊÊ8jëEµ-“Ü”Ùá 
-€‹çÓ×~ƒP˜Ñ¯&$.eÇüU¦¤t¹ÓtJD8›Ô}. "M-r©>3ËÜh¤ b¹wd’/{šÆ‹6èî}H
-SËÀt§R:Cjeî¾Å¨™ŸxØ:µãù|–lmy³ qƒz‰7C¯ûdÎ‚á¸?/¿½“Îªû@\ÿ	¦ÔôW3Ø*»,Ô#ÌågûÍbWÀK›T|dD—pg9Bšã*éhÙjK­˜)Ö–FÔšª¼·ê,"Ç›µ€×£ˆšu¹s;SŒqöŠ^İjÖ© 0®˜ì¡b²m)$*x¦°éBÖŞÓ8Å¦ìÆßÌÜş¿`û-ª‹n°rø‡9óĞMâĞÜÄdn–åànW¨À9™*"y³¥Øoª¹‘!·KuüËòEÛCÇ
-Ó©¿$VERÙCgİş”@›ÖÅºÍ ˜æ>KŞ¥yßíI—±UÕaZ¬õ¡£©õá#Xu{[ÿavqU]Š4-ª§«Ã­”‡]ª:$î¶ —·´$I[…Ä®•”ñ–Å{¹T{I~^&§×R5Ahš«‚è;–ğÁÒB	g÷ª>"Ec†ôÔ²c‡”RÜ@hTóœ¥µ5²·3•>i³gQ•ÿ%|±Å8(·¨N†Šb–Â~±X5Åâœûƒ;h]áR«³›ŒoÀ¤ÿÖõ‘ ŸÏÉÔ¿oIRŸ óĞ1—ÌÍ/3ã;ñ5-%?–º kqO¡¨ÇZû 6ùdw9ûğÒlE|;-Ï²õ„èà“.¥Z·Ó¢-s‹iŒ´Àf‹t>->Ò…µöÅô¼Tñ¾ö*ó¶h·Ó¨¦|ìôûÎ;WÚØ“Óõ/­¶±;xD*t­Ä£LÆ˜Ìd÷Ò‡±›¯8u§bÄIƒÁhºˆÿ÷[Q|ƒK0|‹˜\Ãı‚G8]>£GX\N­ØåP…bÛ¹Jºbq…ôhÑüÓãP­U©nÒ¿Á’ëC=´¯º‡DÔn9¿ËVƒ"İ¹â›øÃàzR(âñQH®x­F¹SBQ…óÈ«Ô€c†”]\ªf2Ùë!?)ºPˆËš·è<’0{åT©ıf9çÇ”+Uåm¬…D–_³_	Ìõ=ıØug]K\!é§ƒÌ«ó0(ï‹“sN¡XTh}¶ğÑh¯ùËiuİ°êùtİğòU0ÑòŞ†6=~YQpm¶ñQı€ĞZéŸYá¢MÃ‘ùÒ'%î)8-=DÓŒ£šù)H¡WµğÕs M×§îÕšÖ6G½|¹Ó^/:·¾Æ¯àäÁÏE™w“´³Zšj-(è8‘¢ìroÄÀßPñÃà……Â­ùË|MÕN§àkş’B±2½ø
-õb9şšÓ‘¿ùà€Í_™¸ÈÆ¹¬¡¤²PÒ&âj6nuˆ®­GñÛ:„/¤QÔ!•cğ®wœ|W·a+ãÀ‹€#Ã…!*s?}j,ºHyğqşRZŠØqS;~ì4~,iBæÑ¦)ƒLâªõòD^-j]aQaÎDø æŸİU†—õÑ7I_£C;nQ£d7˜œÏ±…Uû£èHRÌ0¶EÑÜ©^?EnœÈÄ¨|×%‡ò|­÷¥\¯_‚ûä­¬ÎãhÌÈ?xR1=¥1åxâ!w?&üÑpÌÇÔÇÕš£ÜĞ€x~¶Bë
-ªˆÊ%VNñI›Q'Ë”U·Ãäzú9Ååq,¦.PuîÇŞé²{zØı©{ø®uLÚg'çˆêq(Áz´;½~÷¨Ûnõ;]¹ÓSã{”m>,±LÔÆâƒ¢~<·£~<ĞÇÎèC¢¢ÜŞAı(8Œ6¿[ŒäZ0AĞz»/DãÒÅT”‡beœR-&ó[3§Ö9Fx¬À1qÁà;¾Î¬Ãü, wÇ;Hşbò|MA¨}[O°x`=êäÅ×Ê“ÜK"îØ
-Ì´bÁ«åÿsAƒ	¬[8zêj­ƒ:óÑ+'~¤@XÒœ5ÒYÎ)ôxËÑ±Iî4›»ÛTì¦BÁà±'õ²-"]”µWg¢8ç8ğ.ƒEÀÏ¬æª(2L%
-ºSj7›ù)%r-[şsE±lJcæ­Öhù·I
-ê¤  äú
-ĞÁ¹:Wxin9ñçğ!v8î»Xô¢
-À6z›VğwMí§r·Ù[ö›úö2êPŞÚ«öØ›Ì0wcÌXj	9„…ÂDo90 ›ĞÍ¦ÀV§ xş¯7Ñt9ÀùİÒË¥§^_ví3 Fù×CxR÷6Gv“6,Õûb%”S~g3a»öê'„ŞçLDàA?¦Ø¸Ê¯ÔÕòl>T3KáÊ8kZ[k¥d»£±PXŞnÉù‰œ©•ÎN$¬b‚4o`¥³Ëç#˜æXQh2l˜ç"½Ewz9HÌ´NŸúP8=çÊ&J:V&5õ¹‚–ì6Ä÷it¾(’ùYGß~·Ö#µöÛîñáöj€=Ş»pÊSá–ÿÿ“¡­‘Jöq³ĞÒÅ?I”2#ìr©|èyNVà
-Åğœ"6âM§zÚë¶ÉiTa¢¶éƒ•M'“¨[a@eá
-ç™“^?İj­ßËİV³ıÆÁyUËÑóg±J~¸ğ ÔÅ±”Í3®(ŠDúâ×"~x»-òæ]«wØm’öÙéQ·wÒêwÏNù“®÷"‚ÈÊßéÏÔ >]¥4J'béáæÜ]ˆêÑª$®ŒƒqÍ5¬‡˜»üª•ÍÌ¶9h×äôSànÉÏÇÑÔ…N\ÇëĞè‰¾}OÙ€Åêøe˜Vf]6vk8i›<Ü’Ğ×8,É’­w@şrç(™×p\\O&^\†ŒuÈ§ÍL›Oæ~Y@d/!ª×^eÑ—^ç¸Óºè‹w''­Ş?tbXYÓİ¤17œiÌ‘‘™¿pk”¦ŞıØ¿¼%CæEa<Ğ§AZô³š38e'ABË>0hrË±Zæ¢Ïòësı‚0ÌGx81°1z’\#„3BqŒo0CÉ¯ˆ
-C2ëã)õç_ÑfŞ¼IüOşdFñ„ä®Doê|úO¬àGü7½…-Q¼æÒ
-|Í»ÀÑÏeqÉÔÿ_–û€z¤ÜgJs?_Ş+øe`!}kG£ËÛ›£ÏI v3lº…@³¹"r\…*…)#şBI¨¸zeTúˆä¸è´ßõhN¿Õ=Ö;\üó(Á!t``?M¯¥#2ŒÓÔ=OEé*§ĞQµ½Ò(İĞÿ|WUÛAÆq ÁáŠUÄ¤v]IÖ®Î•G6]¹jºQ·ÂV~ƒÖ%9S­+å0v½± 5S”¥d,Ä÷IÔĞy(x\ßÙ³;¯‘aMTÎj˜ôĞ§‚¿&#}¹x^VxĞÉç/×$(Lz¿YJZo5—BéôŸÑå¿¼‰²İ"^š*SşpR	/§­Ic‹LàÌa…·¦\1e¾Ñ²ÆçgÌ.ZYü_“ÉéNÍËqtTêiVÑK2Œ×TÇ }YT6Škë}<o}ãG ç©¿íŸë±ÕYq$;—_†Éiæ1‚+RËÍuC“#Î+%Akz™KQ]_—ÒNÕùtøxD72Áñéœiryíƒ–	_Œç“Ğ˜qçR‹9¡R®­½W‰ûüØãæWĞTÓqì_½\Y¼ƒá´ñ¯dè‡ÁGÊŸoMg“-Œá‚’äí4vÛÏ]’yúûÆVş¸F@Ç‡ój~úÉØ÷ÍE?/¶l«ğ"«¦ùC,î<«ÿàÜáJ4—ß‘šËsÎ,D‡w¥““¤&Ó“¡=èm-Aúö.GÃKvÅBq;ˆƒÙÜöZÁÓ0ò†ÀW×SZÍ]Ó“zéa:ñšC=CâÏûÁÄ®ç5ù=bœ¦àÕ0¥c“€¢kOm5ß ‡„u	^l™“_¬ª¯SÎ‰ñ]Ê{U]ş9É¥„´—©ÿ%Ì½Åò'u‰ì}‡ÌšwâçLY,'€>¤JTÑ5¡Wg‚?âÔ¤G+-ø‚	Hî©°¢©İa«ßzn—ÎßÏÏzº”Wî=¼üct²Ûÿã&¸~•ì=Ğ•Dó—»ºT/»ô[;ŸfaÓÁÕ™‚Êo,j5Œè~Ï E2P·`½xë,óÍ˜œƒ×İµŒ¿ú·ImâaF„€Š½»îÉ…÷Ñ/Öˆm|~l57Éeİ$ş&ŠºÌ’ù[™›6uµ2 +–Ë]‘çšÃ„—úËƒ`Cˆš$ğ#ò¹ù©”N~çå¾8†Õ÷^Ê¨xJÀõeò†s{z€3yXíXYY¨-”Në\¥ûRçö‚gµ| pşTuÍªr(äºŒë1Ù™û|1éŸÂ8ÒÑ¶ù±©üeÜ¿<´ß.‡öÃÿsÕ´ÀhJÉ¬…´€¼sÈá¥şQû˜§l¼GÎ#cı¡Îîq“tÛdJ£·›“7¶<.ƒâ¾7A<HÕ÷T‚” C<{)øã34x²¨t™1 enáJu•–ŠÍË¯¾.ü«[|{
-¥q%±£6ãUtHë	SBÜ)ÂQ–DPÁ$@ç8?ı”ÕÅêSí¿ÿKyéŠjKŸ£õ®Ud„zO˜ò6nbo–—±©Z´¼ÏuAË9°æX2ü(ÅŠ˜[Š0·â¿Ñiy©m-©6ş9ˆ×,(—uŞ€~€ÁU:òM¨µ­ 'uş¨k•ùoCIx6,ú$JÃ³j‡¾¶3ªE\äY¤è³8‚Uô;ù® ?.?Šµ2xXN†*ï¤­3neÚÊ÷{…§WBa.Ôµ(e-FUP”ª»(z÷Åbå€nÕNP#ô ©ò…ó³¬s™^m#Â³cüONr¢zeÇ»}1Ş5‚İ:uæ’ñpG‰xÜxWûj‡N\ÌÓ1¦_¢÷Èrğ\ŠKQX /Œ˜ˆ.sæy%3ÌÈIDw,åËQ*V„]]Ñã…Y?BEÒ5²ÒbòêS°–Hµ~·æŒ”m2r‚J8*u°-÷æfW
-†Ê ÿeq êâl´›EQ7‘µ‡úxFÉ#Š¦yù¼ßú¾™/¸şô[æm¢ŸIRÙhÌ5E6Ìq0¼in$Í= }×Hjh34eˆ'èX¬#¡ğ_í‘‰ºbL?¸zLû–Tí¢ÏĞêÄ2µ™ÈéÚæ nşl'ÚQóhÊÍŒİÓô†;~¦Ü+ìŒq!i>ƒŒW~ûñyêùíËµiT¿²¢Ô¸  ÑÁùÉàÂ³±a0›¹‚%È§Q<&Á„©ú¸Ğ«Ñ€><s=¥aeşå’ºd¡¬3äÄ(NÖ^¥[ikßèxlÌ1…¾ÛÖ©öYöSí©(d5i‘”Åİy.´a'­¦ĞÌ'E/Ì‰6c\Å¬Tğ2Ä`e!ëÃ³×Š‰ü8İaT-ÖV¾ñ1çÕmŒ½·4Œùƒ-hû––¦Æ!
-çÖ‹Fé:)”…s— ­m37=İ
-JvîÏNÁœÙùk_à;°®‚xrè£úÄ­ƒîjÂt«wÏØ©Ñèy‘¯à!™yt=RÏÖKrGFŞ(²%°kH—JŒô®Ò/.¢î$÷Â~tÁ<í5>š>dâcÆˆb×xÚa¹ ˆÛpíNÒI„BšØº“ëÁÀOš›ı`í/± €á¤vüÅ÷Í~:½Ê¾õ·¯PÍU8ÔVİÁoƒª«5ï«Lız¨ºN0¡ùø‡Ó†¬|ñ½éÀW²öV­Ë®!:nóÖQ±bİ;“.0ÆLyI?c¼“ßU¼M¯t;é/XÆfG¥Æ‰)‡UÙZ«FÂÄë9“F–m³o®a	]úM+‡¬’müQå”…’J«ÄFXrÎ¼)˜Ò‘Ì¥‚EM8Æj.êV	oÑÍB67ş%VÇë‰2{ÓáeôIÔ6	ìB<q0¿æ£7¸%3´æ¿ĞS|™¼£şÛÎI‡\ôi©­:×¨?ö'ş£È3zˆÔ¢=)µ¨Y%µHn™iK3:îõÉyë´s|@.:Ç6B-¸D–™³\wÍn¢³=JÃ )ŞSSú)Ö0†5èœ]¹”jI€ÏÛ­–K«Ek“pÎ=œsUŠ‘”-#lv&¾ÖU¡Ê'BrXòù{ æé(¾“&F[}U-4{‘ãf-P)^Îi åüCbH–b€—«†"‡—z×TÉ l5uÇ¤Î<Öæ™9øD
-•½jÅs$šzağ›ÏN©ĞtÅs/l€‚—1ú †·ğ§`@¼Á€<>ln²If˜é„7ÃÈ ¥ yË²¡°0u ü¦
-ÛİxÙÔÏà´U~~SæSé÷´ºd(ÛüˆiµÛÓş…²µ£N¾ìèÀ‘·–µ?êírÍ[á½}8œÆ:ˆ{)éQ+H¨ÿ1‹n^bÌ‰S”œÊqubñî½FÁÓû‚áYçØyë›ÚÛZáÆ»‘Fÿò¦#ÃıC?Àı}LœE>õâ_pÌƒPz`C+&¡Ù2ºò®ÃùëŒö§#zîfnØò>»;Üîì>§ÿ|Şşìëõ_4#Üë†¶,à$N1½Å¾‚'üNÒŠı©ç°‚ş`Œ.] ÚÏçY±ÎNç‡£&ıg«ùlïVlŠök³ÉÑu|k_®×ÔBã|G0äô+Æ@À£Ÿiù:‡ß~ÿ÷›ï°tÿ½ñÜaYQo¼x§Í%*Ø'“ òzĞöÛ®×:úáhßqáø½øØ^ç¨óŒ-\çûÃfK¿pÊßÿÂâºæNî¶ 4¦;7†t+¸d±$„ˆ=ç1àlò%¢›„â¯Gm\$x0]ZÃƒçcvœÜ}`¹tØ¶vVßU¨i’j–‹›­“*máçô€DŸ;]£ÓƒuÂ+fÉ1íSŞÀl¢ÿI®ÏÉĞÒ#5¼C«4Åófji.ú^Ğ‰	¿úÆwúşñÍÕf•>XTs)¶sÈ‹n@z–‹òK„îÕÔê^â‚1ÁÀøx°	Òî“‘™ó_KY)DÒw0kÀT0A£^ûÍ5B+w_ŞİI
-4eÂ2 ³F»—	wÛş¬†>/7:Å@¨Œ›š(sÖƒğ¥I‚˜^ÚP£ÙÓXÉ!èbDì×­ö_ßôÎŞ’öÙñY´ß]ôÏNºÿì”)tX-ŞlI‰œkğq™×ÓeíŒö8Â2Æ×™¡×LåF:ƒCñ+ÜsjvÊÃ·ÇÁ,Qn‡†íéiA3³Y„sYk?£Cšà)©f*}ª2}ªÊäF`z‡Ã?£FÔ}o’{şÙÑNçµËó]PÜO@ıÌ=½Ï?wyú"‚ÓúNVùñÎÑÑ÷G{NÓc‘\`˜<ÂöÎö³í–Ëm/¾}àuÄ¡³³³ƒ`ÒÅ@6Ë«c8
-KîuVÊJzT6†ALËºR>.¤·JÑ¢²e-1—D…YiÈ_’O¦ªTömù?:hWùbP©Î~”‹'›[ı¨µ| UébÌùW¬V5 ºŸcúß%µt½-jÖŒ~t¨%Î^ GPBgMÎ;à+YQı¶!ñÉöÙ« Ù•4¼—ÏÚWå¸æŠ£´@C!ÜMıØ¿l'¿¥å)ğa–#aÏÕ»»sµYš8bú=ÚB:v±r:ªú ­xU]N³TÅuy‰èP\Ç.U=—ˆŠ¶“VıŸ[œ\ŸĞ¯ñH•‹¬ š^§¸õ	-£ÓëMz[™h:*Çş¤'¬mëŠá/êm,¶3OkT>ù±ERXBUÆAa`äiÉX¬®og¸°ê¿{@[ÿ8{×'ıŞ»vÿ]¯SIßß«¨ïÓh-áy«İ=}czºháò&ÃäR  U´Ğrq°dqëAI<‚tÈ"Hæ­×¿,­°«~e…Tùœkë—°r‘©“nAãõ”å]3:ÂTjœ²xzdX§Få.”?ŠªsüÃ´7™¸$Î’Ó¿
-r”Òut×¸„6•FŒ?O¥8ƒĞH¹ï5e_9%x¶Ë(v+`L+òó¯‘Ä§=±Cuvèc;¨í9Fñ!âm0×y&KiÃX›!øM_dd›¶a>Üîöß~qG;OZşd~Ãƒı;rÊ=hér´ï>ĞÑş3&¸ÔÖ1[eèÅÃ
-âlç‹3úUL˜¥_ö$ÍLÒì¹òlçk· ûÁ$Ä¶w~ JŞ …ÿ>'9§|Ú²rûşôë£}éÛ¨¿2õÿœ®ŞƒĞÿ~éÿudå¯f€«ğ:ø
-å>û¬'²¯LöG¸pBñÍæÿ$áÈˆÑ¸¬¢êôkµR[ÔÀ&óú3u–l[µ0ôL¹D&¹m”¡2‹Õ~ŞT!7ÕªÕˆ™†ñ·OùÎH(¹.YÉæzVíWk†U9Yª6M±}jb¨ ´Ôë¾y›Ö‹tON:½‹îOrŞëüÔíüL;í¿Z«G8ş…k	]
-“û™JK¬"B39Æ5[”ĞŞFùZƒmÛ·[{ÕL°në£Oñ?ç±ÿ1ğo´İµİvxAü-Eğ¡lC“îY>pÅÙ¡ÙuóˆÜ ”íL…ŒhJ?`>Ş$%èÇşÌC(ğ4G+Ébßëó`âS©ïÓÉPÏ9˜Áyİ:|Ó![¤{HÚ­Ş¡Cï§R•UáäÈ#Ñìåk­ŞSúÁáH‹*#gàò¤¼»«lşD™Æ‚Aûã­qp‰Ù—^¬ÎF)~T°BØÁ&ƒÃlr4BŠÌ›
-9•*ñªQÎnkî­“àÁË“¦*•RVÏÀpvXC&ÕÌlG%!©ø± …béyTb5gşI¯¢®Ş|şÜ«¤*Å(„şLPÒn«§V÷&sÔiè*E3¤(êÏQ:ÆÎ3€3…+°_ÜÊ°FĞE
-tTÏ£˜¨İLZ‚Wİ[Á¡–yĞèúË”¶öêmëŸİrüîo'­SmáŒ.?RL32ƒŠ\LN¼¬ &[ÒiÏyLüı6Gõ¦Û;¹¥İ5«,¦K¨M@kCÀùi–¸9ş]êA¯»9·7æÜãB¾êÿ¾Q›úÕ¡è4³¡_ÖÆgî³à”¯ïığë¨úGé=à
-ƒ”&*€iê´N;VèG"ZĞş·˜v×UöâL.p%§;@sD*[’ßk²)@Z´[§´ÆşİÅÒÁYDEÃµW?wÀX¨wOÁ\¸°ŒnbÃŸÚcğk;ˆaaÉK‘‡HyXMßsª¹£%tñ‹~ç„´ÏNÎÏN5e¥1[ĞDE¥©¡Ï9mùëc ‹6¡^é¤Vš	f¹C.`,éH=;U31ğ¬›lJ;7ˆ[É4l£Û­ãéuZ‡İÓ7g;)1®÷¾o<Û'5ZÕu£˜uwDr“¨¨úÒ¿ï6å9;²¹«:{L´å0å¼56®!«K¯¢xÂ2BÑ–E{ù!x@nãj¡öĞ»ôC«¤´ds‚šÒ‹B{<c^lÑ×8³›Ca‡1ÏÓÒ4/0û‡gSP4g) k7(±‚éöÎ®v¤2l¦½eAÄŠú[(af¹a:ËS'P8¾E‘ŸÔ}Ş”ü#eèK¡=İ£‘Fè]¼œnŠ_ıíMø£³³>öëô[Ø9LbÉW(I^:3®Ñ3H$¬ÛÑµüÊ+¼åÆ’ÔSkÂÄønÍnÿBvš;ÏÈÉ?êı¿‚øsAú ÆÅm‚§Zƒ´ĞŒÉ~ŸÌãë¶ÉM6É0a]<¯á§q|O¼yD/vO@ıE1H‡`Ãnš¥ĞNØ9Q¤&ø?$†å¥â§W P¦óÀƒ¹!©í/¶Øf¼’·®}Öj¿%ÃnŸœ÷ÎºpÎ)á—ÚØX¾3æìkaÚY„©ÀÇÎÍyœ°Kånq®§¶sK#geo¸.Heıû‰;wSøj
-(GJ})ŠPÚÒ`Ë©Àˆ\;XñQ‘tµq"w´¡,œ3“Ë-ÔD'wÜËUnç¨‘–I¦¤Xæ¿+ÖX±²ÆvSò¯¬„[ÄóºQY³°Âá'“ƒ¢H¥ŸÇÛë¨/ê+ÉËZ+ È9òÊÏtoõ‘É%º¿‘®Q²“ZÛ›N#8¶À4¡å*Ã“^Æ,Y“âU1×	G[^¿‡ó!ÁnİCu€E¡º:‰Î„¢\¥„æ#>å¿‡aæÂˆn|£CZµŸ{Å™88¥îê…Vx Ç¸W—É·”Ê‹´Û±ø^pÔ¢•>öAtôUldÙ¼åic7æ|ŒÓ>¥ãÜw&,oÈ²3ô§­qÜšÎÄBÒÁ H\÷ÆÇ‡Ê»CÇ²ì½ç‹İÇsîs÷z°nà{ÈŸI*«ŒKW±Ó?ã4>°Ùøm_à:¦¬%frÎtòÁŠFm²ÜÇë3˜
-°†Ïèjüèy;Kn¦É|}å]Ò›=gU¸ëÚ$°%Z c‡¶orVc“ö…#ßäNxåAó?ªûºå{!àK6	È&)O¢ƒ$öÿ}`£,cóã8ŠuX'/eïBÅïJ)”c6úe~¢'yŸiû¿há×²Qäûup'ìDµº'´jotOÌğŒ—¡g¾´ŸHæW@³Cİ ô“ ÇR•f|“åIäIGù j+•D°ïG›-º[Ã³ˆP=!Ó03j:» +ÇşæÙùTVøéÖGC¯¾×”²Yİ¥T±“¯Ö	dwV`vEn”ò¡÷²ƒ°ÜÔÉ™áî¯îu:½NÇÁíÙÃne¾_p|b©âGŸÿíkô„.Goƒ ë{C§¾	OS“ÇôÁ|¥ez_Ê[Êº›XÜ¥ù¾Ñ•] ´á_Uh‰0Û°Éè u¡LK´Üˆ j‡P¤U«ÉßÃp=Bq°„³'f¤„Ãèıp½üM_ •óûlÎi¯Ûæş•9¦ù†ÆÁàÉ3­v³qt™å5Ûı½üMOü°€´Š¼
-KÛ£w€ö¤;6Æqc°§ŒO¶È²¡¾=8Œõ47=m’ã&õüD$ãh@kœ–Û'iDãVI÷=í–ãnX~Gò“?½öIíMD¾#=Ö©>˜’¿l¸oß”
-ÍâŠ—wOÜô´u[÷Úƒ%X^
-â0V)(nzÚœ*›ÓàKç¨êmâãYwŠß÷´Y›õ×Û(¾D8áPÏ¸NÌû•ø!æJæ7‰Ä7nSîÎÂF‰~)¿Û~ÉÁ"Ms4£ç:ÏÌî÷(@ Œè§‹Xë÷Àtd÷9rÑ^:ÄEÅ!NaˆS£¦£œV¥£tÑİ6-Õ5õb‹‘Å£¦öó(š$¿<µó¨=wçµ?Q{á÷›zM&ÑÙ!=àıqrÏd$÷Ü_<¹ŸF@f©“.¹	`–^ãw“É-‰n¦•hí~²ö
-şƒÅ#oü†%‘ò‹'¶¶“sl9R9}Náğb:”Ù;Áoz4ª„³şÈ•¾‹™?@EkÆ“†¤…Æê8¥TàÃà³Æ’îû
-$“ãáĞâè”âÔ¨vøôá(õã)Eë=¤}9æxšV§}ñvôvücDñ-Cô#5ø}µzİ6º°ØØÖa?a§H~_m 7­“Î´.ú8_ß •~â%Â­½9Ù ù÷SÏ¯á›%´*ëÖi¿=í¶[ÇÿyvŞéµúg=yÏ`¼yïêŸ-ÿ®Ÿº½ş;xOtX{%†Kõ„Ÿz•ßRQœW@;bE‚²>{fàbqMÖÌëÅüK1Q¡£ËgOô’Ûé€XÒ¡_š (ÇWä_g½ü;Ù¿.¸$óèbİ4k"¡ŒW®ËCï—œƒXvËTHB<}ZêT0¥hi"õ~é‡ÃdÕˆŠ_±¤Ä!,ÄO°4/ÉÌ‹ÿ(Œ¼y­°HxB%t•”sÁm
-€HOk|0ºBbà¤YaIXš‹‡²'æNÆB}RrT¶âùuÀ´İéU¤ÍŞ¼âz@
-«NJÌR±\‡„FP)súÆç‡ô^Á êÛãŒUDä&}Rb#õÃC¾AbçÕ·]r^JÌ¥¿óWî	ş;õCl¥å¬2õƒ¿Ê^¹ôÁœ¯N³#²ƒ#Ûù·šâ
-|¶CüêÛ“L‹LŸ4KÕC÷Q¡&1Ò ÓM» é\bcƒFìÏB83j[ïÿWÿ­Uÿg³şü—­pİúF¾ßòsĞÂÔœ²µEŞQ"£0ºôByƒ`OÕëDçëÒ1wÂœó%à˜aÍÃÃÄ«ú¬ [4A)'½_'Ó€ún°îS‚{¹	ÖôÈÉFCZß?îËK#Í÷šoP£[6	O'F22Aì`ÂÂRË"¶l‚x ğ]ØA’mîY¿ã®Å°kxtÔØLĞ#Ñ•jF6³Á1MÁÌŠ¯{;™;eËÇË¦»*ÏYo[ƒsZ·Æ¸9 ºô(§7ªß/Æ‘`:¨ìCD.¼E%(/ÚS2üj“áÏzoZ§´ƒuëğ0MWfÃ§ÀÖpø”ış”ışù³ßğRˆ’ì<(qÉÒ©ğ
-bÿƒäÂ÷½Ë2bµhLI¥¹îº;e lÂ?ó«³?–ñ¹Ê›”í…ÿ‡Y×Ö…J¦jË!·ãàHcÜÏÀ èÉ€SØt7çªßŠ(cÙ&*{kx¥™1E:;åi‰]5”­4D¯}õsés2ÒŒ–)—énk»Y¾Ü<CqV1{*—>ºCø·Wó9=9Lı›ÇI	8±¯‰Ú±OChşM*u5J«¨Ê¹³r,d­øê*¥<ê>“`
-Z
-û_Ûù×	$U4 Ğ"¢ú^:¹ªY m@QAIÚŞÚ!Œ Ğ–ğ‹"½ =z*rjL)ô©¹ƒÚc T?~¹Æ§g¢A‘äò–Ö1o¬dÙ$QL_`béæ!¼„™	›¿]ûñ­®Ã*¶w¡ÀµÁø
-¢}ˆÖ·›`ÿÈ{âõ“V÷ ·[Ïš -İ‘¹j3j¿EÅ˜ëí»Í"ß0mzgá:Q¹g Ë}>.Ëk\êeîˆ¶j×¦“qŸ£äw>gŠcKÃßQJv f(Jß‘¿]{ap0Ÿ­¥÷¥3l|QÁŸáËë·â©átÍ,ïjúğ»˜sÆû&=‰eÌÔì­òôQ¯‘‡n@ÓØ9?'<åhÔÙ9¨îâ´½#HZ!ÙŞv§ØuVvr%ÑÄ_ÚÅÅ§oœ	‹Ääæ±ÁÃ „š¦‡-ã*…¥%æ•_¡ÃšhFq]jÔ)ÇÅ·XDdòÃ7‚)œC?©ıãTãĞ-[b¤Ó†Å°’ÿìgıÀjL
-q—IßF0]Ày|m †{µOŸ]H~m„ştÄ jC¹¹˜7³,ËPêÕy•D'Äu)U‰+ÚœJ¸ˆÉmtsšm˜'©«ì2ì×½~©¹pÃ–Xof!Q‡=xEš”àwúQgá¢4á£w¸êÛËÊx“Œ6Sl˜¨Äao_˜7©¼ñ;¬©Gfbì6Î-cãBf¥[_Oq™-Ìâå€T¼(×)Á&{ÅEÕUıîÖŞÿb‘¼ìº'>œ#+z§‰.'ŞLæm¸ÍÎzÂã_¼Š8)€ÚjÌ(¬ÔÑQã¯´öeÌ_6z,±Åİa“º9tÍb©¹§«¸”B¨àa("Ù¯K®„‚;ÏÜÉ¯û÷öÅ@ó]51z¬ËK¡õ6şÈöW;=Xe»i"°B‡>Ïm…!®È‡‹ôGRûöÎ.Æï7´}g³9šÛ§“4Jøü©aÓ±ˆ¦JfÑv%ş0¸¶ŸÇ®“»gu-ÙH+‡-4÷(b—¡ı2ÄJÆÍD‰†g§“ÈF…tŞW<œmòÒQ“v?	ùÕ¿}y'&`g¬ª§æBç¦°Šª—öÓ›Æà,ğÿÂ$â/¦ä›—™•évrU<Yİg÷¾Ñhà¿7Ó	¹ôxQ’Ò649íÅÛ¿ÙåLw¹)fİ i´õi:ê„ùH}¡cºÓIId¶u\é|ôÔ™Î~±Ÿê¶YlüËºëèp
-+üó{MÅ¸’Çß~D›:¢g—‹è·wúRg^;†$ÁÂ«"á%m}EåÈe¹µ"¼î¤¹èô¡´ZE/G½ˆŞê|§‚IœS×^İÉû
-3*¿Gèñ*&šFü]ôd«òå®·ºßX½»§Ã új*şá)·~ıt«µ^iTìM{·éa÷%¹ÈÂñ3têg©ëºD@y¾¦‰³¹\¢’—)»xñ¡‹™K4vã6W%öK\(Í'—Lı‹³jt5¾,JÑ½Ñşx¡íşjø~£¦´jHm;Eƒ]ÁÛÔ¤ÔëíÌàI`„ĞçqÓĞï›¿¨>š;LòÃé´²jk[¾¡67—¦pÖ¨n4ZS#¡³ú~1ñ)M&Ø+&-fg¡.P8ŞÓJ{çîàZÒKQ$è^¡Ê,rŒı9ØÂêÜpšT·§qÅæO9àÓ]z®Üòÿ§I8FW¯M=±ø9´1bV­<¹DÊqírJİõU{.ÏDœ8”-İ˜Í"íó¬„
-#nå£¨fúÂ–©Tó¶ò5E[Ôa‘VåòáÛÜßïÉ_O> ½òå,EàÂÊŠx²rú²ø aáD™[¶”—)ÎZd¿a”0#D›¯ßg+mÔ¾€MH1V·úÂ7LxÅÜÆÜy`šs¦¬ «­œÇsÕœĞ–\#}Î—X¿\ÜvÙWŠZ{L43ÌàÁÀ?´¬ÙÕJ’`4%j€ZQÖ‰¾^@^'-š¿G†³1ÀZ‰Ä0r9m´1Vë›òÙK´35rĞÊğL”ã-Œj¢mqlåp‹#œ(‡[1Î‰z=íDùÆÁ<áoÒ"Ÿˆ¿ë4uRµù¡–ÿbæú+WcG™)K³Bb‘!`öˆl•sÓ”l:ô–7Ö+ÎIï¥Ú€[ >MÌÑ».¡·õ]ÂË®QbEí%ãÉ¤`[CÅ˜,9È5åÇ´#íĞå9u«×ì|4+r*Ò¥)İ7±7Ë<ô,å~»IÇÅ¼ğ™!ÿ[’8(%XVË54fR7ŸN Ú³;T‹æÂŞNÙ?ÉÊ†’Slú¡M/G¥ì®i·‹*é™Á9™Áæw)_GÓ‘$ÓªdÈÙ|ìÿı_æuvpÕÛöK¿t»(7‹#âÉ2z²Œ,£'ËèñYFÖç7ÈÁjª~İë|íègrYşş]ıÈª¯Ÿ)²ş»l’ÜİoÉmbİü[„7<mO¥íqn6WÚŸ¯³İÜ£Û jMç¸è+j;÷è6«ró9‡ıúêÚÏ=º][¾	ùƒµ¡{t[èÖŒÎÛ¾¢vts“*4¥sÜ®¯ª-İ£Û´šÓ‘?z{º²Ÿd¡–]¥aiÚUö©-Ö¶«4Îâ»Ì®–GFÿ´«ÓÑÿ¦aİı=ô¿H;üaZØ)‹7±+¶D»/Šô*´³sñ{|íİUnk§“ˆÆv«x®.Ø¹Â@ç
-ƒœàü¼ÁÍÏØ\@Ü»vÀ+D1s?HğZ4ÌÂ®íˆ§n‚WbÓœşXùêl0mÿ<Ë}™k÷‘áèkAVÜ3o!,jÃ
-Kkò{úòâòÀTIMÃ A0£áKç2ß¦jŠcõıRtàPWñ!²˜û¿äéAâqá»ìeoí7ÅóÓh^÷pt¨C…³¢)ç!ÇaÜÓÁ•_õ#ù€-4¾­–5üA9¬ÔCQø¦ãUšÆBmrNı3üş¬™’+ 	iÜ7¡p²,Ş@èu«ß~KÎ{İÓ>ùtş~~ÖëüOëXİFèy+Áp&Tf2„]DÀ§8Ì¿sO!2Ã	0Ló‡h0´/5ÚYeƒ!¶˜Ë¶*4ºÌ5ÅV~-÷™XJİ"Å²³>)‘¤ŠOß ²şÿ#q¯„Ò•ß%úÛ]úI+8Ô™\” •íŒVÒQ]Ñ˜)”s±íx÷ìfĞf¡w»öŠÎyõÓ,Šç¤{H(+R?--».7O¢™Y,0`…İã(agX0|°mªŸ› Î¥Á5Î?Á>›À8ë±O;Z D¦®UöóÓ7IãÅÖlq•»²2[OKõ}¢ëŸÓLÓˆq›RíİåE
-Å7_[´„–FÉríY˜¸yoÚEÕ·u(Ï0cñÁó#ÂÑıw'+£ÏJœWTÃa>ÇˆxîMığ€¶‰£°lC©„•ÍğÊ›úû]Ú£"C‘¹¡ª<{mÓ©†j{3à_ñj™2Ş5•éJ’°:¢E!¤3E2™'ÀØ»ª—©´LXNŞ¾åÒ+Ÿ%æï×W%”İht¶¦yñÂçÔšCnñ‘Uk²CÚì˜šìd¸|ù)ëí¤îWÍ_sİvô7q ¸lşúj•Kğ<{ĞµN¡ËÏ)íãÓ=¤]|Ú¼‹~ÂU‹²C1¬?Ç9»ÌµX:}ˆ%q@3]$Ô–†chÂ!gºGÃ2tR=,j3C'Ç²f¹djcß‰£Wé¿tô!:/ÉTóiµãè˜ôBêˆŸ˜Ú]+½ÛêÑµ©’u^CUÔ Z^9£e|¯qCTò½"ì!³±±‘BŠÛÜ£K¾´‡ymƒŞ‰·˜>ÅÓ‚O¼ı^ıáûŸmÆºº<¬†AsLpb[ä5ŒşüÑ1dkä+¦¹Z¶äƒ.È™üé¯œ9ùWºó§7òßÀügŸGM¯’øô’“¸;«ò'Rn?¿Jÿõùy¶ó	„å†6fÅ`"1¤†gïüO}bxN®;LIğ›on‚`w4húÍ 1Ç@±ûÍfÙ… ş°“ó8°¶7JP
-|`¯ik)§ùBlÎ†úÄ›‚qŞq›¥ïœŞµÊ®²!Ü)¾?%VS9¹´¼²‚dãÇï6›rµf(İ—Fºï4VŠëU®kt*P+ó ¯De\šœ„ é¬('{©Å©‹ZŒ^<İqF)çİ6ş05Œ	•X
-ˆ{wBÚqÁ63w…@4×‚ºIÑÖ=ìÌÜÎôú»Â}®}ô
-¯jCá-B"ßÄo¯ü2fsñn|ìeëæFYK¾Ü ®øøüfD@36Çƒ{‚¡ù_ötMñLmÔ,“5µ¼»O]İq¤!`cúÏR\$¤æ
-¸Gw<Ğg©A-ö›d6ATÀJ1¬@
-'1˜ ¬¶©ïJ:"V(HÊk:ö’RûÆ‚ÂâI=É#ñğŠå‘E™xñ­6Qˆ>¯±lÕYŒ:¢c§<Ä\?bšÒKòÄ¨OŒú¨U÷Ö49G¾Î­qa?F#?>IF5„…îr[MŒGÑ–èúÓQc}“¬ûqÅë†¯dß¢ıÍïo‚é0ºiĞWé6VÓ KéÈ‘²f"!Áü¶ş\J™É´—Ù-[~’â[`Óğd†I.X9¼i¬¹¾Ól;vYÃñ,±FXGÚŠOÔ¨!Ê ¾)ãF¨;ÇŞõt0&·	L—)<&9/ÌÓ'ùû$Ÿäoù91#oØ
-CaHĞ,Œ¢P®&Õ²ŒØ 9äo ).`\²
-Ì±ÖxpÆøŒl±0S,Å!tì`e†ÔfĞ'bW¯d”|–Qş”.Ñs2ÆKõ†ıfö»ru…[°qõ›å§ñÌ7Ì.[ğ¼.ËçÈƒb,ÅxâĞ^; æ’K{½¸µ³´û—å|ãO±Œ¾:MÜ#Ø=*i4VXi­ïkíÕşçq4‚A“{²EÒ_ö£¹Zpy+á&çYI¬4ıİ˜nM!)×Ò‹Êe4Õ§yÃÛ”ï	2ŞÛŞoRhIæ·¡ÿòî”ıá||€kjÅåƒÕË-Şù3Ùn6ïÿçS^}¶Ò"PÕ"+m/.Ù
-~0s¯Ğ<Ş}Urïö~)¼Â		?ô)÷Ö15³ÊóIœi Fí0™|¸Ì…©†ªÖùO/Â€æÅª»½jÅš°]Š‹w ”hŠDZøõu.!š,<À¤«,µ_­çº æ‹0xÕ™¢”~ŸÇÑtôjí5(#ºd{³q0HÖ€™Ù_ÑYÌ2†/³ÛQÅX:$˜@<Ç4`XûÆ>´â}gGGÙè—qt“À
-¥“a	òlì+ZqW˜Œ÷1
-†dâÅ#ÉÓ(H|ËËÛã(J¤ÏÅÊ¬¥=?<Ê<ˆ&3ì´‡ÜÎ£á»á¼«!ùz.‹˜€ï³E¡‰Ö¶ cŸ€N]Ï	æÖb­aŒ¦I:¹\ÚëÉ4É&6ÀÔ¸“æh'ƒ IpéñÑ¯ú‹­kE²Š)+»ğ[äøöÀ)»ƒ8
-Cú¹ağÿ“`–úyìü‡D^dÌÏĞeò­\”â Ÿvlò‘Vî¡ßRˆ{µDÑ†ô]q¥Äµ½éGÏ¤Ñ˜ÌpFƒµWoñà#˜PË@›Üâh%0)¨Pº—hå»«õ æÑg22‹6‰•9¤Ò,ŒfPÁRËjY=Ï½Ö´l{GwÖKx^z½dœ¶¡/enèÂwIéHJùÓt·I&ŸhQ„Ş€)×ßˆ"è,6{Ñ²Ìá€m8b’°ÔvÆ|ê‚Í+°kkˆ«ÉFÂÊ9Ô+1Û›:ób¸NÔKºñ5z¢ºÔ¹†„WÒíïc%İ,İÁœâçl=-„ïÒZ ÁĞV#ãõ”óäL×²QgL­ÍŒ‘±lA"RT`ıLıdÙ8—~ˆü_õô£H8#ìXi
-l±A®?b²‘?ïRGïıM-+6ŒaÆ<ÉxüæŸ‚wÔ0{æ€¬JÖ	Ì.™Ğÿ]Â>Ñ„#ú¿O!ıßÿ?(‰ë›dè_y×áü'tTĞ˜AùÚÿ0¯¹˜lĞéù>/Øs›üùW03Óó„N¦ı|öi}Ó|#|Üˆ†­íNúÕxï®ı^X¼sß~'¬ŞùƒıÎvëÎıÖ]~ë3¸Õpç½ËÃ.¼G"øÉ3ÛS_şE×ÈÒÚ]6¯a	ÙfLy¯£ºM{xÕ¿½C&TáGÈ—ŒĞ!jÛÈˆòŸÎ­„.İoï$!ğ#Y¾YPx°ıúó}’xs|Ä¯ï7×çù’ÙŸßo7šÛ¿¬›g§÷•áÅ|=`\d‰ß,‘…\ŒQhÒ¾K«*ÓË`°ôrT¿áXÚzÖÌ™}â‹›lµêùØövÓ¥ <[`şœ¥ı˜C¶¸²`¯o‘éÙå7’y4;ÕÌ1ü?ã!(.&®gCoNO‘ã]:œFÃC=£-ó)]üí¡¶ã'»î‰*FÅ—xÃa…78Ü£L•çosx‰Á+®¼«M“çJÇF¹DX`°©²1@@×I/I©i¾‡sÅyñ²1©H’éE{ì~mñ ôqáh((4H©ıL´í­ØÁoµ/9¯ÁÈËÉî”{A¦„Æ¨`ä70¿õÄÚÛtów8tµ3ÕÍH«ÒÄ'¢%p$rÌÜ€UÅ(–¿³~‘`Oí±Bø"HÌĞ@Şÿi{gg{»ıB¼ÿS³µ½»İü¥@—¬@úûf³$õx'éI–7íİ²°¥EÉtH`w\”×£w±!H—[;©:AôPwşƒ5’Íb7™³»;Õù€|¸ÃÚ·š©ßo`ÜFŸYdnìx„“|‚üé°>­(˜…·†ºué=Ö{¬½'ml¢)â‡/ ~ES:ƒŠY†êd% f—Ëü
-Ïà«–kÂ
-1k‹Şáz6ã±H€İdÈpc°Ø¹Ùå kÊ]2T-×Ø{Öršâ¸şC‘§9KÓŸı~?`=?qU5pmª‹}*9°¯EèÄÀ[;’Ì½xÎR@ˆ.>pŒÁƒÜÈép¹q£æ–ÓªŒ½^ B“#_÷ùƒ™VÊf$LZ&*õáŞE&°KcàÈ@y\I(‹?Pà¬lóøz: )/‰µ+nvªj5èv'?óqmı¢ß::ª¯s÷Jê/ ËNÿú£Ù3/Nüît^ËÙñœÄ6É:Z››d»¹AşƒìŞÏ>}€cÙí`<àÛO ~‹?]Ñk„í+YO]ûË—+Ëšò×Ê4×²XBoÎÃ%|‹,’ÖX¶…h¿*pÂTÇd›íu>¹…ºb³q4~Éèkòbœªõ´Kv*HP¯^D/$@¹Pv•Ÿ•dbDÍ†íŠ‘0š†—ÕYîFí¦SŒä:Ï—‡•ps…˜Ò^ÓI‹KGu—BEd¡P~xşÃ·XÙo%œÇÀıèO+á:VuÏ~¬ÀtR°ôa8.n¦ÑADvÖœ&‰ä4I!¡0!0Ø$Í<eˆY
-}Ä¢Pw¸£bêjD5åG?
-Á(ÕÃs¾å‰cÌW5Éæ-àö\u&°(Ç^ÓóMÁãI“L øŠGÁìù€†«±e8MAµuù%8.ı¨'¶3_ÕØ®h.SzŞ°æ/føgzM¢i„æû6Ãsmfx®ÂÁêÙôp¯u´û½`Ó`XÑp}|:ñçŞĞ›{Ï¦®Q‘;eş“3}uVœÉšPuìR ëR“[ª %ğ
-ªÎ#`Ì!áİŒtUziÊ!•"CUp*aä#ó*m7Ñ­´YõÍ6-²ÒpqÂìª²ÿ˜‰Öğ?iUyCU7X%ËÒI¢™²ğy©âGåqYÈ ÜI£¤,wú9’éyRÛêDu=·è„Ş_<Ÿ¥®lïŸ•jÛ0©×¥Z´¶7÷GQ|[•Ğuö‰?®'²­º½œ­ZÁ‡z•İ×•øöñìŞÁW¼wŸo»Ftú”ÍúÙG)ôu0Úı–6Îé²}‡g¯¿XFF—»MoGı   ÿÿì]İrÜFv¾ÏS´—9Zs†’¼f‘rÑ$åå®H*$í]Çq,p¦93˜0i.Ÿ UÙË¤r³¹IU®’Û<O^ û9§€ĞİhÌ`F#™SeKšîsNŸŸïœSş”í¨?Fİ°çî&ç @ø‚Í§#FÍdÏU_µè>#
-ßµ#Ğ:A·–àu×MlA|÷$!¦Ú©©BîX­¬'¼ê¦×ÖØ#œè>¾òØÜ>¥º&ú£ö»öF3Û f`ÕXQXÓ›-ğlõ3µ‰ÀùÆÁŸ–ç•û’9PN“ÆÁ,aÊ«>·¤1MQæ\TYñ-c.ë3ÿîü ÖàâÛ¯ëÙ«¢¸øë˜í~g'Å¶×´ÿA¼ïİ=Ù¨y[ B&Ø[9©émy;',|ï%3Õ±çt-Á]YÔ (0şMç0ûôS]ıƒ²'ÈØš]§úÅÓÆZiŞ«Ê¨}]fNrÚÏ;k§=­Ò tîÁ˜†û†Ï¶\ûT°iæş¹³#ø21è!°*ß·äL¹Fğ¦ü¦Ã„í–ŒÓÂhè‰&eß?í<-—–™âıØ8Ê¦!¨5™Ç±C6:¿~ŠoxÑ­2	IÏïc2{pK@Å€˜ÜMAäxdÁÅáhDƒC{‹KgµNÌëPkE©î+!½¯PyIÅæJ\Ææö†N¥”jMhøåïÜ»¦²~©í³Ó—ß‘ıó£}òâìœÁ÷÷Ï/Ô†©®mQ¤ˆ·.MÃS\H2şcXo¦;Úq7bhĞ^†ğÇŞ­¿··’–aùh ËJİÆÚUë$Å^ºøçmû×†éR‚´6-ú‘%Q¥°S¥Dé½4…™1{W~WJ”şôSËP2!º0ZNtè¢ƒæŸÙ lÄ%Ú3•9Ğƒ™Sš­C•FrN}6ûøqnTk"óiÇÓ'kzŸ‰ÅÓ¦W$W¥W'W¥	W%W¦Û5é¿õ’~Ë©¾F«Ñ”Ö+“yÚy*¯-‹·tµıL&]ızê¤«´¹LÁÜ„nY“s[–[Ö¹Š¨÷¦íbP\Û¼HÖ¸¯]şŞ­Ïyí,-cfÖ²ecÍ3KŸu¥U|t
-Ïb2ªšÈ¢š*sÊ53±RfE5™	ÕtöSŒ§F³œæ•Ù”Ã¬<$9‰Ï<L7g)P™¨TK,$!©·®N6ªõÚÍ%5”HÔLòP„¡JdŠ&1èœ[K•Ô\2Ğü¼2ÎD^™ĞS‹Æ›HÜi “ÕË{UMÕsM¾1”UÙ7OÏ¾™?¹VfÓÔ"×&²f>>rı`3_æO~n™,óÍ^©Eáe©||d¾ˆL“¬8ıräœÌŸCœrHæ’7â;YÊüÇœ…åÔÉıXl¾ÇÌ9•yåŠó7\¬úJ ²Šm­Ó`¶Œ­\[
-ˆÂ_Üqâ€"°B‚?_TòDM÷ÔöÅsË˜pÁ;¼Çí¨“QÌ^Ìú×HXòÕ¯“Ş°”¬P7§aÉ÷Ã9_aYXÁ5Ia	œw‰õ“˜Pğ^’fJ¨Xçº	Í%4šPü_K]ÿ¢€ıuÀü øhÿ‰Ã¥5€úÓ€óg|4¼ Û?€í+yÔ`_ÎÙœæ}ˆàú…«:•p=ìÜ0í×…9åt‡•Ÿ]_Kt7(ÒvˆxÏ>â#²Ä#oÂ$gÙPhßş>ŒÃ±ò/Ñ Í<Â‰f–;¢™.ñ"ÄQ±ì­`ƒ£Üñu÷}§ÓXğ5òº¾~ÅfşÀÀcš†YSc„§Ekyèàé°ÁVd°\…
-¶c‚íˆà
-<°\Â×AqÀURæ`Æi¬8ØïíY$ç—ä5#ù<”ä¤¿a<|qí¦
-s/‹Ëš aDx¹ ÂóƒëÀÁº6Ü‹@Ï\iı-ıÛ ö·9äo³¸_wÔoƒ˜ßÄïâ¿fn²©ÚE[¯f×ÆùÖàô`|g|×*to—m
-ÙÛ®·	T¯3¦·",ú!ày›BóV˜ÀódÛ
-oJ¿;s`¿°¾[P¿Šv!¨İyfZ·aÎÔıxóÅçÎ“Ğ\p¹óDåÖ ä†¹9ÿòp¸óäüíĞ·3£ßòÖ	w» Ô­;æv‘ˆÛñ¶hÛÊø­ÒvŞ¨÷²}YğµÏáPXLíRÂk j«Ã»ïmÜ±´ËtFÒ.ñª»ch—’ôë!h—x±³ËBúnÈÙ÷è(«ÄËÖEË.+û²3àd­«[#ÛB¶A|l-tlíñ½#cƒ‹uGÅ6€‰uFÄ:ãaë£ag	4€ƒ}@Á> `ëT|xÀÀê–hQJK…³Y‡{Õ>\óenê@¶ªÉûß^’ó£ƒ£ãW—ääìpÿ¥
-ci@»	íaAßsÚ¥ş8±ãY¯ıàúvõÔÁÑ7†CGŒ×.*À$WÁ$B‰7ò‡(g®½…‹¬…“íe^'°
-CïNx8õ1æ­›  Ø·ŸP‚»´}[ª·\Z¼³ˆğÊv®ÚÛrWêdKÇ¬ŞN)Ä1ßÂš\ãø?£øZy®ÛfòÁAïAÊÜ2™#~ÑóRFuuåŠeßŒƒĞÃ3ÃK´„×™ˆö?ëùäj’$¡Æ¿ûfï®Åê#¹^”ŸØB>Õ°dñEÓ— ídKäÈô³­ñ“üâÉá]%I2b„Å~âÃ„»dQ[ ¿«Q»ÈƒPgY9Ù]ç+R ÛòÚUÒ5(‚iŸdÀUd—qZ:7§£ºH^NıûíF8È›ğ¯§ü_)ƒŞ¶½I–ùÃöËûGİ=-1EüO„––ïò‚do¥@öÕQ=V™IEJ†¯~‚gËºïŠ].éÑkE4zi"\#lË¯Š¯k÷Ï]ITã6³Êké•_v s™b)AˆmAÑ×·?±Êô®.m­ÿCüÙz
-8öï;ãQßÌF”i*ğ}Ä9N(í/6¡(í®­t?n„t«\X&XÙ­´6ŠupcSáõyŞõÂ¨Şù²»î-\ê	|W^øiÜ¢<t]÷º«{„1NÒ¹ç_’Ë³oÎO÷™ÒTV–á»£Ÿ !{ö¼`¾ªÒÆ²«JÊ*R:Í‡TkMzD¹|øFüU'Ú[¥ó3oj©LÁ ‹Hï"Eˆ³ av—bïR8>‚¸Dãƒ­Y˜¿H°-æï˜RãÍQ2.FE U{ÒQX¿¾ZÃ–nnjMNµ/*ò\ÿ|ãíàWí<ğ®h`ÜÄœæb:ôótgS”1)$ÏŞpËü1¹ô“€’_í®³j&âÆ“DçüJnÇbSµ¾1á¤£‚J¸A ¹ˆkàúpi‹Jò:RnjÑXó}štØˆÚüÎÜN3‘#Î|’†r°s…%@d|v'ñN8I˜‰åMò¯d7Æ¥¹hèKg\,|Ï¿¥£É"¶™=§ö>³»>Ö®lÏTôÈµYes¤‘–ütˆ‰7fB±‘Š$–g6ÈfpÁÛèos!—e"­¿ß”˜şvÿ»…î=<pÊíw~¼°$‡Æ9íû1üÄt2f)UQHÕ1b¤m¨Of6RŠN´£|¬ÇÌ‚uÈĞëÈ:¹¤ŞìO’‹(aœzJ†|Tm‚7~|4àâÇc. z”¨FVêm-9üÊ–ËœíE³ÏÇè6/˜â@äE3R»}©åéà0òF]8‘.+äÅ·£.ii[-â±JTJ6ªüÓŸÈ£œÒ­ûåî{q€ê~’,"~3A¢à×~ŸF'q¿µú* Ìâø#âÁıãÄ0Ó‚X]#«4ŠÂ¨Ü’xxSÙÔñ&MÆxœôÈü{8¦	ÛÁ˜U3èâzêÕ	úÂ{{äKb„Öw:®Ş•¢Ù]ÓDü¼ÅMÊîP÷Ìt¾^vî˜éJÊ74»Xì°éúHw2fwkN$dÃk`™i`V+a<Ù`ŠÒŞxOvHWó‹–Z¼wŸØãÀŸø2¼HÂÈëÓ– íM!¤»\¥oÅ™&I.t»4ñX¸eÄ¾ÑQ¶&Ï¡J¾É`D*·ni€®$l™(Êb®»€•#ü,»v}Ÿ½8:?:"ûg'è÷¾<>;%‡G—ûÇ//Êp¤Ğ5ö»İsŒ_QúàW7Wô7¬VŠ²hú¹ıB|ä'Şø•?ªï%
-‡CÌ¶¹ 	’]ÃNò£"1Ï‚
-XZy‰@`«QVºP¨	S¾Z^¹©£‚2‚Dš7eÓÌZ!“0§…wiÆ“È˜²¹´ò¼,µ:Èí§<ÇŞm|-â%McÕ>cù]œÅu=µ%£æ`:F+Ï_†½>Í»H¼dƒõøŠ¡(hÔf›ÑÅƒªOè¬jqVñÊx
-üèùÖŸÏ¾µúW+}Nw¯3CP¹ÎhT Vµ_B˜3 ©:€Äw0\MÉ*ŸM(¬E’ŠøŠ¿ûª'i'ó;lÈÌŠVÌg“M§LßÍ[´üë_şüŸDÒŞ¹´LÄêèÆ`Í±ßæKS§áORğ
-å¯`ç‘¤6S’Ê¾{"ÈŠ³ätõïä4d¤EAš]Ğàº½E¨X#}áfÖ"/›/¸^`i“ÄÃ¢”,{pê³ó:~&0è«(|ë#ˆ³uèİÆ+ƒMvô,8ôG{+úß7#5›ÎEÏ&?£z§[„‚Ö°b4Ú»ã'"}AiÜÅQàx?ö`ÀÇr•¯¥Ö8Ö´;äï ³:ÁÊ˜®ĞN¿C¶V
- 4áu‹è5©/Ê¹ÏOEğšà
-¶Ä‰\Š^O3GçŞ7Ïh÷Mûl"âµëğÇí,,Ã4Y¦`Ï…Ícñ˜º|¡ŞÜ(ktÅÀ?¢wÆ™rw)Ì°ù”œuÒÚÜÚÓçÕÉãœ9€tÖH‰X*2¢´cz[!Ó©ÁËk~äm~‹#­3Pà¤¤æ#g÷"êi9
-ßÅ{wÛ:
-ÉsxîBËˆ»\¸EåNÈü`ı’ó÷uÑ•­‘ó0’'[ÂÅˆ?‚)Í­dÀh¾££²Y	¾6©Eb¢&ûµ<!]4İÍ²S”¢ô*ğŒ’	¡åÂôƒğÊH †ß,/©†ı€’o“—°C!Yœ“¨äFÂO²ñ)øš¤-o«MÛƒ$Ç;ëëC ãÇ~vúÁz§Ó!aDäÏ}¶àyv%ş<¢fU·›‘ã³ô+/Fÿà€uï|‘8dßKé©“Ô‹ıàhœ—YP®Yˆ\óUÉó÷"'×ô‚âĞvƒ¼‡íG¤v\¾ª6¦ëı<ŒËJ•õR›‰ì‘¢&ãÔhó¬bº.Wç[Åëƒ
-—ÚDú8³úH©fOTT%8®ŒiTÄé`óÎoºnü©äÖ5V=UyÙÉ;^œîšDz«øwE:7„”Øéò‹ŠArƒ¤¿SÜtëê®ìöNc©õˆx™4p,û2|áƒŠ‘„Q<¿`
-Ú/××É~ B–€¡B‰‹zçûÿø×(jo	½ñc½1&êÌÔw]–½şY¢Û÷ÿèµŞoÿıFû‹XÆÛêãN¾ßÑè ô‚–á5øcØ4øèğ¨Âd;@ğ½–‡LíÕ}(ÇWğ—0Ì q-ÊóÍ•wJ{&&Ø2×¹C¶Ê†6‘Öt,ÕS5ÄV³0ÖÔ¬…êÔ-ĞûtEŞ*Ú¶hñÈ´Àù ×ÂŠ@ÂN\-0şLÔ‡l‚
-ÉK­•03˜R’rº§›úÎÊÁ1õ“Tß<ÉŒm†È¨ÂJ•—Ù2q”hµÊD8åÍy®Ñg†CÉ©ßÛAÃÿµ1{v}\œ4œĞ+gû¿!G88zIÎ¾>¾¸<ç m'ÃÄİ€æ•æpº6s›?%×õÍšßÊåÉMšĞş&¾¹×É3»^@Û“ñ’ƒ`Ìõ­´‰ôn¸–ò cÀl\À‹å¶„]´¥¯´µËËdÔÇÊÔMRid¨Æ¸‹¸'ûçaŒëx<‡‘N¥ÒAxØ÷:»zScWÅº¼q¼$öIÍÛ9–J,¦K©Ök4õù©íU-|éˆEÒnYYD$¯xİ+¦$¼â-![ßÿ`½ø[/ğ¹¨>ÂÍp½ı û Qİ(ï* µĞQÅ<béI|VâÂ?Ù3:&›;ä’ÇXm¤!Š¶‰|mEvô¨…[òò;îÈú–ËÛ¬Áu%ahÊ…¬o<qDƒÕ "0‚»câÊV­£BÌâg³C¾‰¹Cîğ$…ß"Oî¢^Ä=™AÄ¥İ°ó h!†Kß+œD¤ÇçÆ
-¯õéˆFLWç3½¥”P<ü ÕÛw~2€ò1 $qÔ«1jFĞ‘X_Ú5²ß‡7ö±#!èÜk#¼Ø0a¥A-&_ÃÏØï’$IâH(ü•iÍíktº¨ ÷GÚE«ï5b~R9ª{/ rØBÈsË-^xÇ™\9êSY&õŒ€tÇ>¯¤øDz¤­Ğ 0ALúrV…Øeµì"ÔReİr6¤XĞ&h­ÎMß<6U6ú;µQ›Tdní°’9DhK_…7SŠ$­.7‡*‡¶:r®¨_`ÙBÉŠ¼ô#°R’”÷ºb±ÏR’TÈîi±†×3•ºØ›BJ[›b?¿¢V/&U…S@é¢Ç)€1NÇÉŞ
-#Š5‚Ax"$Å¹6Sø2VûK=b‹f­²nÔFE1"üèéİD\ºnŞ¦s¨Üa»ÉnÊ{jÏà´Å¬½ÂÚ—OlóÚœ¸…¶‰eY³-/ëÆÂ¿»H¡—x×6JØíæêš¶ÚìÎpqşå>F{‘×WO¾(w!-Yª‡º‚À‡	«Í S'Æ«QÏ‹zŒÀopøP#8Æc)\#JÆáiqû(€ÃĞ\ïÕ¸¦Ñ÷‘ŠÕí)”°nl"¢#£.b—GpTOº,}O#lïhÉîètÔ½ÍúÔé>E1ç$«ª˜×i%×m[S‚Ò§Í¬uÊÎl™íˆâİâ`3ìeÑ }‡F‘bÉwG·|»ñ,¿•ç¶:ıÒú&Ã‘pÁÄ¤µàIƒiÄÚ¿H"¿›€b(‘Özl£:k¥Z~	zÕÄ‡…~é‚\‡şÏ”Ü¢.j…Ê=k„Àöá:øµÁ¶°ï%SÅü‡}¨È`±¨±& l,èKbø¤A—¯h¬ÌƒM¸NÜ!'~ŒWàtüÑ[4’9¦"u–³ëM„€6*…è²òúˆ+ÆÅo| ¢^ÇU±uÀ{%¼ğ¢l€ã9c»è6Ù şhıvŒO¯`¶ö‚ÚL/‘e9U÷€yàT&ŸıÂî®C›pä6ŸXÖ»KÆ,Kú’Eg‘1Ø²øÏwAÈaŸrkCêdPü+)ğ{ƒNŠß¢õ„ V¤ŒÌÕÏoæÙ¼­NîÁ+'pÆ¯ ¥®¼ Cö÷ücõåêúê«UŒvÂŞíãgqz~|€ÄÌa<õróa?W¹½q¨ €0«™•Ï”gÆÀ¶°_ùœ>ê´öyÅp°l¯Øo,@Ôú>í““öáa“ës.hõálÖÈÁ x$¦k@İ=ß­áú¼™ÕàÖçï®O´¸áJëCà}Ù²y?˜\-3ï3wHnk•äópŒÔ¼F†,Ã‚~éƒÿ9–5Á,h!\ÍÌ{¥¹EÑù	Œ Kuƒd‹>^|ßğ‚xAO8|®êH2ğ,ï…!aF)>ü¢;C<ß{× øÌ}&e”ÈæOâ@”çI'qOïú(»üV¿§…Øá5òÕWû›[MÊ­ıìe#®³LPšNÈ@ÍxÎóZëŒ±‚HçÏ9£~`1h&øâ„A±>QK@{3¿!l9^ˆ0Ö(ˆí¯:…ˆ¬c>egùamÀèA=ñ÷^„ææÌò@ŠÁ/ÅM¥bÔEZKÏkØJh`–’½$ìæn4˜Lè-”;çd<9ÅIS÷»CKœ$*İõû’?ê(‚Í!)]’ç œgk-w¦eİ„{£¿ÒFHv_¾ílÉçXkK}ëËœ±‚É
-Ò!Ã²R,ÛCàö˜òÛ01i}Qø§Fí&(»†¨2³J1©˜ÉÂı!ÄësUÄÉHáğ8÷‹0<$€œnå_$MnnÏg«ñbØ(, „° 5â³ğ©©GWÚ¡ëÎ¿Ï…îÒ§‹±)ú}ùS;³Ö‘õí’†«ØySïÀ–N†ò7÷®rİlPº–Çû’]Lı’,Úãc-Ğv‘)¯"úÖ§ïê¹“œdMçPİæ.&iÕ„“©J$¹‚"¨ ²e^·{©²ÄB¨/òdrúh¸@qÙ«˜[k+A3kŒŒ³ÏVyÌ+"ì•„Ş©B˜;C*İ„‡İ‚²‚SÖD	ƒ”#‹l=¸’Ãì"a,»[$‹.‹üJ"M)¶Êš½äxyë¯&(^4±½òüow×“Aİ›R§Ë47ËfÄõïdÎŒuÂú¹Ö¿›Y‹ÓÜ˜ZbÓÜ¬šSöûá×È¬N[)k7¹
-õ”gÏ|á°‡N`±³}'{ïÆz¶ó9Dâxïİäø2Æ´áªî–I¯°’Š®ÁcÉgdNÜÄÂ¶Á‡‚z§@´úcW¼iYœ³v¥E•òÙ|?I›eó‚"Üë¸*Š‡\OºƒØ÷¤ºÇ†ß¡ÆŸêÕ[«¢NHZÒf³XÂ&·Rúfµ¢!=ÿdm¾«VÈ¥{ó4Û®“°¶³>
-+lØÅ„§ÒyŒMá§Üè(Ğ•
-U§!9>ïu_Ù½T>Ótè«¥¯Xé:Ób“Ézd»ÌfúÅÎØV4ÖÎs™ì):Ë^†”=,›U¿ùgä[¥Ûcó&=_Ü‡BŞäTa
-MÓn•÷’º*U|Ş7Í7àÌ¦C™érT5°0‹¦œ‡Ÿ=-)7–à´¹%—Bg…)kvT³g‰p×Ì×4Ib¦îgzxXñ2íf¬¦ddWs€lOÚ®	Û®ÜÖB·Ion	ÒÎ$§‡(j³§Í3Ó¶÷üÅ\o¯äç»„§:€yd(· ŠŠƒptíGÃŒ^øÍö=»{íš2öT³³3%)¸—Oê/jˆ|÷$EßÂ¤íáôiéyÚXÕ|ÓÅ]éYzÓa×hÑœÓëˆÆƒƒw:hxšó4öGF¯³né,:M“ÜÕƒYòuçÎrBë8ÈåTŠ«Éâ7¾Š®éµõkıª~Yk¥©ãoÏOÉÁÙé‹ãó“r~ VaÃ–.pNõ­ÿ–)ñoÚ"Ù$şÕî(®å~)EÔ¶–>"a»†„÷œ?]-µA"5hÀº‹÷ük[MxéX¥Ø	ë§-(›$Ão3iòPS¼È÷Æ>œ•l*dè¶"lÆ×éŞg‹s˜2?
- ©|´›¥’¬<Wƒ5±„%L‹›r·†QQ&èÉ3Å"@~#J½İÆ¶Z9&¹4õ;ÖDå^(6eéÃ0w-³¡ÅË£x¼ĞÈJ£Lb}Yã&­åÅ:‰9>ıs
-İÅâgƒÚgË•˜Å~‡ sû˜ëä¥¨v×¨|….;g8™Êgš#b;Q6!9´3VNÃ$­k¨jwê]ºtèÇ­’@_ŞRƒšw’g3FNyãÙÖ×!ù¶›Q!¨"¿;yL~¥áÕéªšë=—kbn>Õ…¬‘/àZÑğ·ùÛ–¸½œª[</_àÍ¥ß¦/Rè”i,1E^Ğ°,O	ÖãÈ"‘9,+ÏÙ¢´“Èç¨ìq†*ú0&ƒ–
-²Äj=,yª–J\'¿÷~F„·	Ø£„8èR‘Şác¢í"²\Éfæ­½ÊÉ3Wİ&ãş§s8¯?Õéúãp¶‹-¤Ì%Âª÷ÕáêI´\üİmMú¾Ô£Ïl7ËMÎrÂÆJ3…­’uÅVÜâŞÚ÷[šêâ‡9V‹ù*¼14×ÅßÛ[A	Ö~Ã×IŸÿŠ6z^çx”´„ä+Ì«)>'æ@¦E*ƒd¢P<t›Ì·ajuÁ&Xv‘å¢ÆB–¡t‹T•0†
-:aYÁ£ÄX7?fç¦A2^„Qai]XWtLÚMl™»øùë_şãŸRbo]À&áKêQUã?µ»ÊÍ×cáÄ¸Î˜]ã¹†Î*õHÀ,}YñT³§]~ª»°ğÑªV©÷ÄK¡wÓÚ\#ÖÕj“MTÚ1ùqÔo™cøÑøaO[jç[˜¤ä_é,ScL7ÎÊßm›·ÃÒ)G\Qmnf	¢DÈ;, @Óª+ÏïÊë}ß«P,šPZVêøì#¦Ï¦¦8Ø‚6è¯Âp{ôA7ĞRİ`Ì×i
-İ@¬ğlº2ÈG§È¥«nğ¿ÿúßÿ÷?NÉ½…õâ¹«Å½ÿeª*ñÚTƒÜj=¨†+šS”õ^Õ@%”’j£Õ@ÿ{“ªÁ·~Ä\F—}ó.õÂ%AÿI•„·|Å¦PÄZÏ¦$(ƒ|tJ‚\Ú9;şù¿4dßúö|îšB‘ ~™š‚JÁ6M!·Zš‚áŠæ4e½—CSP	¥¤)ä¨ãASĞÿ>•¦àúuó‘-.ÀL„ÿN†éB%ŠÂFx•/jºe5AFù¦·á„á’”çÚÂøÓÖ2ÆŸòMCx5YBOÚ®òúD·¦;€9{#÷æòzx½ìü]V+æØü'Í‹8v™WâÓºLn{ßïr¦ñ¶’iœ	;üåéÆœÚÉk%ÍâÚÈë‰È±›üACUmå?0ú·É:Ç·=lÆxyo±ºwÛ@×øf®;ë¾èõ£/ÉëãkvPam)ë§g—¬×Qâİ"(ŒúŞÈÿ‹Ór^Zc³ú—WeÈœv¸4	_–ÆÁpŸš;¿ş¸ñãÓûÎkí|vÈ
-2+“8{v;í§ÎÚa­‹©täfHèHöd9?,¿8ÁJV)˜D§ˆ	gˆ<ÒÀ†Õñ³.‡á—Ü…³¸ù=ôß¬¨ë]f ¥jÇ©vÀ${ü//‚ĞK‰b3¢N}XúÓ–¨ô‚ğH1Ø.Ù0uRSÚ­=˜•§2—dšÎÊYaÕ…VÉŠÕªo’f|ó7hMN†òİM1[x¯İĞbıÌ£äÜ»öQŞšGÉ™~öQ’0ñˆ%º¨¦/úY6ÛÏÒGj[™âîjGÛİ«µ·:'³køÎ«6Ú4sÚî
-Å]½ÀáäÖ()Ó—(EŞhV¾*œiXŠ¾ñ­jä;¢ïÎéµcã[1YS“I)dSJÇ¶¸:=Åtë›ŒÛwRf1]<Î˜z'e'ÓÅo3ŞİIÎtq˜gµ-;›nö{;äõ'¹	¿wÿã') ½’°ï_›ÆFç¸—®©ÜxuD±°ç~²ƒt@°PràøâLz¬ôjó­z9¡™3ØØÌ[ù‰›/ßgepÓ¡ƒ—Ô“ÊFŸ¯/”&¦l9)V¹)åº<z¾ÑsëLıJñQ
-`Ù¹E©yˆ*áòt)­­Êé2¡íyM2wñS‚”£¤0:éƒ3ä(½<º<"çÇ§_Ë¼dCóRdÏËğb	¿÷<„äaÏ9¹`Ö”¦§óÏ+.›V³'ÖX@›‚¶oœb®¨­«%ös:„•ÎST9•©œ[#÷õ\ºáäWÖô×úââšeœ)ÖšñZ™áú®½‰İ`6·òX…¾ZA×XîÙ¹ETL	ìLë™vet©ÒºÊabÖVlƒíR­İŒX“Ú”^VïG,ãˆ°v0Ì7åĞÚ"=.)óTş%Ğõvù‘ÒE…öF ókEHÇQÔ³(Ùc¿?b9DhQåpùªGèrûfä±ohL¥r­¾$‰¾ÛûÓÃ˜¯{×ÿĞÒ@öÓv>ØŞŞvì)“µ³÷D~%m£V¬äƒI^Ú-„õ±„ Ì•‡'î2+Åÿ VXUY`Î}wL¥V,{RË/KÈ%æ¤áJ¥o1ÜcÇú-ÕD5Ö4‚ÆkËzÙB½DÛÍ ;ôyyh„ápdàE½Øı­É«š¯>LeÍ#èÁE©]HzC»“„r•—´¥r¼}IÅ‰õlC©R‡_|.Í~º/ƒÁ ;ììÃ¡îx™Ÿµ~	†Üıßü?   ÿÿ rI_'
+                      return (
+                        <div 
+                          key={field.id} 
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', field.id);
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.currentTarget.classList.add('opacity-40');
+                          }}
+                          onDragEnd={(e) => {
+                            e.currentTarget.classList.remove('opacity-40');
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.add('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
+                          }}
+                          onDragLeave={(e) => {
+                            e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.remove('ring-1', 'ring-dashed', 'ring-gold/40', 'bg-gold/5', 'rounded-lg', 'p-1');
+                            const draggedId = e.dataTransfer.getData('text/plain');
+                            if (draggedId && draggedId !== field.id) {
+                              handleSwapFields(draggedId, field.id);
+                            }
+                          }}
+                          className="pt-3 first:pt-0 space-y-1.5 border border-transparent p-1 hover:bg-white/5 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-150"
+                        >
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center space-x-1.5 min-w-0">
+                              <GripVertical className="w-3 h-3 text-text-dim/40 cursor-grab shrink-0" />
+                              <span className="text-[11px] font-bold text-text uppercase tracking-wide truncate max-w-[150px]">{field.name}</span>
+                            </div>
+                            <span className={`text-[8px] uppercase font-bold tracking-widest ${field.visible ? 'text-good' : 'text-bad'}`}>
+                              {field.visible ? 'Visible' : 'Deleted'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <div className="flex items-center border border-line rounded overflow-hidden bg-ink">
+                                <button
+                                  type="button"
+                                  disabled={idx === 0}
+                                  onClick={() => handleMoveField(idx, 'up')}
+                                  className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
+                                >
+                                  â–²
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={idx === arr.length - 1}
+                                  onClick={() => handleMoveField(idx, 'down')}
+                                  className="px-1 text-gold disabled:opacity-30 disabled:pointer-events-none text-[9px]"
+                                >
+                                  â–¼
+                                </button>
+                              </div>
+
+                              {/* Alignment Selector */}
+                              {['header', 'photo', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
+                                <select
+                                  value={field.align || (field.id === 'qrcode' ? 'left' : 'center')}
+                                  onChange={(e) => handleChangeFieldAlign(field.id, e.target.value as any)}
+                                  className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
+                                  title="Align Element"
+                                >
+                                  <option value="left">L Align</option>
+                                  <option value="center">C Align</option>
+                                  <option value="right">R Align</option>
+                                </select>
+                              )}
+
+                              {['header', 'name', 'club', 'athleteId', 'metadata', 'qrcode'].includes(field.id) && (
+                                <div className="flex items-center gap-1.5">
+                                  <select
+                                    value={field.fontSize}
+                                    onChange={(e) => handleChangeFieldFontSize(field.id, e.target.value as any)}
+                                    className="bg-ink border border-line rounded text-[9px] py-0.5 px-1 text-text focus:outline-none focus:border-gold"
+                                    title="Font Size"
+                                  >
+                                    <option value="xs">XS</option>
+                                    <option value="sm">SM</option>
+                                    <option value="base">MD</option>
+                                    <option value="lg">LG</option>
+                                    <option value="xl">XL</option>
+                                    <option value="2xl">2X</option>
+                                    <option value="3xl">3X</option>
+                                  </select>
+
+                                  <div className="relative flex items-center bg-ink border border-line rounded px-1.5 py-0.5 gap-1.5" title="Font Color">
+                                    <input
+                                      type="color"
+                                      value={field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}
+                                      onChange={(e) => handleChangeFieldColor(field.id, e.target.value)}
+                                      className="w-3.5 h-3.5 rounded-full border border-line/40 cursor-pointer overflow-hidden p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:border-none shrink-0"
+                                    />
+                                    <span className="text-[8px] font-mono text-text-dim uppercase leading-none">{field.color || (field.id === 'header' || field.id === 'name' || field.id === 'metadata' ? '#ffffff' : field.id === 'club' ? '#a0aec0' : '#D4AF37')}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleFieldVisibility(field.id)}
+                              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition border ${
+                                field.visible 
+                                  ? 'text-bad bg-bad/5 border-bad/20 hover:bg-bad/10' 
+                                  : 'text-good bg-good/5 border-good/20 hover:bg-good/10'
+                              }`}
+                            >
+                              {field.visible ? 'Del' : 'Add'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Right Column: Premium High-Fidelity Large Live Preview */}
+            <div className="lg:col-span-7 bg-surface rounded-2xl border border-line p-8 flex flex-col items-center justify-center space-y-6 shadow-sm sticky top-6">
+              <div className="w-full border-b border-line/50 pb-3 flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-wider text-text-dim">Live Design Preview (Sample Athlete Badge)</span>
+                <span className="text-[9px] font-bold text-gold bg-gold/15 px-2.5 py-1 rounded-full border border-gold/30">Drag & Drop Enabled</span>
+              </div>
+
+              {/* ID CARD GRAPHIC PREVIEW CONTAINER */}
+              <div className="relative w-full max-w-[340px] aspect-[1/1.4] rounded-2xl border border-line/80 overflow-hidden shadow-2xl flex flex-col bg-gradient-to-br from-[#12211C] to-[#0A1310] animate-fade-in">
+                {activeComp.idCardBgUrl && (
+                  <>
+                    <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
+                    <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
+                  </>
+                )}
+                
+                {(() => {
+                  const demoMockupPlayer = {
+                    id: 'ATH-8899',
+                    name: 'MUHAMMAD AMIRUL',
+                    club: 'KUALA LUMPUR DRAGONS',
+                    event: 'Kyorugi (Sparring)',
+                    ageGroup: 'Junior (15-17)',
+                    gender: 'MALE',
+                    weightClass: 'Under 55kg',
+                    dob: '2010-04-12',
+                    photo: ''
+                  };
+                  const p = demoMockupPlayer;
+                  const belt = '#000000'; // Black belt default mockup
+                  const fieldsList = getIdCardFields(activeComp);
+                  
+                  const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
+                    const map: Record<string, string> = {
+                      'xs': '8px',
+                      'sm': '10px',
+                      'base': '12px',
+                      'lg': '14px',
+                      'xl': '17px',
+                      '2xl': '21px',
+                      '3xl': '25px'
+                    };
+                    return map[size] || defaultVal;
+                  };
+
+                  return (
+                    <div className="relative z-10 h-full flex-1 flex flex-col justify-between text-[11px] py-3">
+                      {fieldsList.filter(f => f.visible).map(field => {
+                        if (field.id === 'header') {
+                          return (
+                            <div key="header" className={`h-8.5 bg-gradient-to-r from-hong via-hong to-chong flex ${
+                              field.align === 'left' ? 'justify-start gap-1.5' :
+                              field.align === 'right' ? 'justify-end gap-1.5' :
+                              field.align === 'center' ? 'justify-center gap-1.5' :
+                              'justify-between'
+                            } items-center px-3.5 shrink-0 shadow-sm w-full`}>
+                              <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                              
+                            </div>
+                          );
+                        }
+                        if (field.id === 'belt') {
+                          return (
+                            <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }}></div>
+                          );
+                        }
+
+                        // Render interactive card items in high fidelity
+                        return (
+                          <div key={field.id} className="px-4.5 py-1 shrink-0">
+                            {(() => {
+                              if (field.id === 'photo') {
+                                return (
+                                  <div className={`flex ${
+                                    field.align === 'left' ? 'justify-start' :
+                                    field.align === 'right' ? 'justify-end' :
+                                    'justify-center'
+                                  }`}>
+                                    <div className="w-14 h-16 bg-ink rounded-lg border border-line flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
+                                      <User className="w-5 h-5 text-text-dim/40 mx-auto" />
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'name') {
+                                return (
+                                  <div className={
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }>
+                                    <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2" style={{ fontSize: getFontSizePx(field.fontSize, '12px'), color: field.color || '#ffffff' }}>{p.name}</h3>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'club') {
+                                return (
+                                  <div className={
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }>
+                                    <p className="uppercase tracking-widest font-semibold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'athleteId') {
+                                if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
+                                return (
+                                  <div className={
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }>
+                                    <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'metadata') {
+                                if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                                  return (
+                                    <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                                      <span 
+                                        className="font-display font-bold tracking-widest uppercase text-white" 
+                                        style={{ 
+                                          fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                          color: field.color || '#ffffff' 
+                                        }}
+                                      >
+                                        {p.event}
+                                      </span>
+                                    </div>
+                                  );
+                                }
+    return (
+                                  <div className={`grid grid-cols-2 gap-2 text-[9px] border-t border-line/30 pt-2 ${
+                                    field.align === 'left' ? 'text-left' :
+                                    field.align === 'right' ? 'text-right' :
+                                    'text-center'
+                                  }`}>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
+                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
+                                      <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.gender}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
+                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
+                                      <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.dob}</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (field.id === 'qrcode') {
+                                const containerClass = 
+                                  field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
+                                  field.align === 'center' ? 'flex flex-col items-center justify-center gap-1.5 text-center' :
+                                  'flex items-center justify-between';
+                                
+                                const textAlignmentClass = 
+                                  field.align === 'right' ? 'text-left min-w-0' :
+                                  field.align === 'center' ? 'text-center min-w-0' :
+                                  'text-right min-w-0';
+
+                                return (
+                                  <div className={`${containerClass} border-t border-dashed border-line/30 pt-2`}>
+                                    <div className="bg-white p-0.5 rounded inline-block shadow shrink-0">
+                                      <QRCodeSVG 
+                                        value={`${activeComp.id}::${p.id}`} 
+                                        size={32} 
+                                        level="M" 
+                                        includeMargin={false}
+                                      />
+                                    </div>
+                                    <div className={textAlignmentClass}>
+                                      {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                        <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                                      <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="text-center max-w-md bg-ink/20 border border-line rounded-xl p-3">
+                <span className="text-[10px] font-bold text-gold uppercase tracking-wider block mb-1">Visual Design Guidelines</span>
+                <p className="text-[10px] text-text-dim leading-relaxed">
+                  Badges will auto-scale to standard physical CR80 sizes (3.375" x 2.125") upon PDF compilation and batch printing. Use the live mockup above to preview placement & layout proportions.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {organizerTab === 'staffPasses' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full animate-fade-in">
+            {/* Left Column: Form */}
+            <div className="lg:col-span-4 bg-surface rounded-2xl border border-line p-6 space-y-6 shadow-sm">
+              <div className="border-b border-line/50 pb-3">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-gold" />
+                  Add Custom Staff Pass
+                </h3>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Full Name</label>
+                  <input
+                    type="text"
+                    value={staffPassName}
+                    onChange={(e) => setStaffPassName(e.target.value)}
+                    placeholder="e.g. Ali Bin Abu"
+                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Role / Title</label>
+                  <select
+                    value={staffPassRole}
+                    onChange={(e) => setStaffPassRole(e.target.value)}
+                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
+                  >
+                    <option value="Coach">Coach</option>
+                    <option value="Team Manager">Team Manager</option>
+                    <option value="Referee">Referee</option>
+                    <option value="VIP">VIP</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Medical">Medical</option>
+                    <option value="Media">Media</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-dim">Club / Organization</label>
+                  <input
+                    type="text"
+                    value={staffPassClub}
+                    onChange={(e) => setStaffPassClub(e.target.value)}
+                    placeholder="e.g. MSST"
+                    className="w-full bg-ink border border-line rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-gold"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    if (!staffPassName) return;
+                    setStaffPasses([...staffPasses, {
+                      id: 'STAFF-' + Date.now(),
+                      compId: activeComp.id,
+                      name: staffPassName,
+                      ic: '',
+                      dob: '',
+                      gender: '',
+                      club: staffPassClub,
+                      coachUsername: user || '',
+                      event: staffPassRole,
+                      ageGroup: 'STAFF',
+                      weightCategory: '',
+                      photo: '',
+                    } as any]);
+                    setStaffPassName('');
+                    setStaffPassClub('');
+                  }}
+                  className="w-full bg-gold text-ink font-bold py-2.5 rounded-xl text-xs hover:opacity-90 transition shadow-md cursor-pointer"
+                >
+                  Generate Pass
+                </button>
+              </div>
+            </div>
+
+            {/* Right Column: List */}
+            <div className="lg:col-span-8 bg-surface rounded-2xl border border-line p-6 shadow-sm">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-text mb-4 border-b border-line/50 pb-3">
+                Generated Staff Passes ({staffPasses.length})
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {staffPasses.map(p => (
+                  <div key={p.id} className="bg-ink border border-line rounded-xl p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="font-bold text-sm text-text uppercase leading-tight mb-1">{p.name}</div>
+                      <div className="text-xs text-gold font-semibold uppercase">{p.event}</div>
+                      <div className="text-[10px] text-text-dim mt-1 uppercase tracking-wider">{p.club}</div>
+                    </div>
+                    <button
+                      onClick={() => setStaffPasses(staffPasses.filter(sp => sp.id !== p.id))}
+                      className="mt-3 text-[10px] text-red-500 hover:text-red-400 font-bold uppercase tracking-wider text-left cursor-pointer"
+                    >
+                      Delete Pass
+                    </button>
+                  </div>
+                ))}
+                {staffPasses.length === 0 && (
+                  <div className="col-span-full py-8 text-center text-xs text-text-dim">
+                    No custom staff passes generated yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+                {organizerTab === 'referees' && (
+          <div className="space-y-4 animate-fade-in text-text font-sans">
+            
+            {/* REFEREE EVENT FEES & ALLOWANCE SETUP */}
+            <div className="bg-surface rounded-2xl border border-line p-5 shadow-sm space-y-5 relative">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-xs font-bold text-text uppercase tracking-widest mb-1 flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-gold" />
+                    REFEREE EVENT FEES & ALLOWANCE SETUP
+                  </h3>
+                  <p className="text-[10px] text-text-dim">Configure mileage allowances, daily duty honorariums, and supplemental officiating pay.</p>
+                </div>
+                <div className="bg-ink/50 border border-gold/30 text-gold/70 px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider">
+                  RM / Flat Rate
+                </div>
+              </div>
+
+              {/* 1. TRAVEL MILEAGE (KM) RATE / ALLOWANCE */}
+              <div>
+                <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-3">1. TRAVEL MILEAGE (KM) RATE / ALLOWANCE</h4>
+                <div className="grid grid-cols-4 lg:grid-cols-8 gap-3">
+                  {[
+                    { label: '0 - 50 KM', key: 'km_0_50' },
+                    { label: '51 - 100 KM', key: 'km_50_100' },
+                    { label: '101 - 150 KM', key: 'km_100_150' },
+                    { label: '151 - 200 KM', key: 'km_150_200' },
+                    { label: '201 - 250 KM', key: 'km_200_250' },
+                    { label: '251 - 300 KM', key: 'km_250_300' },
+                    { label: '301 - 350 KM', key: 'km_300_350' },
+                    { label: '350 KM & ABOVE', key: 'km_350_above' },
+                  ].map(tier => (
+                    <div key={tier.key}>
+                      <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">{tier.label}</label>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                        <input
+                          type="number"
+                          value={refereeFees[tier.key as keyof typeof refereeFees] || 0}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, [tier.key]: Number(e.target.value) || 0 })}
+                          className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 w-48">
+                   <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">1B. FIXED RATE (PER KM)</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={refereeFees.km_rate_special || 0}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, km_rate_special: Number(e.target.value) || 0 })}
+                        className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                      />
+                    </div>
+                </div>
+              </div>
+
+              {/* 2 & 3. DAILY DUTY ALLOWANCE RATES & SUPPLEMENTAL */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 border-t border-line/50 pt-5">
+                {/* 2. DAILY DUTY ALLOWANCE RATES */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-3">2. DAILY DUTY ALLOWANCE RATES</h4>
+                  
+                  <div>
+                    <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-2">OFFICIATING REFEREE HONORARIUM</label>
+                    <div className="grid grid-cols-4 gap-3">
+                      {[
+                        { label: 'IR (INTL TIERA)', key: 'rate_ir' },
+                        { label: 'NR (NATIONAL)', key: 'rate_nr' },
+                        { label: 'SR (STATE / REGION)', key: 'rate_sr' },
+                        { label: 'TR (TRAINEE)', key: 'rate_tr' },
+                      ].map(tier => (
+                        <div key={tier.key}>
+                          <label className="block text-[8px] font-bold text-text-dim uppercase tracking-wider mb-1">{tier.label}</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                            <input
+                              type="number"
+                              value={refereeFees[tier.key as keyof typeof refereeFees] || 0}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, [tier.key]: Number(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-2">SPECIAL AUTHORITIES (GLOBAL)</label>
+                    <div className="grid grid-cols-3 gap-3 w-3/4">
+                      {[
+                        { label: 'TECHNICAL DELEGATE', key: 'rate_td' },
+                        { label: 'SUPERVISORY BOARD', key: 'rate_csb' },
+                        { label: 'REFEREE-IN-CHARGE', key: 'rate_ric' },
+                      ].map(tier => (
+                        <div key={tier.key}>
+                          <label className="block text-[8px] font-bold text-text-dim uppercase tracking-wider mb-1">{tier.label}</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                            <input
+                              type="number"
+                              value={refereeFees[tier.key as keyof typeof refereeFees] || 0}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, [tier.key]: Number(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-2">VIRTUAL / NEW MEDIA OFFICIALS</label>
+                    <div className="grid grid-cols-3 gap-3 w-3/4">
+                      {[
+                        { label: 'GAME MASTER', key: 'rate_game_master' },
+                        { label: 'TECHNICAL OPERATOR', key: 'rate_technical_operator' },
+                        { label: 'VIRTUAL REFEREE', key: 'rate_virtual_referee' },
+                      ].map(tier => (
+                        <div key={tier.key}>
+                          <label className="block text-[8px] font-bold text-text-dim uppercase tracking-wider mb-1">{tier.label}</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                            <input
+                              type="number"
+                              value={refereeFees[tier.key as keyof typeof refereeFees] || 0}
+                              onChange={(e) => updateRefereeFees({ ...refereeFees, [tier.key]: Number(e.target.value) || 0 })}
+                              className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. SUPPLEMENTAL OVERTIME PAY & OTHERS */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-3">3. SUPPLEMENTAL OVERTIME PAY & OTHERS</h4>
+                  <div className="grid grid-cols-3 gap-4 items-end">
+                     <div>
+                        <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">OVERTIME (HR)</label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                          <input
+                            type="number"
+                            value={refereeFees.overtime || 0}
+                            onChange={(e) => updateRefereeFees({ ...refereeFees, overtime: Number(e.target.value) || 0 })}
+                            className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">OTHERS (FIXED)</label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-text-dim font-bold">RM</span>
+                          <input
+                            type="number"
+                            value={refereeFees.others || 0}
+                            onChange={(e) => updateRefereeFees({ ...refereeFees, others: Number(e.target.value) || 0 })}
+                            className="w-full bg-ink border border-line rounded-lg pl-7 pr-2 py-1.5 text-xs text-text outline-none focus:border-gold font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <button
+                          onClick={() => {
+                            if (window.confirm('Are you sure you want to reset all rates to default?')) {
+                              updateRefereeFees({
+                                km_0_50: 45, km_50_100: 75, km_100_150: 105, km_150_200: 135,
+                                km_200_250: 165, km_250_300: 195, km_300_350: 225, km_350_above: 280,
+                                km_rate_special: 1.00, overtime: 20, others: 0,
+                                rate_ir: 150, rate_nr: 125, rate_sr: 100, rate_tr: 75,
+                                rate_td: 250, rate_csb: 200, rate_ric: 175,
+                                rate_game_master: 220, rate_technical_operator: 180, rate_virtual_referee: 150,
+                                default_accommodation_details: refereeFees.default_accommodation_details,
+                                default_accommodation_maps_link: refereeFees.default_accommodation_maps_link,
+                                default_hotel_days_provided: refereeFees.default_hotel_days_provided,
+                                default_hotel_checkout_date: refereeFees.default_hotel_checkout_date,
+                              });
+                            }
+                          }}
+                          className="w-full bg-ink border border-line text-text text-xs py-1.5 rounded-lg hover:border-gold transition font-bold"
+                        >
+                          Reset Defaults
+                        </button>
+                      </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. DEFAULT GLOBAL LODGING & ACCOMMODATION */}
+              <div className="border-t border-line/50 pt-5 mt-5">
+                <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider mb-2">4. DEFAULT GLOBAL LODGING & ACCOMMODATION</h4>
+                <p className="text-[9px] text-text-dim mb-3">Set the default hotel and Google Maps location. This applies to all referees requesting accommodation unless overridden on their specific profile.</p>
+                <div className="grid grid-cols-2 gap-8">
+                  <div>
+                    <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">ACCOMMODATION DETAILS</label>
+                    <textarea
+                      value={refereeFees.default_accommodation_details || ''}
+                      onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_details: e.target.value })}
+                      className="w-full bg-ink border border-line rounded-lg px-3 py-2 text-xs text-text outline-none focus:border-gold h-[70px] resize-none"
+                      placeholder="e.g. Hotel Grand Chancellor, Room 102. Check in at 10th Oct 2 PM."
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">GOOGLE MAPS LINK</label>
+                      <input
+                        type="text"
+                        value={refereeFees.default_accommodation_maps_link || ''}
+                        onChange={(e) => updateRefereeFees({ ...refereeFees, default_accommodation_maps_link: e.target.value })}
+                        className="w-full bg-ink border border-line rounded-lg px-3 py-1.5 text-xs text-text outline-none focus:border-gold"
+                        placeholder="https://maps.google.com/..."
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">HOTEL PROVIDED (DAYS)</label>
+                        <input
+                          type="number"
+                          value={refereeFees.default_hotel_days_provided || ''}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, default_hotel_days_provided: parseInt(e.target.value) || undefined })}
+                          className="w-full bg-ink border border-line rounded-lg px-3 py-1.5 text-xs text-text outline-none focus:border-gold"
+                          placeholder="e.g. 3"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider mb-1.5">HOTEL OUT DATE/TIME</label>
+                        <input
+                          type="text"
+                          value={refereeFees.default_hotel_checkout_date || ''}
+                          onChange={(e) => updateRefereeFees({ ...refereeFees, default_hotel_checkout_date: e.target.value })}
+                          className="w-full bg-ink border border-line rounded-lg px-3 py-1.5 text-xs text-text outline-none focus:border-gold"
+                          placeholder="e.g. 15 Oct (12 PM)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* REFEREE ROLES CONFIGURATION */}
+            {(() => {
+              const tourneyRefs = referees.filter(r => r.compId === activeComp.id);
+              const appointedRefs = tourneyRefs.filter(r => r.specialRole && r.specialRole !== 'None');
+              const standardRefs = tourneyRefs.filter(r => !r.specialRole || r.specialRole === 'None');
+
+              const filteredRefs = tourneyRefs.filter(r => {
+                const q = inlineRoleSearchQuery.toLowerCase().trim();
+                const matchesSearch = !q || 
+                  r.fullName.toLowerCase().includes(q) || 
+                  (r.nric || '').toLowerCase().includes(q) ||
+                  (r.phone || '').toLowerCase().includes(q) ||
+                  (r.clubName || '').toLowerCase().includes(q);
+                if (!matchesSearch) return false;
+
+                const hasSpecial = r.specialRole && r.specialRole !== 'None';
+                if (inlineRoleFilter === 'special') return hasSpecial;
+                if (inlineRoleFilter === 'standard') return !hasSpecial;
+                return true;
+              });
+
+              const selectedRef = inlineSelectedReferee ? tourneyRefs.find(r => r.id === inlineSelectedReferee.id) || inlineSelectedReferee : null;
+
+              const roleOptions: { value: NonNullable<Referee['specialRole']>; label: string; desc: string; badgeCls: string }[] = [
+                { value: 'None', label: 'Standard Referee', desc: 'Court judge & center referee duties', badgeCls: 'bg-slate-700/40 text-slate-300 border-slate-600/60' },
+                { value: 'RIC', label: 'Referee In-Charge (RIC)', desc: 'Chief referee manager & court roster leader', badgeCls: 'bg-amber-500/15 text-amber-400 border-amber-500/40' },
+                { value: 'TD', label: 'Technical Delegate (TD)', desc: 'Official governing supervisor & rules arbiter', badgeCls: 'bg-blue-500/15 text-blue-400 border-blue-500/40' },
+                { value: 'CSB', label: 'Supervisory Board (CSB)', desc: 'Arbitration, protests, & appeals panel', badgeCls: 'bg-purple-500/15 text-purple-400 border-purple-500/40' },
+                { value: 'GAME_MASTER', label: 'Game Master (GM)', desc: 'Virtual Taekwondo tournament lead', badgeCls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40' },
+                { value: 'TECHNICAL_OPERATOR', label: 'Technical Operator (TO)', desc: 'Virtual Taekwondo technical system & VR gear', badgeCls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/40' },
+                { value: 'VIRTUAL_REFEREE', label: 'Virtual Referee (VR)', desc: 'Virtual Taekwondo ring referee & sensor judge', badgeCls: 'bg-rose-500/15 text-rose-400 border-rose-500/40' },
+              ];
+
+              return (
+                <div className="bg-surface rounded-2xl border border-line p-5 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start flex-wrap gap-3">
+                    <div>
+                      <h3 className="text-xs font-bold text-text uppercase tracking-widest mb-1 flex items-center gap-2">
+                        <UserPlus className="w-4 h-4 text-gold" />
+                        REFEREE ROLES CONFIGURATION
+                      </h3>
+                      <p className="text-[10px] text-text-dim">Assign special roles (RIC, TD, CSB, GM, TO, VR) to referees that have joined this tournament.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAssignSpecialRolesModal(true)}
+                      className="bg-gold/15 text-gold border border-gold/40 hover:bg-gold hover:text-ink px-4 py-1.5 rounded-lg text-xs font-bold tracking-wider transition shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      title="Open full special roles management modal"
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      Assign Special Roles
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 border-t border-line/50 pt-4">
+                    {/* Left 6 cols: Search and Referees List */}
+                    <div className="lg:col-span-6 space-y-3">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider">SEARCH TOURNAMENT REFEREES</h4>
+                          <p className="text-[9px] text-text-dim">Click any referee to view or update their role.</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setInlineRoleFilter('all')}
+                            className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer ${
+                              inlineRoleFilter === 'all' ? 'bg-gold text-ink' : 'bg-ink text-text-dim hover:text-white border border-line'
+                            }`}
+                          >
+                            All ({tourneyRefs.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInlineRoleFilter('special')}
+                            className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer ${
+                              inlineRoleFilter === 'special' ? 'bg-gold text-ink' : 'bg-ink text-text-dim hover:text-white border border-line'
+                            }`}
+                          >
+                            Appointed ({appointedRefs.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInlineRoleFilter('standard')}
+                            className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer ${
+                              inlineRoleFilter === 'standard' ? 'bg-gold text-ink' : 'bg-ink text-text-dim hover:text-white border border-line'
+                            }`}
+                          >
+                            Standard ({standardRefs.length})
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-text-dim absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={inlineRoleSearchQuery}
+                          onChange={(e) => setInlineRoleSearchQuery(e.target.value)}
+                          placeholder="Search referee by name or NRIC..."
+                          className="w-full bg-ink border border-line rounded-lg pl-9 pr-8 py-2 text-xs text-text outline-none focus:border-gold transition"
+                        />
+                        {inlineRoleSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setInlineRoleSearchQuery('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-dim hover:text-white text-xs p-0.5"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1.5 custom-scrollbar">
+                        {filteredRefs.length === 0 ? (
+                          <div className="text-center py-8 text-xs text-text-dim bg-ink/40 border border-dashed border-line rounded-xl">
+                            No tournament referees found matching criteria.
+                          </div>
+                        ) : (
+                          filteredRefs.map(r => {
+                            const isSelected = selectedRef?.id === r.id;
+                            const hasSpecial = r.specialRole && r.specialRole !== 'None';
+                            const roleDef = roleOptions.find(opt => opt.value === r.specialRole);
+
+                            return (
+                              <div 
+                                key={r.id} 
+                                onClick={() => {
+                                  setInlineSelectedReferee(r);
+                                  setInlineSelectedRole(r.specialRole || 'None');
+                                }}
+                                className={`border rounded-xl p-3 flex justify-between items-center transition cursor-pointer gap-3 ${
+                                  isSelected 
+                                    ? 'bg-gold/10 border-gold/70 shadow-sm' 
+                                    : 'bg-ink border-line hover:border-line/80 hover:bg-surface-2/40'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-text flex items-center gap-2 flex-wrap">
+                                    <span className="truncate">{r.fullName}</span>
+                                    {hasSpecial ? (
+                                      <span className={`px-2 py-0.5 rounded text-[8px] font-mono font-bold uppercase border ${roleDef?.badgeCls || 'bg-amber-500/15 text-amber-400 border-amber-500/40'}`}>
+                                        {r.specialRole}
+                                      </span>
+                                    ) : (
+                                      <span className="bg-line/60 px-1.5 py-0.5 rounded text-[8px] font-mono text-text-dim border border-line">
+                                        Standard
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[9px] text-text-dim mt-0.5 flex items-center gap-2">
+                                    <span>{r.phone || 'No phone'}</span>
+                                    {r.clubName && (
+                                      <>
+                                        <span>â€¢</span>
+                                        <span className="truncate max-w-[130px]">{r.clubName}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-1.5">
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setInlineSelectedReferee(r);
+                                      setInlineSelectedRole(r.specialRole || 'None');
+                                    }}
+                                    className={`px-2.5 py-1 rounded text-[9px] font-bold transition cursor-pointer border ${
+                                      hasSpecial
+                                        ? 'bg-surface border-line text-text-dim hover:text-white hover:border-gold'
+                                        : 'bg-gold/15 text-gold border-gold/40 hover:bg-gold hover:text-ink'
+                                    }`}
+                                  >
+                                    {hasSpecial ? 'EDIT ROLE' : '+ ADD ROLE'}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right 6 cols: Assign / Edit Special Role Panel */}
+                    <div className="lg:col-span-6 bg-ink/70 border border-line rounded-xl p-4 flex flex-col justify-between space-y-4">
+                      {selectedRef ? (
+                        <>
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between border-b border-line/60 pb-3">
+                              <div>
+                                <h4 className="text-[10px] font-bold text-gold uppercase tracking-wider">ASSIGN SPECIAL ROLE</h4>
+                                <p className="text-[9px] text-text-dim">Configure tournament role appointment for this official.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setInlineSelectedReferee(null)}
+                                className="text-text-dim hover:text-white text-xs p-1"
+                                title="Clear selection"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Selected referee info banner */}
+                            <div className="bg-surface border border-line/80 rounded-xl p-3 flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-black text-white flex items-center gap-2">
+                                  {selectedRef.fullName}
+                                  <span className="text-[10px] font-mono text-gold font-normal">
+                                    ({selectedRef.nric || 'No IC'})
+                                  </span>
+                                </div>
+                                <div className="text-[9px] text-text-dim mt-0.5">
+                                  {selectedRef.clubName || 'No Club'} â€¢ {selectedRef.phone || 'No Phone'}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenRefereeEditProfile(selectedRef)}
+                                className="text-[9px] font-bold text-gold hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+                                title="Open full referee profile"
+                              >
+                                <ExternalLink className="w-3 h-3" /> Edit Full Profile
+                              </button>
+                            </div>
+
+                            {/* Role Selector Grid */}
+                            <div className="space-y-1.5">
+                              <label className="block text-[9px] font-bold text-text-dim uppercase tracking-wider">
+                                Select Designated Role
+                              </label>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[190px] overflow-y-auto pr-1 custom-scrollbar">
+                                {roleOptions.map(opt => {
+                                  const isSelected = inlineSelectedRole === opt.value;
+                                  return (
+                                    <div
+                                      key={opt.value}
+                                      onClick={() => setInlineSelectedRole(opt.value)}
+                                      className={`p-2.5 rounded-lg border transition cursor-pointer text-left flex flex-col justify-between ${
+                                        isSelected
+                                          ? 'bg-gold/15 border-gold shadow-sm ring-1 ring-gold/40'
+                                          : 'bg-surface border-line/70 hover:border-line hover:bg-surface-2/40'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className={`text-[11px] font-bold ${isSelected ? 'text-gold' : 'text-slate-200'}`}>
+                                          {opt.label}
+                                        </span>
+                                        {isSelected && <Check className="w-3.5 h-3.5 text-gold shrink-0" />}
+                                      </div>
+                                      <p className="text-[8.5px] text-text-dim mt-1 leading-tight">{opt.desc}</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Footer action buttons */}
+                          <div className="pt-3 border-t border-line/60 flex items-center justify-between gap-2 flex-wrap">
+                            {selectedRef.specialRole && selectedRef.specialRole !== 'None' ? (
+                              <button
+                                type="button"
+                                disabled={isSavingInlineRole}
+                                onClick={async () => {
+                                  setIsSavingInlineRole(true);
+                                  try {
+                                    await handleAssignSpecialRole(selectedRef.id, 'None');
+                                    setInlineSelectedRole('None');
+                                  } finally {
+                                    setIsSavingInlineRole(false);
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-[10px] font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 transition cursor-pointer"
+                              >
+                                Revoke Role
+                              </button>
+                            ) : (
+                              <div className="text-[10px] text-text-dim">
+                                Status: <span className="text-slate-400 font-semibold">Standard</span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={isSavingInlineRole}
+                                onClick={async () => {
+                                  setIsSavingInlineRole(true);
+                                  try {
+                                    await handleAssignSpecialRole(selectedRef.id, inlineSelectedRole);
+                                  } finally {
+                                    setIsSavingInlineRole(false);
+                                  }
+                                }}
+                                className="bg-gold hover:bg-yellow-400 text-ink font-black text-[10px] uppercase tracking-wider px-4 py-2 rounded-lg shadow-md transition flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                {isSavingInlineRole ? 'Saving...' : 'Save Role'}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full min-h-[220px] border border-dashed border-line rounded-xl flex flex-col items-center justify-center text-center p-6 space-y-3">
+                          <UserPlus className="w-8 h-8 text-gold/50" />
+                          <div>
+                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">No Referee Selected</h4>
+                            <p className="text-[10px] text-text-dim max-w-[240px] mx-auto mt-1">
+                              Select a referee from the list on the left to assign or update their special role, or open the manager.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowAssignSpecialRolesModal(true)}
+                            className="bg-gold/15 text-gold border border-gold/40 hover:bg-gold hover:text-ink text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+                          >
+                            Open Special Roles Manager
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* SUMMARY CARDS */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-surface rounded-2xl border border-line p-5 shadow-sm">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-wider">TOTAL REGISTERED REFEREES</h3>
+                  <UserPlus className="w-4 h-4 text-gold" />
+                </div>
+                <div className="text-2xl font-black text-text font-sans">
+                  {referees.filter(r => r.compId === activeComp.id).length}
+                </div>
+                <p className="text-[9px] text-text-dim mt-1">Qualified officials registered for this tournament</p>
+              </div>
+              <div className="bg-surface rounded-2xl border border-line p-5 shadow-sm">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-wider">TOTAL REFEREE ALLOWANCE BUDGET</h3>
+                  <CreditCard className="w-4 h-4 text-gold" />
+                </div>
+                <div className="text-2xl font-black text-gold font-sans">
+                  {activeComp.currency || 'RM'} {referees.filter(r => r.compId === activeComp.id).reduce((sum, r) => sum + getRefereeAllowance(r, refereeFees, activeComp.currency).totalPay, 0).toFixed(2)}
+                </div>
+                <p className="text-[9px] text-text-dim mt-1">Sum of (Base Duties + Status / Mileage Tiers) + Overtime + Others</p>
+              </div>
+              <div className="bg-surface rounded-2xl border border-line p-5 shadow-sm">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-[10px] font-bold text-text-dim uppercase tracking-wider">ACCOMMODATIONS NEEDED</h3>
+                  <MapPin className="w-4 h-4 text-gold" />
+                </div>
+                <div className="text-2xl font-black text-text font-sans">
+                  {referees.filter(r => r.compId === activeComp.id && r.accommodation === 'Yes').length}
+                </div>
+                <p className="text-[9px] text-text-dim mt-1">Referees requesting organizer-provided lodging</p>
+              </div>
+            </div>
+
+            {/* REFEREE OFFICIATING & ALLOWANCE LEDGER */}
+            <div className="bg-surface rounded-2xl border border-line p-5 shadow-sm space-y-4">
+              <div className="flex justify-between items-center mb-2">
+                <div>
+                  <h3 className="text-xs font-bold text-text uppercase tracking-widest mb-1 flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-gold" />
+                    REFEREE OFFICIATING & ALLOWANCE LEDGER
+                  </h3>
+                  <p className="text-[10px] text-text-dim">Calculate individual duty payouts, accommodation allocations, and banking info</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setAddRefereeModalTab('existing');
+                      setShowOrganizerAddReferee(true);
+                    }}
+                    className="bg-ink border border-line hover:border-gold px-3 py-1.5 rounded-lg text-[10px] font-bold text-gold tracking-wider transition flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3 h-3" /> Add Referee
+                  </button>
+                  <button className="bg-gold text-ink px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider hover:opacity-90 transition flex items-center gap-1.5">
+                    <Download className="w-3 h-3" /> Export Ledger to Excel
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto custom-scrollbar border border-line rounded-xl pb-1">
+                <table className="w-full min-w-[1050px] text-left text-xs whitespace-nowrap bg-surface">
+                  <thead className="bg-ink">
+                    <tr className="text-[9px] text-text-dim uppercase tracking-wider border-b border-line">
+                      <th className="py-3 px-4 min-w-[240px]">REFEREE / CLUB</th>
+                      <th className="py-3 px-4 min-w-[160px]">NRIC / PASS /<br/>PHONE</th>
+                      <th className="py-3 px-4 min-w-[100px] text-center">STATUS (K<br/>/ P)</th>
+                      <th className="py-3 px-4 min-w-[150px] text-center">DISTANCE<br/>(GO/RET)</th>
+                      <th className="py-3 px-4 min-w-[180px] text-center">OFFICIATING DAYS</th>
+                      <th className="py-3 px-4 min-w-[150px] text-right">PAYOUT TOTAL</th>
+                      <th className="py-3 px-4 min-w-[100px] text-center">ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line/50">
+                    {referees.filter(r => r.compId === activeComp.id).map(r => {
+                      const totalAllowance = getRefereeAllowance(r, refereeFees);
+                      const refPass = r.password || refereeAccounts.find(a => a.nric && (a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === (r.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()))?.password || 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢';
+                      return (
+                        <tr key={r.id} className="hover:bg-ink/30 transition-colors group">
+                          {/* 1. REFEREE / CLUB + BANK & CAR PLATE */}
+                          <td className="py-3.5 px-4 align-top">
+                            <div className="flex items-start gap-3">
+                              <div 
+                                className={`relative group/photo flex-shrink-0 mt-0.5 ${r.photo ? 'cursor-pointer' : ''}`}
+                                onClick={() => {
+                                  if (r.photo) {
+                                    setEnlargedPhoto({
+                                      url: r.photo,
+                                      title: r.fullName,
+                                      subtitle: `${r.clubName || 'Taekwondo Club'} â€¢ ${r.specialRole && r.specialRole !== 'None' ? r.specialRole : 'Referee'}`,
+                                      details: [
+                                        { label: 'NRIC / ID', value: r.nric || 'N/A' },
+                                        { label: 'Contact Phone', value: r.phone || 'N/A' },
+                                        { label: 'Kyorugi Accreditation', value: r.kyorugiStatus || 'TR' },
+                                        { label: 'Poomsae Accreditation', value: r.poomsaeStatus || 'TR' },
+                                        { label: 'Accommodation Request', value: r.accommodation === 'Yes' ? 'YES (LODGING REQ)' : 'No Lodge' },
+                                        { label: 'Bank Details', value: `${r.bankName || 'MAYBANK'}: ${r.bankAccount || 'N/A'}` },
+                                        { label: 'Vehicle Plate', value: r.carPlate || 'N/A' }
+                                      ]
+                                    });
+                                  }
+                                }}
+                                title={r.photo ? "Click to enlarge photo" : undefined}
+                              >
+                                {r.photo ? (
+                                  <div className="relative">
+                                    <img 
+                                      src={r.photo} 
+                                      alt={r.fullName} 
+                                      className="w-10 h-10 rounded-md object-cover border border-line hover:border-gold shadow-sm transition-all duration-200 group-hover/photo:scale-105" 
+                                    />
+                                    <div className="absolute inset-0 rounded-md bg-black/40 opacity-0 group-hover/photo:opacity-100 flex items-center justify-center transition-opacity">
+                                      <Maximize2 className="w-3.5 h-3.5 text-white drop-shadow" />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="w-10 h-10 rounded-md bg-ink border border-line flex items-center justify-center text-text-dim">
+                                    <User className="w-5 h-5" />
+                                  </div>
+                                )}
+                              </div>
+                              <div>
+                                <div className="font-bold text-white text-xs uppercase tracking-wide">
+                                  {r.fullName}
+                                </div>
+                                <div className="text-[11px] text-text-dim italic mt-0.5 tracking-normal">
+                                  {r.clubName || 'MBW'}
+                                </div>
+                                <div className="mt-2 pt-1.5 border-t border-line/40 space-y-0.5">
+                                  <div className="text-[11px] font-bold text-white uppercase truncate max-w-[200px]">
+                                    {r.bankName || 'MAYBANK'}: {r.bankAccount || 'N/A'}
+                                  </div>
+                                  <div className="text-[11px] text-[#d4af37] font-bold font-mono tracking-wide uppercase truncate max-w-[200px]">
+                                    PLATE: {r.carPlate || 'N/A'}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* 2. NRIC / PASS / PHONE */}
+                          <td className="py-3.5 px-4 align-top">
+                            <div className="text-xs text-text font-mono font-medium">{r.nric || 'N/A'}</div>
+                            <div className="mt-1">
+                              <span className="text-[11px] text-[#d4af37] font-bold">PW:</span>
+                              <div className="text-xs text-[#d4af37] font-bold font-mono">
+                                {refPass}
+                              </div>
+                            </div>
+                            <div className="text-xs text-text font-mono mt-1">{r.phone || 'N/A'}</div>
+                          </td>
+
+                          {/* 3. STATUS (K / P) */}
+                          <td className="py-3.5 px-4 align-top text-center">
+                            <div className="inline-block bg-[#1a202c] border border-[#d4af37]/25 text-[#d4af37] px-2.5 py-1.5 rounded-md text-xs font-bold font-mono leading-tight text-center shadow-sm">
+                              <div>K:{r.kyorugiStatus || 'TR'} |</div>
+                              <div>P:{r.poomsaeStatus || 'TR'}</div>
+                            </div>
+                          </td>
+
+                          {/* 4. DISTANCE (GO/RET) & ACCOMMODATION */}
+                          <td className="py-3.5 px-4 align-top text-center">
+                            <div className="text-sm font-bold text-white font-mono">
+                              {r.distance || 0} KM
+                            </div>
+                            <div className="text-xs text-text font-medium mt-0.5">
+                              {activeComp.currency || 'RM'} {totalAllowance.travelPay.toFixed(2)}
+                            </div>
+                            <div className="text-[10px] text-[#d4af37] font-semibold mt-0.5">
+                              {r.accommodation === 'No' ? `(Daily Travel ${activeComp.currency || 'RM'} ${refereeFees.km_0_50.toFixed(0)})` : `(Travel Pay)`}
+                            </div>
+
+                            <div className="mt-2 pt-1.5 border-t border-line/40 flex flex-col items-center">
+                              <div 
+                                onClick={() => {
+                                  setSelectedAccommodationReferee(r);
+                                  setEditAccStatus(r.accommodation || 'No');
+                                  setEditAccHotelDays(r.hotelDaysProvided ? String(r.hotelDaysProvided) : '');
+                                  setEditAccCheckoutDate(r.hotelCheckoutDate || '');
+                                  setEditAccDetails(r.accommodationDetails || '');
+                                  setEditAccMapsLink(r.accommodationMapsLink || '');
+                                }}
+                                className="bg-[#212836] border border-slate-700/80 hover:border-slate-500 text-white px-2.5 py-1 rounded-lg text-xs flex items-center justify-between gap-1.5 cursor-pointer shadow-sm w-full max-w-[125px]"
+                              >
+                                <span className="flex items-center gap-1 text-[11px] truncate">
+                                  {r.accommodation === 'Yes' ? 'ğŸ¨ Lodging Req' : 'ğŸ  No Lodge'}
+                                </span>
+                                <ChevronDown className="w-3 h-3 text-text-dim flex-shrink-0" />
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setSelectedAccommodationReferee(r);
+                                  setEditAccStatus(r.accommodation || 'No');
+                                  setEditAccHotelDays(r.hotelDaysProvided ? String(r.hotelDaysProvided) : '');
+                                  setEditAccCheckoutDate(r.hotelCheckoutDate || '');
+                                  setEditAccDetails(r.accommodationDetails || '');
+                                  setEditAccMapsLink(r.accommodationMapsLink || '');
+                                }}
+                                className="mt-1 text-[10px] text-[#d4af37] border border-[#d4af37]/30 hover:bg-[#d4af37]/10 px-2 py-0.5 rounded transition font-semibold flex items-center gap-1 cursor-pointer bg-[#d4af37]/5"
+                              >
+                                <Edit className="w-2.5 h-2.5 text-[#d4af37]" /> Details
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* 5. OFFICIATING DAYS */}
+                          <td className="py-3.5 px-4 align-top">
+                            {totalAllowance.isSplit ? (
+                              <div className="flex flex-col items-center gap-2">
+                                <div className="bg-[#151a24] border border-slate-800 rounded-2xl p-3 shadow-md flex flex-col gap-2 w-full min-w-[150px] max-w-[170px]">
+                                  {/* Kyorugi Row */}
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="text-xs font-medium text-[#93c5fd]">Kyorugi:</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const current = r.kyorugiDays || 0;
+                                          if (current <= 0) return;
+                                          const updatedRef = { ...r, kyorugiDays: current - 1 };
+                                          const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                          setReferees(updatedRefs);
+                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          saveRefereeToFirestore(updatedRef).catch(() => {});
+                                        }}
+                                        className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="font-bold text-white text-xs min-w-[20px] text-center select-none font-mono">
+                                        {r.kyorugiDays || 0}d
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const current = r.kyorugiDays || 0;
+                                          const updatedRef = { ...r, kyorugiDays: current + 1 };
+                                          const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                          setReferees(updatedRefs);
+                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          saveRefereeToFirestore(updatedRef).catch(() => {});
+                                        }}
+                                        className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Poomsae Row */}
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="text-xs font-medium text-[#93c5fd]">Poomsae:</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const current = r.poomsaeDays || 0;
+                                          if (current <= 0) return;
+                                          const updatedRef = { ...r, poomsaeDays: current - 1 };
+                                          const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                          setReferees(updatedRefs);
+                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          saveRefereeToFirestore(updatedRef).catch(() => {});
+                                        }}
+                                        className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="font-bold text-white text-xs min-w-[20px] text-center select-none font-mono">
+                                        {r.poomsaeDays || 0}d
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const current = r.poomsaeDays || 0;
+                                          const updatedRef = { ...r, poomsaeDays: current + 1 };
+                                          const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                          setReferees(updatedRefs);
+                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          saveRefereeToFirestore(updatedRef).catch(() => {});
+                                        }}
+                                        className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Virtual Row */}
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="text-xs font-medium text-[#93c5fd]">Virtual:</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const current = r.virtualDays || 0;
+                                          if (current <= 0) return;
+                                          const updatedRef = { ...r, virtualDays: current - 1 };
+                                          const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                          setReferees(updatedRefs);
+                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          saveRefereeToFirestore(updatedRef).catch(() => {});
+                                        }}
+                                        className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="font-bold text-white text-xs min-w-[20px] text-center select-none font-mono">
+                                        {r.virtualDays || 0}d
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const current = r.virtualDays || 0;
+                                          const updatedRef = { ...r, virtualDays: current + 1 };
+                                          const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                          setReferees(updatedRefs);
+                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          saveRefereeToFirestore(updatedRef).catch(() => {});
+                                        }}
+                                        className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Merge Standard Button */}
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const total = Math.max(1, (r.kyorugiDays || 0) + (r.poomsaeDays || 0) + (r.virtualDays || 0));
+                                      const updatedRef = {
+                                        ...r,
+                                        officiatingDays: total,
+                                        kyorugiDays: undefined,
+                                        poomsaeDays: undefined,
+                                        virtualDays: undefined
+                                      };
+                                      const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                      setReferees(updatedRefs);
+                                      localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                      saveRefereeToFirestore(updatedRef).catch(() => {});
+                                    }}
+                                    className="text-red-500 hover:text-red-400 text-xs font-semibold text-center mt-1 cursor-pointer transition tracking-wide select-none"
+                                  >
+                                    Merge Standard
+                                  </button>
+                                </div>
+
+                                {/* Checkboxes: Overtime, Others */}
+                                <div className="flex flex-col gap-1.5 mt-0.5 text-left">
+                                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={r.includeOvertime || false}
+                                      onChange={async (e) => {
+                                        const updatedRef = { ...r, includeOvertime: e.target.checked };
+                                        const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                        setReferees(updatedRefs);
+                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        saveRefereeToFirestore(updatedRef).catch(() => {});
+                                      }}
+                                      className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
+                                    />
+                                    <span className="text-xs text-[#93c5fd] font-medium">Overtime</span>
+                                  </label>
+
+                                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={r.includeOthers || false}
+                                      onChange={async (e) => {
+                                        const updatedRef = { ...r, includeOthers: e.target.checked };
+                                        const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                        setReferees(updatedRefs);
+                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        saveRefereeToFirestore(updatedRef).catch(() => {});
+                                      }}
+                                      className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
+                                    />
+                                    <span className="text-xs text-[#93c5fd] font-medium">Others</span>
+                                  </label>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1.5">
+                                {/* Stepper [-] 1 [+] */}
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const current = r.officiatingDays || 1;
+                                      if (current <= 1) return;
+                                      const updatedRef = { ...r, officiatingDays: current - 1 };
+                                      const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                      setReferees(updatedRefs);
+                                      localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                      saveRefereeToFirestore(updatedRef).catch(() => {});
+                                    }}
+                                    className="w-6 h-6 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 shadow-sm select-none cursor-pointer transition active:scale-95"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="font-bold text-white text-sm min-w-[20px] text-center select-none font-mono">
+                                    {r.officiatingDays || 1}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const current = r.officiatingDays || 1;
+                                      const updatedRef = { ...r, officiatingDays: current + 1 };
+                                      const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                      setReferees(updatedRefs);
+                                      localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                      saveRefereeToFirestore(updatedRef).catch(() => {});
+                                    }}
+                                    className="w-6 h-6 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 shadow-sm select-none cursor-pointer transition active:scale-95"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                {/* Split Days text link in gold */}
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const currentDays = r.officiatingDays || 1;
+                                    const updatedRef = {
+                                      ...r,
+                                      officiatingDays: undefined,
+                                      kyorugiDays: currentDays,
+                                      poomsaeDays: 0,
+                                      virtualDays: 0
+                                    };
+                                    const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                    setReferees(updatedRefs);
+                                    localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                    saveRefereeToFirestore(updatedRef).catch(() => {});
+                                  }}
+                                  className="text-[#d4af37] text-xs font-semibold hover:underline cursor-pointer transition tracking-wide select-none mt-0.5"
+                                >
+                                  Split Days
+                                </button>
+
+                                {/* Checkboxes: Overtime, Others */}
+                                <div className="flex flex-col gap-1.5 mt-1 text-left">
+                                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={r.includeOvertime || false}
+                                      onChange={async (e) => {
+                                        const updatedRef = { ...r, includeOvertime: e.target.checked };
+                                        const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                        setReferees(updatedRefs);
+                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        saveRefereeToFirestore(updatedRef).catch(() => {});
+                                      }}
+                                      className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
+                                    />
+                                    <span className="text-xs text-[#93c5fd] font-medium">Overtime</span>
+                                  </label>
+
+                                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={r.includeOthers || false}
+                                      onChange={async (e) => {
+                                        const updatedRef = { ...r, includeOthers: e.target.checked };
+                                        const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
+                                        setReferees(updatedRefs);
+                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        saveRefereeToFirestore(updatedRef).catch(() => {});
+                                      }}
+                                      className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
+                                    />
+                                    <span className="text-xs text-[#93c5fd] font-medium">Others</span>
+                                  </label>
+                                </div>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* 7. PAYOUT TOTAL */}
+                          <td className="py-3.5 px-4 align-top text-right">
+                            <div className="text-base font-extrabold text-[#d4af37]">{activeComp.currency || 'RM'} {totalAllowance.totalPay.toFixed(2)}</div>
+                            <div className="text-xs text-text-dim text-right mt-1 space-y-0.5">
+                              <div>{activeComp.currency || 'RM'} {totalAllowance.dailyRate} * {totalAllowance.days}d</div>
+                              {totalAllowance.travelPay > 0 && <div>+ {activeComp.currency || 'RM'} {totalAllowance.travelPay.toFixed(2)} travel</div>}
+                              {r.accommodation === 'No' && <div>({activeComp.currency || 'RM'} {refereeFees.km_0_50.toFixed(0)} daily)</div>}
+                              {totalAllowance.otPay > 0 && <div>+ {activeComp.currency || 'RM'} {totalAllowance.otPay.toFixed(2)} OT</div>}
+                              {totalAllowance.othersPay > 0 && <div>+ {activeComp.currency || 'RM'} {totalAllowance.othersPay.toFixed(2)} Others</div>}
+                            </div>
+                          </td>
+
+                          {/* 9. ACTIONS */}
+                          <td className="py-3.5 px-4 align-top text-center min-w-[100px]">
+                            <button
+                              onClick={async () => {
+                                if (window.confirm(`Remove ${r.fullName} from officiating?`)) {
+                                  const updatedRefs = referees.filter(x => x.id !== r.id);
+                                  setReferees(updatedRefs);
+                                  localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                }
+                              }}
+                              className="text-xs font-semibold border border-red-500/40 text-red-500 bg-red-500/10 hover:bg-red-500/20 px-3.5 py-1.5 rounded-lg transition active:scale-95 cursor-pointer shadow-sm"
+                              title="Remove referee from officiating list"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+          </div>
+        )}
+
+      </div>
+    )}
+
+      </main>
+
+      
+      {/* MODALS */}
+      <ThemeModal
+        isOpen={showThemeModal}
+        onClose={() => setShowThemeModal(false)}
+        theme={theme}
+        setTheme={setTheme}
+        layoutDensity={layoutDensity}
+        setLayoutDensity={setLayoutDensity}
+        layoutWidth={layoutWidth}
+        setLayoutWidth={setLayoutWidth}
+        customBgColor={customBgColor}
+        setCustomBgColor={setCustomBgColor}
+      />
+      
+      <CoachEditProfileModal
+        isOpen={showCoachEditProfile}
+        onClose={() => setShowCoachEditProfile(false)}
+        user={user}
+        coachEditName={coachEditName}
+        setCoachEditName={setCoachEditName}
+        coachEditClub={coachEditClub}
+        setCoachEditClub={setCoachEditClub}
+        coachEditPhone={coachEditPhone}
+        setCoachEditPhone={setCoachEditPhone}
+        coachEditEmail={coachEditEmail}
+        setCoachEditEmail={setCoachEditEmail}
+        coachEditPassword={coachEditPassword}
+        setCoachEditPassword={setCoachEditPassword}
+        coaches={coaches}
+        saveCoachesToStorage={saveCoachesToStorage}
+        triggerMsg={triggerMsg}
+      />
+      
+      <RefereeEditProfileModal
+        isOpen={showRefereeEditProfile}
+        onClose={() => setShowRefereeEditProfile(false)}
+        activeReferee={activeReferee}
+        refereeFullName={refereeFullName}
+        setRefereeFullName={setRefereeFullName}
+        refereeNric={refereeNric}
+        refereePassword={refereePassword}
+        setRefereePassword={setRefereePassword}
+        refereePhone={refereePhone}
+        setRefereePhone={setRefereePhone}
+        refereeClubName={refereeClubName}
+        setRefereeClubName={setRefereeClubName}
+        refereeResidential={refereeResidential}
+        setRefereeResidential={setRefereeResidential}
+        refereeDistance={refereeDistance}
+        setRefereeDistance={setRefereeDistance}
+        refereeBankName={refereeBankName}
+        setRefereeBankName={setRefereeBankName}
+        refereeBankAccount={refereeBankAccount}
+        setRefereeBankAccount={setRefereeBankAccount}
+        refereeKyorugiStatus={refereeKyorugiStatus}
+        setRefereeKyorugiStatus={setRefereeKyorugiStatus}
+        refereePoomsaeStatus={refereePoomsaeStatus}
+        setRefereePoomsaeStatus={setRefereePoomsaeStatus}
+        refereeAccommodation={refereeAccommodation}
+        setRefereeAccommodation={setRefereeAccommodation}
+        refereeCarPlate={refereeCarPlate}
+        setRefereeCarPlate={setRefereeCarPlate}
+        refereeSpecialRole={refereeSpecialRole}
+        setRefereeSpecialRole={setRefereeSpecialRole}
+        referees={referees}
+        refereeAccounts={refereeAccounts}
+        saveRefereeAccount={async (ref) => {
+            const updated = [...refereeAccounts.filter(r => r.id !== ref.id), ref];
+            setRefereeAccounts(updated);
+            localStorage.setItem('app:refereeAccounts', JSON.stringify(updated));
+        }}
+        saveRefereeToFirestore={async (ref) => {
+            const updated = [...referees.filter(r => r.id !== ref.id), ref];
+            setReferees(updated);
+            localStorage.setItem(`app:referees:${activeComp?.id}`, JSON.stringify(updated));
+        }}
+        triggerMsg={triggerMsg}
+      />
+
+      <AssignSpecialRolesModal
+        isOpen={showAssignSpecialRolesModal}
+        onClose={() => setShowAssignSpecialRolesModal(false)}
+        activeComp={activeComp}
+        referees={referees}
+        refereeAccounts={refereeAccounts}
+        onAssignSpecialRole={handleAssignSpecialRole}
+        onEditFullProfile={(ref) => handleOpenRefereeEditProfile(ref)}
+        triggerMsg={triggerMsg}
+      />
+      
+      <OrganizerAddRefereeModal
+        isOpen={showOrganizerAddReferee}
+        onClose={() => setShowOrganizerAddReferee(false)}
+        addRefereeModalTab={addRefereeModalTab}
+        setAddRefereeModalTab={setAddRefereeModalTab}
+        searchRegisteredQuery={searchRegisteredQuery}
+        setSearchRegisteredQuery={setSearchRegisteredQuery}
+        refereeAccounts={refereeAccounts}
+        referees={referees}
+        selectedExistingRefereeNrics={selectedExistingRefereeNrics}
+        setSelectedExistingRefereeNrics={setSelectedExistingRefereeNrics}
+        refereeSpecialRole={refereeSpecialRole}
+        setRefereeSpecialRole={setRefereeSpecialRole}
+        refereeFullName={refereeFullName}
+        setRefereeFullName={setRefereeFullName}
+        refereeNric={refereeNric}
+        setRefereeNric={setRefereeNric}
+        refereePhone={refereePhone}
+        setRefereePhone={setRefereePhone}
+        refereeClubName={refereeClubName}
+        setRefereeClubName={setRefereeClubName}
+        refereeResidential={refereeResidential}
+        setRefereeResidential={setRefereeResidential}
+        refereeDistance={refereeDistance}
+        setRefereeDistance={setRefereeDistance}
+        refereeBankName={refereeBankName}
+        setRefereeBankName={setRefereeBankName}
+        refereeBankAccount={refereeBankAccount}
+        setRefereeBankAccount={setRefereeBankAccount}
+        refereeKyorugiStatus={refereeKyorugiStatus}
+        setRefereeKyorugiStatus={setRefereeKyorugiStatus}
+        refereePoomsaeStatus={refereePoomsaeStatus}
+        setRefereePoomsaeStatus={setRefereePoomsaeStatus}
+        refereeAccommodation={refereeAccommodation}
+        setRefereeAccommodation={setRefereeAccommodation}
+        refereeCarPlate={refereeCarPlate}
+        setRefereeCarPlate={setRefereeCarPlate}
+        handleOrganizerAddExistingReferee={handleOrganizerAddExistingReferee}
+        handleOrganizerSaveNewReferee={handleOrganizerSaveNewReferee}
+      />
+      
+      <ViewIndemnityModal
+        isOpen={showViewIndemnityModal}
+        onClose={() => setShowViewIndemnityModal(false)}
+        selectedIndemnityPlayer={selectedIndemnityPlayer}
+        activeComp={activeComp}
+      />
+      
+      <IndemnityDashboardModal
+        isOpen={showIndemnityDashboardModal}
+        onClose={() => setShowIndemnityDashboardModal(false)}
+        players={players}
+        user={user}
+        indemnitySearchQuery={""}
+        setIndemnitySearchQuery={() => {}}
+        indemnityFilterStatus={indemnityFilterStatus}
+        setIndemnityFilterStatus={setIndemnityFilterStatus}
+        onViewIndemnity={(player) => {
+            setSelectedIndemnityPlayer(player);
+            setShowViewIndemnityModal(true);
+        }}
+        triggerMsg={triggerMsg}
+      />
+      
+      <AthleteDatabaseModal
+        isOpen={showAthleteDbModal}
+        onClose={() => setShowAthleteDbModal(false)}
+        masterAthletes={masterAthletes as any}
+        dbSearchQuery={dbSearchQuery}
+        setDbSearchQuery={setDbSearchQuery}
+        saveMasterAthletesToStorage={saveMasterAthletesToStorage as any}
+        triggerMsg={triggerMsg}
+      />
+      
+      <PaymentReceiptModal
+        selectedClubReceipt={selectedClubReceipt}
+        onClose={() => setSelectedClubReceipt(null)}
+      />
+      
+      <EditCompetitionModal
+        isOpen={showEditCompModal}
+        onClose={() => setShowEditCompModal(false)}
+        compId={activeComp?.id || null}
+        competitions={competitions}
+        editCompName={editCompName}
+        setEditCompName={setEditCompName}
+        editCompVenue={editCompVenue}
+        setEditCompVenue={setEditCompVenue}
+        editCompDate={editCompDate}
+        setEditCompDate={setEditCompDate}
+        editCompEndDate={editCompEndDate}
+        setEditCompEndDate={setEditCompEndDate}
+        editCompRegistrationCloseDate={editCompRegistrationCloseDate}
+        setEditCompRegistrationCloseDate={setEditCompRegistrationCloseDate}
+        editCompPasscode={editCompPasscode}
+        setEditCompPasscode={setEditCompPasscode}
+        editCompCurrency={editCompCurrency}
+        setEditCompCurrency={setEditCompCurrency}
+        saveCompsToStorage={saveCompsToStorage}
+        triggerMsg={triggerMsg}
+      />
+      
+      <RefereeAccommodationModal
+        editingAccReferee={selectedAccommodationReferee}
+        onClose={() => setSelectedAccommodationReferee(null)}
+        editAccStatus={editAccStatus}
+        setEditAccStatus={setEditAccStatus}
+        editAccHotelDays={editAccHotelDays}
+        setEditAccHotelDays={setEditAccHotelDays}
+        editAccCheckoutDate={editAccCheckoutDate}
+        setEditAccCheckoutDate={setEditAccCheckoutDate}
+        editAccDetails={editAccDetails}
+        setEditAccDetails={setEditAccDetails}
+        editAccMapsLink={editAccMapsLink}
+        setEditAccMapsLink={setEditAccMapsLink}
+        refereeFees={refereeFees}
+        refereeAccounts={refereeAccounts}
+        saveRefereeToFirestore={async (ref) => {
+            const updated = [...referees.filter(r => r.id !== ref.id), ref];
+            setReferees(updated);
+            localStorage.setItem(`app:referees:${activeComp?.id}`, JSON.stringify(updated));
+        }}
+        saveRefereeAccount={async (ref) => {
+            const updated = [...refereeAccounts.filter(r => r.id !== ref.id), ref];
+            setRefereeAccounts(updated);
+            localStorage.setItem('app:refereeAccounts', JSON.stringify(updated));
+        }}
+        triggerMsg={triggerMsg}
+      />
+
+      <RefereeJoinCompModal
+        joiningComp={joiningComp}
+        onClose={() => setJoiningComp(null)}
+        user={user}
+        refereeAccounts={refereeAccounts}
+        activeReferee={activeReferee}
+        referees={referees}
+        joiningDistance={joiningDistance}
+        setJoiningDistance={setJoiningDistance}
+        joiningKyorugiDays={joiningKyorugiDays}
+        setJoiningKyorugiDays={setJoiningKyorugiDays}
+        joiningPoomsaeDays={joiningPoomsaeDays}
+        setJoiningPoomsaeDays={setJoiningPoomsaeDays}
+        joiningVirtualDays={joiningVirtualDays}
+        setJoiningVirtualDays={setJoiningVirtualDays}
+        joiningAccommodation={joiningAccommodation}
+        setJoiningAccommodation={setJoiningAccommodation}
+        refereeFees={refereeFees}
+        saveRefereeToFirestore={async (ref) => {
+          await saveRefereeToFirestore(ref);
+          const updated = [...referees.filter(r => r.id !== ref.id), ref];
+          setReferees(updated);
+          localStorage.setItem(`app:referees:${ref.compId}`, JSON.stringify(updated));
+          const updatedMy = [...myRefereeRegistrations.filter(r => r.id !== ref.id), ref];
+          setMyRefereeRegistrations(updatedMy);
+        }}
+        setCompId={(id) => {
+          setCompId(id);
+        }}
+        setActiveReferee={setActiveReferee}
+        triggerMsg={triggerMsg}
+      />
+      
+      <CoachExcelImportModal
+        isOpen={showCoachExcelModal}
+        onClose={() => setShowCoachExcelModal(false)}
+        activeComp={activeComp}
+        excelParsedPlayers={excelParsedPlayers as any}
+        setExcelParsedPlayers={setExcelParsedPlayers as any}
+        excelValidationErrors={excelValidationErrors}
+        setExcelValidationErrors={setExcelValidationErrors}
+        excelImporting={excelImporting}
+        handleDownloadExcelTemplate={handleDownloadExcelTemplate}
+        handleCoachExcelUpload={handleCoachExcelUpload}
+        handleConfirmCoachExcelImport={handleConfirmCoachExcelImport}
+      />
+
+      {/* ENLARGED PHOTO PREVIEW LIGHTBOX */}
+      {enlargedPhoto && (
+        <div 
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setEnlargedPhoto(null)}
+        >
+          <div 
+            className="bg-surface border border-line rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl relative flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-line bg-ink/70">
+              <div>
+                <h3 className="font-bold text-text text-sm uppercase tracking-wide flex items-center gap-2">
+                  <User className="w-4 h-4 text-gold" />
+                  {enlargedPhoto.title}
+                </h3>
+                {enlargedPhoto.subtitle && (
+                  <p className="text-[11px] text-gold font-semibold uppercase tracking-wider mt-0.5">{enlargedPhoto.subtitle}</p>
+                )}
+              </div>
+              <button 
+                onClick={() => setEnlargedPhoto(null)}
+                className="p-1.5 rounded-lg text-text-dim hover:text-white hover:bg-white/10 transition cursor-pointer"
+                title="Close preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Photo Preview Content */}
+            <div className="p-6 flex flex-col items-center justify-center bg-black/40">
+              <div className="relative max-h-[60vh] max-w-full overflow-hidden rounded-xl border-2 border-gold/30 shadow-2xl bg-ink">
+                <img 
+                  src={enlargedPhoto.url} 
+                  alt={enlargedPhoto.title} 
+                  className="w-auto h-auto max-h-[55vh] max-w-full object-contain rounded-xl"
+                />
+              </div>
+
+              {enlargedPhoto.details && enlargedPhoto.details.length > 0 && (
+                <div className="grid grid-cols-2 gap-2.5 w-full mt-4 bg-ink/80 border border-line rounded-xl p-3 text-xs">
+                  {enlargedPhoto.details.map((d, i) => (
+                    <div key={i} className="bg-surface/50 p-2 rounded-lg border border-line/40">
+                      <span className="text-[9px] uppercase tracking-wider text-text-dim font-bold block">{d.label}</span>
+                      <span className="text-text font-semibold text-[11px] truncate block">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 border-t border-line bg-ink/70 flex justify-between items-center">
+              <span className="text-[10px] text-text-dim">Click outside or press Close to dismiss</span>
+              <button
+                onClick={() => setEnlargedPhoto(null)}
+                className="bg-ink border border-line hover:border-gold px-4 py-1.5 rounded-lg text-xs font-bold text-text hover:text-gold transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};
