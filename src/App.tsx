@@ -39,7 +39,8 @@ import {
   DEFAULT_EVENT_WEIGHT_CLASSES, 
   getEventWeightClassLabel, 
   getWeightClassesForEvent, 
-  isExemptFromStrictWeightScale 
+  isExemptFromStrictWeightScale,
+  POOMSAE_PATTERNS
 } from './utils/eventWeightClasses';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
 import { 
@@ -926,6 +927,7 @@ export default function App() {
   const [pAgeGroup, setPAgeGroup] = useState('');
   const [pWeightClass, setPWeightClass] = useState('');
   const [pEventWeightClasses, setPEventWeightClasses] = useState<Record<string, string>>({});
+  const [pEventPoomsaePatterns, setPEventPoomsaePatterns] = useState<Record<string, string>>({});
   const [pSchoolName, setPSchoolName] = useState('');
   const [pSchoolCode, setPSchoolCode] = useState('');
   const [pRace, setPRace] = useState('Malay');
@@ -1569,20 +1571,8 @@ export default function App() {
     if (compId) {
       unsubscribe = subscribeToPlayersForComp(compId, (cloudPlayers) => {
         let loadedPlayers = cloudPlayers;
-        if (loadedPlayers.length === 0) {
-          const storedPlayers = localStorage.getItem(`app:players:${compId}`);
-          if (storedPlayers) {
-            try {
-              loadedPlayers = JSON.parse(storedPlayers);
-              // Sync to cloud
-              for (const p of loadedPlayers) {
-                savePlayerToFirestore(p).catch(err => console.warn("Failed to sync player to cloud:", err));
-              }
-            } catch (e) {
-              console.error("Failed to parse players for comp", compId, e);
-            }
-          }
-        }
+        // The previous fallback to localStorage when cloudPlayers.length === 0 caused deleted players 
+        // to be resurrected if another client still had them in localStorage.
         setPlayers(loadedPlayers);
         localStorage.setItem(`app:players:${compId}`, JSON.stringify(loadedPlayers));
         
@@ -3782,6 +3772,7 @@ export default function App() {
         setPAgeGroup(p.ageGroup);
         setPWeightClass(p.weightClass);
         setPEventWeightClasses({ [p.event]: p.weightClass });
+        setPEventPoomsaePatterns({ [p.event]: p.poomsaePattern || '' });
         setPendingPhoto(p.photo || null);
         setPSchoolName(p.schoolName || '');
         setPSchoolCode(p.schoolCode || '');
@@ -3809,6 +3800,7 @@ export default function App() {
       const defaultWc = getWeightClassesForEvent(comp, defaultEv)[0] || comp.weightClasses[0] || 'OPEN WEIGHT';
       setPWeightClass(defaultWc);
       setPEventWeightClasses({ [defaultEv]: defaultWc });
+      setPEventPoomsaePatterns({});
       setPendingPhoto(null);
       setPSchoolName('');
       setPSchoolCode('');
@@ -3934,6 +3926,7 @@ export default function App() {
       club: pClub.trim(),
       ageGroup: pAgeGroup,
       weightClass: primaryWc,
+      poomsaePattern: pEventPoomsaePatterns[primaryEvent] || undefined,
       photo: pendingPhoto || undefined,
       schoolName: pSchoolName.trim(),
       schoolCode: pSchoolCode.trim(),
@@ -3967,6 +3960,7 @@ export default function App() {
           event: extraEv,
           ageGroup: pAgeGroup,
           weightClass: extraWc,
+          poomsaePattern: pEventPoomsaePatterns[extraEv] || undefined,
           photo: pendingPhoto || undefined,
           createdAt: new Date().toISOString(),
           weighIn: null,
@@ -4000,6 +3994,7 @@ export default function App() {
           event: ev,
           ageGroup: pAgeGroup,
           weightClass: evWc,
+          poomsaePattern: pEventPoomsaePatterns[ev] || undefined,
           photo: pendingPhoto || undefined,
           createdAt: new Date().toISOString(),
           weighIn: null,
@@ -6511,7 +6506,7 @@ export default function App() {
                             <td className="p-4 font-semibold text-text">{p.event}</td>
                             <td className="p-4 text-text-dim">{p.ageGroup}</td>
                             <td className="p-4 text-text-dim">
-                              <span className="font-medium">{p.weightClass}</span>
+                              <span className="font-medium">{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</span>
                             </td>
                             <td className="p-4">
                               <div className="flex flex-col gap-1 items-start">
@@ -7124,36 +7119,61 @@ export default function App() {
                         const wcList = getWeightClassesForEvent(activeComp, ev);
                         const currentVal = pEventWeightClasses[ev] || (ev === pEvent ? pWeightClass : '') || wcList[0] || '';
                         const label = getEventWeightClassLabel(ev);
+                        const isPoomsae = ev.toLowerCase().includes('poomsae');
+                        const currentPattern = pEventPoomsaePatterns[ev] || '';
+                        
                         return (
-                          <div key={ev} className="bg-surface border border-line rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:border-line-hover transition">
-                            <div className="min-w-[160px] shrink-0">
-                              <span className="text-xs font-bold text-text flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-gold"></span>
-                                {ev}
-                              </span>
-                              <span className="text-[10px] text-text-dim block mt-0.5">{label}</span>
+                          <div key={ev} className="bg-surface border border-line rounded-xl p-3 flex flex-col gap-2.5 hover:border-line-hover transition">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="min-w-[160px] shrink-0">
+                                <span className="text-xs font-bold text-text flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-gold"></span>
+                                  {ev}
+                                </span>
+                                <span className="text-[10px] text-text-dim block mt-0.5">{label}</span>
+                              </div>
+                              <div className="flex-1 w-full sm:w-auto">
+                                <select 
+                                  value={currentVal}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setPEventWeightClasses(prev => ({ ...prev, [ev]: val }));
+                                    if (ev === effectiveEvents[0]) {
+                                      setPWeightClass(val);
+                                    }
+                                  }}
+                                  className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
+                                >
+                                  {wcList.length === 0 ? (
+                                    <option value="">No divisions defined for {ev}</option>
+                                  ) : (
+                                    wcList.map(wc => (
+                                      <option key={wc} value={wc}>{wc}</option>
+                                    ))
+                                  )}
+                                </select>
+                              </div>
                             </div>
-                            <div className="flex-1 w-full sm:w-auto">
-                              <select 
-                                value={currentVal}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setPEventWeightClasses(prev => ({ ...prev, [ev]: val }));
-                                  if (ev === effectiveEvents[0]) {
-                                    setPWeightClass(val);
-                                  }
-                                }}
-                                className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
-                              >
-                                {wcList.length === 0 ? (
-                                  <option value="">No divisions defined for {ev}</option>
-                                ) : (
-                                  wcList.map(wc => (
-                                    <option key={wc} value={wc}>{wc}</option>
-                                  ))
-                                )}
-                              </select>
-                            </div>
+                            
+                            {isPoomsae && (
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mt-2 pt-2 border-t border-line/40">
+                                <div className="min-w-[160px] shrink-0">
+                                  <span className="text-[10px] text-text-dim block uppercase font-bold tracking-wide">Poomsae Pattern</span>
+                                </div>
+                                <div className="flex-1 w-full sm:w-auto">
+                                  <select
+                                    value={currentPattern}
+                                    onChange={(e) => setPEventPoomsaePatterns(prev => ({ ...prev, [ev]: e.target.value }))}
+                                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
+                                  >
+                                    <option value="">-- Select Pattern (Optional) --</option>
+                                    {POOMSAE_PATTERNS.map(pattern => (
+                                      <option key={pattern} value={pattern}>{pattern}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -7458,7 +7478,7 @@ export default function App() {
                                       </div>
                                       <div>
                                         <span className="block text-[8px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight Class</span>
-                                        <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '12px'), color: field.color || '#ffffff' }}>{p.weightClass || '—'}</span>
+                                        <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '12px'), color: field.color || '#ffffff' }}>{p.weightClass ? p.weightClass + (p.poomsaePattern ? ` / ${p.poomsaePattern}` : '') : '—'}</span>
                                       </div>
                                       <div>
                                         <span className="block text-[8px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
@@ -9603,7 +9623,7 @@ export default function App() {
                     </span>
                     
                     {(() => {
-                      const demoMockupPlayer = {
+                      const demoMockupPlayer: Partial<Player> = {
                         id: 'ATH-8899',
                         name: 'MUHAMMAD AMIRUL',
                         club: 'KUALA LUMPUR DRAGONS',
@@ -9611,6 +9631,7 @@ export default function App() {
                         ageGroup: 'Junior (15-17)',
                         gender: 'MALE',
                         weightClass: 'Under 55kg',
+                        poomsaePattern: '',
                         dob: '2010-04-12',
                         photo: ''
                       };
@@ -9837,7 +9858,7 @@ export default function App() {
                                           </div>
                                           <div>
                                             <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
-                                            <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
+                                            <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</span>
                                           </div>
                                           <div>
                                             <span className="block text-[7px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
@@ -10657,7 +10678,7 @@ export default function App() {
                           </td>
                           <td className="p-4 text-text">{p.club}</td>
                           <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
-                          <td className="p-4 text-text-dim">{p.weightClass}</td>
+                          <td className="p-4 text-text-dim">{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</td>
                           <td className="p-4">
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
@@ -11386,7 +11407,7 @@ export default function App() {
                           </td>
                           <td className="p-4 text-text">{p.club}</td>
                           <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
-                          <td className="p-4 text-text-dim">{p.weightClass}</td>
+                          <td className="p-4 text-text-dim">{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</td>
                           <td className="p-4">
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
@@ -11733,7 +11754,7 @@ export default function App() {
                 )}
                 
                 {(() => {
-                  const demoMockupPlayer = {
+                  const demoMockupPlayer: Partial<Player> = {
                     id: 'ATH-8899',
                     name: 'MUHAMMAD AMIRUL',
                     club: 'KUALA LUMPUR DRAGONS',
@@ -11741,6 +11762,7 @@ export default function App() {
                     ageGroup: 'Junior (15-17)',
                     gender: 'MALE',
                     weightClass: 'Under 55kg',
+                    poomsaePattern: '',
                     dob: '2010-04-12',
                     photo: ''
                   };
@@ -11866,7 +11888,7 @@ export default function App() {
                                     </div>
                                     <div>
                                       <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
-                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}</span>
+                                      <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</span>
                                     </div>
                                     <div>
                                       <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>

@@ -35,6 +35,7 @@ export interface Player {
   indemnitySignedDate?: string;
   indemnitySignedIp?: string;
   indemnitySignature?: string; // Base64 dataURL or drawing representation
+  poomsaePattern?: string;
 }
 
 export interface IdCardField {

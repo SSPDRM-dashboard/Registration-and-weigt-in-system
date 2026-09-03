@@ -81,6 +81,19 @@ export const DEFAULT_EVENT_WEIGHT_CLASSES: Record<string, string[]> = {
 };
 
 /**
+ * Standard poomsae patterns for dropdown selection.
+ */
+export const POOMSAE_PATTERNS = [
+  'Taegeuk 1 to 4',
+  'Taegeuk 4 to 8',
+  'Taegeuk 4 to Koryo',
+  'Taegeuk 4 to Taebaek',
+  'Taegeuk 5 to Pyongwon',
+  'Koryo & Above (Black Belt)',
+  'Open Pattern'
+];
+
+/**
  * Returns a human-friendly label for the target weight class / division field based on the event.
  */
 export function getEventWeightClassLabel(eventName: string): string {
