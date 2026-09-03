@@ -1889,20 +1889,21 @@ export default function App() {
         await Promise.all(savePromises);
       } else {
         // Find deleted
-        const deletedPlayer = prevCompPlayers.find(p => !list.some(l => l.id === p.id));
-        if (deletedPlayer) {
-          await deletePlayerFromFirestore(deletedPlayer.id);
-        } else {
-          // Find changed or added
-          const changedPlayers = list.filter(p => {
-            const prev = prevCompPlayers.find(pl => pl.id === p.id);
-            return !prev || JSON.stringify(prev) !== JSON.stringify(p);
-          });
+        const deletedPlayers = prevCompPlayers.filter(p => !list.some(l => l.id === p.id));
+        if (deletedPlayers.length > 0) {
+          const deletePromises = deletedPlayers.map(p => deletePlayerFromFirestore(p.id));
+          await Promise.all(deletePromises);
+        }
+        
+        // Find changed or added
+        const changedPlayers = list.filter(p => {
+          const prev = prevCompPlayers.find(pl => pl.id === p.id);
+          return !prev || JSON.stringify(prev) !== JSON.stringify(p);
+        });
           
-          if (changedPlayers.length > 0) {
-            const savePromises = changedPlayers.map(p => savePlayerToFirestore(p));
-            await Promise.all(savePromises);
-          }
+        if (changedPlayers.length > 0) {
+          const savePromises = changedPlayers.map(p => savePlayerToFirestore(p));
+          await Promise.all(savePromises);
         }
       }
     } catch (error) {
@@ -4040,16 +4041,24 @@ export default function App() {
     setScreen(role === 'admin' ? 'adminCompDetail' : role === 'organizer' ? 'organizerDashboard' : 'coachRoster');
   };
 
-  const handleDeletePlayer = (playerId: string) => {
+  const handleDeletePlayer = async (playerId: string) => {
     if (!compId) return;
     if (role === 'coach') {
       triggerMsg('Coaches are not permitted to delete athlete records.', 'error');
       return;
     }
     const updated = players.filter(p => p.id !== playerId);
-    savePlayersToStorage(compId, updated);
+    setPlayers(updated);
+    localStorage.setItem(`app:players:${compId}`, JSON.stringify(updated));
     setConfirmDeleteId(null);
-    triggerMsg('Athlete registration retracted.', 'ok');
+    
+    try {
+      await deletePlayerFromFirestore(playerId);
+      triggerMsg('Athlete registration retracted.', 'ok');
+    } catch (e) {
+      console.error('Failed to delete athlete:', e);
+      triggerMsg('Error removing athlete from cloud. Please try again.', 'error');
+    }
   };
 
   // --- COACH EXCEL UPLOAD AND TEMPLATE ACTIONS ---
