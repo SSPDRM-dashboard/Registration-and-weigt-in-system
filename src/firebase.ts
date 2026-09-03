@@ -253,6 +253,24 @@ export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
 }
 
 export async function savePlayerToFirestore(player: Player): Promise<void> {
+  // Sync to local storage fallback
+  try {
+    if (player.compId) {
+      const key = `app:players:${player.compId}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const list: Player[] = JSON.parse(stored);
+        const idx = list.findIndex(p => p.id === player.id);
+        if (idx >= 0) {
+          list[idx] = player;
+        } else {
+          list.push(player);
+        }
+        localStorage.setItem(key, JSON.stringify(list));
+      }
+    }
+  } catch {}
+
   try {
     const docRef = doc(db, 'players', player.id);
     await setDoc(docRef, player);
@@ -276,25 +294,31 @@ export async function fetchPlayerById(playerId: string): Promise<Player | null> 
     if (!cleanId) return null;
 
     // 1. Direct doc lookup
-    const docRef = doc(db, 'players', cleanId);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return snap.data() as Player;
-    }
+    try {
+      const docRef = doc(db, 'players', cleanId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        return snap.data() as Player;
+      }
+    } catch {}
     
     // 2. Query by 'id' field if doc key differed
-    const q1 = query(collection(db, 'players'), where('id', '==', cleanId));
-    const snap1 = await getDocs(q1);
-    if (!snap1.empty) {
-      return snap1.docs[0].data() as Player;
-    }
+    try {
+      const q1 = query(collection(db, 'players'), where('id', '==', cleanId));
+      const snap1 = await getDocs(q1);
+      if (!snap1.empty) {
+        return snap1.docs[0].data() as Player;
+      }
+    } catch {}
 
     // 3. Query by 'ic' field
-    const q2 = query(collection(db, 'players'), where('ic', '==', cleanId));
-    const snap2 = await getDocs(q2);
-    if (!snap2.empty) {
-      return snap2.docs[0].data() as Player;
-    }
+    try {
+      const q2 = query(collection(db, 'players'), where('ic', '==', cleanId));
+      const snap2 = await getDocs(q2);
+      if (!snap2.empty) {
+        return snap2.docs[0].data() as Player;
+      }
+    } catch {}
 
     // 4. Try masterAthletes doc
     try {
@@ -304,15 +328,24 @@ export async function fetchPlayerById(playerId: string): Promise<Player | null> 
       }
     } catch {}
 
-    // 5. Local storage fallback
+    // 5. Local storage fallback (case-insensitive and normalized)
     try {
+      const normalizedTarget = cleanId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && key.startsWith('app:players:')) {
           const raw = localStorage.getItem(key);
           if (raw) {
             const list: Player[] = JSON.parse(raw);
-            const found = list.find(p => p.id === cleanId || p.ic === cleanId);
+            const found = list.find(p => {
+              if (!p) return false;
+              if (p.id && p.id.toLowerCase() === cleanId.toLowerCase()) return true;
+              if (p.ic) {
+                const normIc = p.ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                if (normIc === normalizedTarget) return true;
+              }
+              return false;
+            });
             if (found) return found;
           }
         }
@@ -327,17 +360,30 @@ export async function fetchPlayerById(playerId: string): Promise<Player | null> 
 }
 
 export async function fetchCompetitionById(compId: string): Promise<Competition | null> {
+  const cleanId = (compId || '').trim();
+  if (!cleanId) return null;
+
   try {
-    const docRef = doc(db, 'competitions', compId);
+    const docRef = doc(db, 'competitions', cleanId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       return snap.data() as Competition;
     }
-    return null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `competitions/${compId}`);
-    return null;
+    handleFirestoreError(error, OperationType.GET, `competitions/${cleanId}`);
   }
+
+  // Local storage fallback
+  try {
+    const stored = localStorage.getItem('app:competitions');
+    if (stored) {
+      const list: Competition[] = JSON.parse(stored);
+      const found = list.find(c => c.id === cleanId || (c.id && c.id.toLowerCase() === cleanId.toLowerCase()));
+      if (found) return found;
+    }
+  } catch {}
+
+  return null;
 }
 
 export function subscribeToPlayersForComp(compId: string, callback: (players: Player[]) => void, onError: (error: Error) => void): () => void {

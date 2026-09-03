@@ -25,7 +25,7 @@ async function startServer() {
   // API route for extracting categories
   app.post("/api/extract-categories", async (req, res) => {
     try {
-      const { imageBase64, type } = req.body;
+      const { imageBase64, type, eventName } = req.body;
       if (!imageBase64) {
         return res.status(400).json({ error: "Missing image data." });
       }
@@ -34,31 +34,58 @@ async function startServer() {
       const base64Data = imageBase64.split(",")[1];
       
       const prompt = type === 'ageGroups' 
-        ? "Extract the age group divisions from this image. Return a JSON array of strings, where each string is an age group name (e.g., 'Cadet (12 to 14 Years Old)')."
-        : "Extract the weight class divisions from this image. Return a JSON array of strings, where each string is a weight class (e.g., 'FEATHER 41.01KG-45KG').";
+        ? "Extract the age group divisions or age brackets from this image. Return a JSON array of strings, where each string is an age group name (e.g., 'Cadet (12 to 14 Years Old)', 'Junior (15 to 17 Years Old)'). Return only valid JSON array."
+        : `Extract the target weight classes or competition divisions from this image${eventName ? ` for the tournament event discipline: "${eventName}"` : ''}. Return a JSON array of strings, where each string is a division name or weight bracket (e.g., 'FEATHER 41.01KG-45KG', 'FLY 33.01KG-37KG', 'POWER BREAK (FIST)', 'INDIVIDUAL RECOGNIZED', 'SPEED SPRINT 30S', 'OPEN WEIGHT'). Return only valid JSON array.`;
         
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
-        contents: {
-          parts: [
-            { inlineData: { data: base64Data, mimeType } },
-            { text: prompt }
-          ]
-        },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.STRING
-            },
-            description: "An array of extracted category strings."
+      const candidateModels = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro"];
+      let lastError: any = null;
+      let categories: string[] = [];
+      let success = false;
+
+      for (const model of candidateModels) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: {
+                parts: [
+                  { inlineData: { data: base64Data, mimeType } },
+                  { text: prompt }
+                ]
+              },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.STRING
+                  },
+                  description: "An array of extracted category strings."
+                }
+              }
+            });
+            
+            const jsonStr = response.text?.trim() || "[]";
+            categories = JSON.parse(jsonStr);
+            if (Array.isArray(categories)) {
+              success = true;
+              break;
+            }
+          } catch (err: any) {
+            lastError = err;
+            console.warn(`Model ${model} attempt ${attempt + 1} failed: ${err?.message || err}`);
+            // If 503 or 429, wait briefly before retrying
+            if (attempt === 0) {
+              await new Promise(r => setTimeout(r, 600));
+            }
           }
         }
-      });
-      
-      const jsonStr = response.text?.trim() || "[]";
-      const categories = JSON.parse(jsonStr);
+        if (success) break;
+      }
+
+      if (!success) {
+        throw lastError || new Error("Failed to extract categories from all model attempts.");
+      }
       
       res.json({ categories });
     } catch (error: any) {

@@ -14,6 +14,7 @@ import { IndemnityDashboardModal } from './components/modals/IndemnityDashboardM
 import { AthleteDatabaseModal } from './components/modals/AthleteDatabaseModal';
 import { PaymentReceiptModal } from './components/modals/PaymentReceiptModal';
 import { EditCompetitionModal } from './components/modals/EditCompetitionModal';
+import { AgeGroupDetailsModal } from './components/modals/AgeGroupDetailsModal';
 import { AssignSpecialRolesModal } from './components/modals/AssignSpecialRolesModal';
 import { RefereeAccommodationModal } from './components/modals/RefereeAccommodationModal';
 import { CoachExcelImportModal } from './components/modals/CoachExcelImportModal';
@@ -34,6 +35,12 @@ import jsQR from 'jsqr';
 import ExcelJS from 'exceljs';
 import { Competition, Player, Coach, WeighIn, Organizer, Referee, MatchAssignment } from './types';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
+import { 
+  DEFAULT_EVENT_WEIGHT_CLASSES, 
+  getEventWeightClassLabel, 
+  getWeightClassesForEvent, 
+  isExemptFromStrictWeightScale 
+} from './utils/eventWeightClasses';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
 import { 
   fetchCompetitions, 
@@ -737,6 +744,13 @@ export default function App() {
   const [editCompRegistrationCloseDate, setEditCompRegistrationCloseDate] = useState<string>('');
   const [editCompPasscode, setEditCompPasscode] = useState<string>('');
   const [editCompCurrency, setEditCompCurrency] = useState<string>('RM');
+  const [editCompEvents, setEditCompEvents] = useState<string[]>([]);
+  const [editCompFeeModel, setEditCompFeeModel] = useState<'STANDARD' | 'SPECIAL_PACKAGE'>('STANDARD');
+  const [editCompPkgFirst, setEditCompPkgFirst] = useState<string>('80');
+  const [editCompPkgSecond, setEditCompPkgSecond] = useState<string>('40');
+  const [editCompPkgSub, setEditCompPkgSub] = useState<string>('20');
+  const [editCompPkgFive, setEditCompPkgFive] = useState<string>('150');
+  const [showAgeGroupDetailsModal, setShowAgeGroupDetailsModal] = useState<boolean>(false);
 
   const [editingAccReferee, setEditingAccReferee] = useState<Referee | null>(null);
   const [editingDistanceRefereeId, setEditingDistanceRefereeId] = useState<string | null>(null);
@@ -893,8 +907,10 @@ export default function App() {
   const [ncCurrency, setNcCurrency] = useState('RM');
   
   // Category additions
+  const [newEvent, setNewEvent] = useState('');
   const [newAgeGroup, setNewAgeGroup] = useState('');
   const [newWc, setNewWc] = useState('');
+  const [selectedWcEvent, setSelectedWcEvent] = useState<string>('Kyorugi');
   const [newClubOption, setNewClubOption] = useState('');
   const [isAIExtractingAge, setIsAIExtractingAge] = useState(false);
   const [isAIExtractingWc, setIsAIExtractingWc] = useState(false);
@@ -906,8 +922,10 @@ export default function App() {
   const [pGender, setPGender] = useState('');
   const [pClub, setPClub] = useState('');
   const [pEvent, setPEvent] = useState('');
+  const [pEvents, setPEvents] = useState<string[]>([]);
   const [pAgeGroup, setPAgeGroup] = useState('');
   const [pWeightClass, setPWeightClass] = useState('');
+  const [pEventWeightClasses, setPEventWeightClasses] = useState<Record<string, string>>({});
   const [pSchoolName, setPSchoolName] = useState('');
   const [pSchoolCode, setPSchoolCode] = useState('');
   const [pRace, setPRace] = useState('Malay');
@@ -936,53 +954,140 @@ export default function App() {
   const [indemnityLoading, setIndemnityLoading] = useState<boolean>(false);
   const [indemnityCoach, setIndemnityCoach] = useState<string | null>(null);
 
+  const handleOpenIndemnityForm = (athlete: Player) => {
+    setIndemnityPlayer(athlete);
+    const comp = competitions.find(c => c.id === athlete.compId) || activeComp || null;
+    setIndemnityComp(comp);
+    setScreen('parentIndemnity');
+    const newUrl = `${window.location.origin}${window.location.pathname}?screen=parentIndemnity&athleteId=${athlete.id}&indemnityComp=${athlete.compId || comp?.id || ''}`;
+    window.history.pushState({}, '', newUrl);
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const athleteId = params.get('indemnity');
-    const compIdParam = params.get('indemnityComp');
+    const athleteId = params.get('athleteId') || params.get('indemnity') || params.get('id') || params.get('player');
+    const compIdParam = params.get('indemnityComp') || params.get('compId') || params.get('comp');
     const coachParam = params.get('coach');
+    const screenParam = params.get('screen');
     
     if (coachParam) {
       setIndemnityCoach(coachParam);
     }
 
-    if (athleteId) {
-      setIndemnityLoading(true);
+    const isIndemnityRequest = screenParam === 'parentIndemnity' || Boolean(athleteId) || Boolean(compIdParam);
+
+    if (isIndemnityRequest) {
       setScreen('parentIndemnity');
-      fetchPlayerById(athleteId).then(async (player) => {
-        if (player) {
-          setIndemnityPlayer(player);
-          const comp = await fetchCompetitionById(player.compId);
-          if (comp) {
-            setIndemnityComp(comp);
+      setIndemnityLoading(true);
+
+      const resolveData = async () => {
+        let matchedPlayer: Player | null = null;
+        let matchedComp: Competition | null = null;
+
+        // 1. Resolve Athlete if athleteId was specified
+        if (athleteId) {
+          try {
+            matchedPlayer = await fetchPlayerById(athleteId);
+          } catch (e) {
+            console.warn('Error fetching player by ID:', e);
           }
-        } else {
+
+          // Fallback to local storage if not found in Firestore
+          if (!matchedPlayer) {
+            try {
+              const normalizedTarget = athleteId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+              for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('app:players:')) {
+                  const raw = localStorage.getItem(key);
+                  if (raw) {
+                    const list: Player[] = JSON.parse(raw);
+                    const found = list.find(p => {
+                      if (!p) return false;
+                      if (p.id && p.id.toLowerCase() === athleteId.toLowerCase()) return true;
+                      if (p.ic) {
+                        const normIc = p.ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                        if (normIc === normalizedTarget) return true;
+                      }
+                      return false;
+                    });
+                    if (found) {
+                      matchedPlayer = found;
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('Error reading player from localStorage:', e);
+            }
+          }
+        }
+
+        // 2. Resolve Tournament / Competition
+        const targetCompId = compIdParam || matchedPlayer?.compId;
+        if (targetCompId) {
+          try {
+            matchedComp = await fetchCompetitionById(targetCompId);
+          } catch (e) {
+            console.warn('Error fetching competition by ID:', e);
+          }
+
+          if (!matchedComp) {
+            try {
+              const raw = localStorage.getItem('app:competitions');
+              if (raw) {
+                const comps: Competition[] = JSON.parse(raw);
+                matchedComp = comps.find(c => c.id === targetCompId || (c.id && c.id.toLowerCase() === targetCompId.toLowerCase())) || null;
+              }
+            } catch {}
+          }
+        }
+
+        // Fallback: active competition or first competition
+        if (!matchedComp) {
+          try {
+            const raw = localStorage.getItem('app:competitions');
+            if (raw) {
+              const comps: Competition[] = JSON.parse(raw);
+              matchedComp = comps.find(c => c.isActive !== false) || comps[0] || null;
+            }
+          } catch {}
+        }
+
+        if (matchedPlayer) {
+          setIndemnityPlayer(matchedPlayer);
+        }
+        if (matchedComp) {
+          setIndemnityComp(matchedComp);
+        }
+
+        setIndemnityLoading(false);
+
+        if (!matchedPlayer && athleteId) {
           triggerMsg('Athlete record not found for indemnity form.', 'error');
         }
+      };
+
+      resolveData().catch(err => {
+        console.error('Failed to resolve indemnity data:', err);
         setIndemnityLoading(false);
-      }).catch(err => {
-        console.error(err);
-        setIndemnityLoading(false);
-        triggerMsg('Error loading athlete record.', 'error');
-      });
-    } else if (compIdParam) {
-      setIndemnityLoading(true);
-      setScreen('parentIndemnity');
-      fetchCompetitionById(compIdParam).then((comp) => {
-        if (comp) {
-          setIndemnityComp(comp);
-          setIndemnityPlayer(null);
-        } else {
-          triggerMsg('Tournament record not found for indemnity form.', 'error');
-        }
-        setIndemnityLoading(false);
-      }).catch(err => {
-        console.error(err);
-        setIndemnityLoading(false);
-        triggerMsg('Error loading tournament record.', 'error');
       });
     }
   }, []);
+
+  // Synchronize indemnityComp with competitions if competitions load slightly after URL parsing
+  useEffect(() => {
+    if (screen === 'parentIndemnity' && !indemnityComp && competitions.length > 0) {
+      if (indemnityPlayer?.compId) {
+        const found = competitions.find(c => c.id === indemnityPlayer.compId);
+        if (found) setIndemnityComp(found);
+      } else {
+        const active = competitions.find(c => c.isActive !== false) || competitions[0];
+        if (active) setIndemnityComp(active);
+      }
+    }
+  }, [screen, indemnityComp, competitions, indemnityPlayer]);
 
   // Synchronize cComp, oComp, refereeLoginComp, and ricLoginComp with the list of active competitions
   useEffect(() => {
@@ -1212,6 +1317,33 @@ export default function App() {
         }
         localStorage.setItem('app:competitions', JSON.stringify(defaultComps));
       }
+
+      // Ensure all loaded competitions include Kyukpa, Speed Kicking, and Skipping Rope in their events list
+      const standardEventsRequired = ['Kyukpa', 'Speed Kicking', 'Skipping Rope'];
+      let hadMissingEvents = false;
+      loadedComps = loadedComps.map(c => {
+        const eventsList = c.events ? [...c.events] : ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'];
+        let changed = false;
+        standardEventsRequired.forEach(ev => {
+          if (!eventsList.includes(ev)) {
+            eventsList.push(ev);
+            changed = true;
+          }
+        });
+        if (changed) {
+          hadMissingEvents = true;
+          return { ...c, events: eventsList };
+        }
+        return c;
+      });
+
+      if (hadMissingEvents) {
+        localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
+        for (const c of loadedComps) {
+          saveCompetition(c).catch(err => console.warn("Failed to sync backfilled events to cloud:", err));
+        }
+      }
+
       setCompetitions(loadedComps);
 
       if (loadedComps.length > 0) {
@@ -1627,6 +1759,15 @@ export default function App() {
     } catch (e) {
       // Error is handled/displayed in saveCompsToStorage
     }
+  };
+
+  const handleApplySpecialSGDPackagePreset = () => {
+    setFeeModelInput('SPECIAL_PACKAGE');
+    setPackageFirstEventFeeInput('80');
+    setPackageSecondEventFeeInput('40');
+    setPackageSubsequentEventFeeInput('20');
+    setPackageFiveEventFeeInput('150');
+    triggerMsg('Loaded Special SGD Package ($80 / $40 / $20 / $150). Click "Save Participant Fees" to apply.', 'ok');
   };
 
   const handleUploadReceipt = async (clubName: string, receiptBase64: string) => {
@@ -3203,7 +3344,11 @@ export default function App() {
     triggerMsg('Badge field layout rearranged.', 'ok');
   };
 
-  const handleAIExtractCategories = async (e: React.ChangeEvent<HTMLInputElement>, field: 'ageGroups' | 'weightClasses') => {
+  const handleAIExtractCategories = async (
+    e: React.ChangeEvent<HTMLInputElement>, 
+    field: 'ageGroups' | 'weightClasses',
+    targetEvent?: string
+  ) => {
     const file = e.target.files?.[0];
     if (!file || !compId) return;
 
@@ -3219,7 +3364,11 @@ export default function App() {
           const response = await fetch('/api/extract-categories', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageBase64, type: field })
+            body: JSON.stringify({ 
+              imageBase64, 
+              type: field,
+              eventName: field === 'weightClasses' ? (targetEvent || selectedWcEvent) : undefined
+            })
           });
 
           if (!response.ok) {
@@ -3228,23 +3377,34 @@ export default function App() {
 
           const data = await response.json();
           if (data.categories && Array.isArray(data.categories)) {
-             // Add categories to the competition
+             const evName = targetEvent || selectedWcEvent;
              const updated = competitions.map(c => {
                if (c.id === compId) {
-                 const existingList = c[field] || [];
-                 // Filter out duplicates and empty strings
-                 const newCats = data.categories.filter((cat: string) => typeof cat === 'string' && cat.trim() !== '' && !existingList.includes(cat.trim()));
-                 if (newCats.length > 0) {
-                   triggerMsg(`Successfully extracted ${newCats.length} categories using AI!`, 'success');
+                 if (field === 'weightClasses' && evName && evName !== 'All / Default') {
+                   const curMap = c.eventWeightClasses || {};
+                   const existingList = curMap[evName] || getWeightClassesForEvent(c, evName);
+                   const newCats = data.categories.filter((cat: string) => typeof cat === 'string' && cat.trim() !== '' && !existingList.includes(cat.trim()));
+                   const nextList = [...existingList, ...newCats.map((cat: string) => cat.trim())];
+                   const nextMap = { ...curMap, [evName]: nextList };
+                   
+                   return {
+                     ...c,
+                     eventWeightClasses: nextMap,
+                     weightClasses: evName.toLowerCase().includes('kyorugi')
+                       ? Array.from(new Set([...c.weightClasses, ...newCats.map((cat: string) => cat.trim())]))
+                       : c.weightClasses
+                   };
                  } else {
-                   triggerMsg(`No new categories found by AI.`, 'info');
+                   const existingList = c[field] || [];
+                   const newCats = data.categories.filter((cat: string) => typeof cat === 'string' && cat.trim() !== '' && !existingList.includes(cat.trim()));
+                   return { ...c, [field]: [...existingList, ...newCats.map((cat: string) => cat.trim())] };
                  }
-                 return { ...c, [field]: [...existingList, ...newCats.map((cat: string) => cat.trim())] };
                }
                return c;
              });
              setCompetitions(updated);
              saveCompsToStorage(updated);
+             triggerMsg(`Successfully extracted categories using AI!`, 'ok');
           } else {
              throw new Error('Invalid response format');
           }
@@ -3266,7 +3426,11 @@ export default function App() {
     }
   };
 
-  const handleUploadCategories = (e: React.ChangeEvent<HTMLInputElement>, field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs') => {
+  const handleUploadCategories = (
+    e: React.ChangeEvent<HTMLInputElement>, 
+    field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs',
+    targetEvent?: string
+  ) => {
     const file = e.target.files?.[0];
     if (!file || !compId) return;
 
@@ -3293,8 +3457,22 @@ export default function App() {
         });
 
         if (newItems.length > 0) {
+          const evName = targetEvent || selectedWcEvent;
           const updated = competitions.map(c => {
             if (c.id === compId) {
+              if (field === 'weightClasses' && evName && evName !== 'All / Default') {
+                const curMap = c.eventWeightClasses || {};
+                const existingList = curMap[evName] || getWeightClassesForEvent(c, evName);
+                const combined = Array.from(new Set([...existingList, ...newItems]));
+                const nextMap = { ...curMap, [evName]: combined };
+                return {
+                  ...c,
+                  eventWeightClasses: nextMap,
+                  weightClasses: evName.toLowerCase().includes('kyorugi')
+                    ? Array.from(new Set([...c.weightClasses, ...newItems]))
+                    : c.weightClasses
+                };
+              }
               // combine and unique
               const existingList = c[field] || [];
               const combined = Array.from(new Set([...existingList, ...newItems]));
@@ -3302,6 +3480,7 @@ export default function App() {
             }
             return c;
           });
+          setCompetitions(updated);
           saveCompsToStorage(updated);
           triggerMsg(`Successfully imported ${newItems.length} items.`, 'ok');
         } else {
@@ -3316,7 +3495,76 @@ export default function App() {
     e.target.value = ''; // reset input
   };
 
-  const handleAddCat = (field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs', val: string, setVal: React.Dispatch<React.SetStateAction<string>>) => {
+  const handleAddEventWeightClass = (eventName: string, val: string, setVal: React.Dispatch<React.SetStateAction<string>>) => {
+    if (!compId || !val.trim()) return;
+    const trimmed = val.trim();
+    const updated = competitions.map(c => {
+      if (c.id === compId) {
+        const curMap = c.eventWeightClasses || {};
+        const currentList = curMap[eventName] || getWeightClassesForEvent(c, eventName);
+        const nextList = currentList.includes(trimmed) ? currentList : [...currentList, trimmed];
+        const nextMap = { ...curMap, [eventName]: nextList };
+        return {
+          ...c,
+          eventWeightClasses: nextMap,
+          weightClasses: (eventName.toLowerCase().includes('kyorugi') || eventName === 'All / Default')
+            ? (c.weightClasses.includes(trimmed) ? c.weightClasses : [...c.weightClasses, trimmed])
+            : c.weightClasses
+        };
+      }
+      return c;
+    });
+    setCompetitions(updated);
+    saveCompsToStorage(updated);
+    setVal('');
+    triggerMsg(`Added division to ${eventName}.`, 'ok');
+  };
+
+  const handleRemoveEventWeightClass = (eventName: string, index: number) => {
+    if (!compId) return;
+    const updated = competitions.map(c => {
+      if (c.id === compId) {
+        const curMap = c.eventWeightClasses || {};
+        const currentList = [...(curMap[eventName] || getWeightClassesForEvent(c, eventName))];
+        const removed = currentList[index];
+        currentList.splice(index, 1);
+        const nextMap = { ...curMap, [eventName]: currentList };
+        return {
+          ...c,
+          eventWeightClasses: nextMap,
+          weightClasses: (eventName.toLowerCase().includes('kyorugi') || eventName === 'All / Default')
+            ? c.weightClasses.filter(w => w !== removed)
+            : c.weightClasses
+        };
+      }
+      return c;
+    });
+    setCompetitions(updated);
+    saveCompsToStorage(updated);
+    triggerMsg(`Removed division from ${eventName}.`, 'ok');
+  };
+
+  const handleLoadEventPreset = (eventName: string) => {
+    if (!compId) return;
+    const presets = DEFAULT_EVENT_WEIGHT_CLASSES[eventName] || DEFAULT_EVENT_WEIGHT_CLASSES['Kyorugi'];
+    const updated = competitions.map(c => {
+      if (c.id === compId) {
+        const curMap = c.eventWeightClasses || {};
+        const nextMap = { ...curMap, [eventName]: [...presets] };
+        return {
+          ...c,
+          eventWeightClasses: nextMap,
+          weightClasses: eventName.toLowerCase().includes('kyorugi') ? [...presets] : c.weightClasses
+        };
+      }
+      return c;
+    });
+    setCompetitions(updated);
+    saveCompsToStorage(updated);
+    triggerMsg(`Loaded standard preset divisions for ${eventName}.`, 'ok');
+  };
+
+  const handleAddCat = (field: 'events' | 'ageGroups' | 'weightClasses' | 'affiliatedClubs', val: string, setVal: React.Dispatch<React.SetStateAction<string>>) => {
     if (!compId || !val.trim()) return;
     const updated = competitions.map(c => {
       if (c.id === compId) {
@@ -3329,17 +3577,114 @@ export default function App() {
     setVal('');
   };
 
-  const handleRemoveCat = (field: 'ageGroups' | 'weightClasses' | 'affiliatedClubs', index: number) => {
+  const handleRemoveCat = (field: 'events' | 'ageGroups' | 'weightClasses' | 'affiliatedClubs', index: number) => {
     if (!compId) return;
     const updated = competitions.map(c => {
       if (c.id === compId) {
         const arr = [...(c[field] || [])];
+        if (field === 'events' && arr.length <= 1) {
+          triggerMsg('A tournament must have at least one active event.', 'error');
+          return c;
+        }
         arr.splice(index, 1);
         return { ...c, [field]: arr };
       }
       return c;
     });
     saveCompsToStorage(updated);
+  };
+
+  const handleUploadAgeGroupChartPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !compId) return;
+    if (file.size > 8 * 1024 * 1024) {
+      triggerMsg('Photo size exceeds 8MB limit.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const dataUrl = evt.target?.result as string;
+      if (!dataUrl) return;
+      const updated = competitions.map(c => {
+        if (c.id === compId) {
+          return { ...c, ageGroupDetailsPhotoUrl: dataUrl };
+        }
+        return c;
+      });
+      await saveCompsToStorage(updated);
+      triggerMsg('Age group specifications chart photo uploaded successfully.', 'ok');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleRemoveAgeGroupChartPhoto = async () => {
+    if (!compId) return;
+    const updated = competitions.map(c => {
+      if (c.id === compId) {
+        return { ...c, ageGroupDetailsPhotoUrl: undefined };
+      }
+      return c;
+    });
+    await saveCompsToStorage(updated);
+    triggerMsg('Age group specifications chart photo removed.', 'ok');
+  };
+
+  const handleAddAllStandardEvents = async () => {
+    if (!compId) return;
+    const STANDARD_ALL = [
+      'Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae',
+      'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'
+    ];
+    const updated = competitions.map(c => {
+      if (c.id === compId) {
+        const existing = c.events || [];
+        const combined = Array.from(new Set([...existing, ...STANDARD_ALL]));
+        return { ...c, events: combined };
+      }
+      return c;
+    });
+    await saveCompsToStorage(updated);
+    triggerMsg('Standard events (including Kyukpa & Speed Kicking) updated successfully.', 'ok');
+  };
+
+  const handleAddAnotherEventForAthlete = (p: Player) => {
+    if (role === 'coach' && activeComp && isRegistrationClosed(activeComp)) {
+      triggerMsg('Registration is closed for this tournament.', 'error');
+      return;
+    }
+    setSelectedPlayerId(null);
+    setSelectedMasterId(p.id);
+    setPName(p.name);
+    setPIc(p.ic || '');
+    setPDob(p.dob || '');
+    setPGender(p.gender);
+    setPClub(p.club);
+    setPSchoolName(p.schoolName || '');
+    setPSchoolCode(p.schoolCode || '');
+    setPRace(p.race || 'Malay');
+    setPendingPhoto(p.photo || null);
+    
+    // Find what events this athlete already registered for in this competition
+    const registeredEvents = players
+      .filter(pl => pl.compId === compId && (
+        (pl.ic && p.ic && pl.ic.trim().toLowerCase() === p.ic.trim().toLowerCase()) ||
+        (pl.name.trim().toLowerCase() === p.name.trim().toLowerCase() && pl.dob === p.dob)
+      ))
+      .map(pl => pl.event);
+
+    const availableEvents = (activeComp?.events || []).filter(ev => !registeredEvents.includes(ev));
+    const nextEvent = availableEvents[0] || (activeComp?.events || [])[0] || 'Kyukpa';
+    setPEvent(nextEvent);
+    setPEvents([nextEvent]);
+
+    setPAgeGroup(p.ageGroup || activeComp?.ageGroups[0] || '');
+    const nextWc = getWeightClassesForEvent(activeComp, nextEvent)[0] || p.weightClass || activeComp?.weightClasses[0] || 'OPEN WEIGHT';
+    setPWeightClass(nextWc);
+    setPEventWeightClasses({ [nextEvent]: nextWc });
+
+    setScreen('coachPlayerForm');
+    triggerMsg(`Adding additional event for ${p.name}. Select the event(s) and click Save Athlete Registration.`, 'ok');
   };
 
   const handleUploadGlobalClubs = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3432,8 +3777,10 @@ export default function App() {
         setPGender(p.gender);
         setPClub(p.club);
         setPEvent(p.event);
+        setPEvents([p.event]);
         setPAgeGroup(p.ageGroup);
         setPWeightClass(p.weightClass);
+        setPEventWeightClasses({ [p.event]: p.weightClass });
         setPendingPhoto(p.photo || null);
         setPSchoolName(p.schoolName || '');
         setPSchoolCode(p.schoolCode || '');
@@ -3454,9 +3801,13 @@ export default function App() {
       const initialClub = compClubs.includes(coachClubProfile) ? coachClubProfile : (compClubs[0] || '');
       setPClub(initialClub);
 
-      setPEvent(comp.events[0] || 'Kyorugi');
+      const defaultEv = comp.events[0] || 'Kyorugi';
+      setPEvent(defaultEv);
+      setPEvents([defaultEv]);
       setPAgeGroup(comp.ageGroups[0] || '');
-      setPWeightClass(comp.weightClasses[0] || '');
+      const defaultWc = getWeightClassesForEvent(comp, defaultEv)[0] || comp.weightClasses[0] || 'OPEN WEIGHT';
+      setPWeightClass(defaultWc);
+      setPEventWeightClasses({ [defaultEv]: defaultWc });
       setPendingPhoto(null);
       setPSchoolName('');
       setPSchoolCode('');
@@ -3523,10 +3874,13 @@ export default function App() {
       triggerMsg('Athlete race is required.', 'error');
       return;
     }
-    if (!pEvent) {
-      triggerMsg('Athlete event is required.', 'error');
+
+    const eventsToRegister = pEvents.length > 0 ? pEvents : (pEvent ? [pEvent] : []);
+    if (eventsToRegister.length === 0) {
+      triggerMsg('Please select at least one tournament event.', 'error');
       return;
     }
+
     if (!pAgeGroup) {
       triggerMsg('Athlete age group division is required.', 'error');
       return;
@@ -3545,25 +3899,31 @@ export default function App() {
       }
     }
 
-    // Check for duplicate player, category, and event
-    const isDuplicate = players.some(p => {
-      if (selectedPlayerId && p.id === selectedPlayerId) {
-        return false;
+    // Check duplicate registrations for the selected events
+    const duplicateEvents: string[] = [];
+    const eventsToCreateOrUpdate: string[] = [];
+
+    eventsToRegister.forEach(ev => {
+      const isDuplicateForEvent = players.some(p => {
+        if (selectedPlayerId && p.id === selectedPlayerId) {
+          return false;
+        }
+        const sameIdentity = 
+          (p.ic && pIc.trim() && p.ic.trim().toLowerCase() === pIc.trim().toLowerCase()) ||
+          (p.name.trim().toLowerCase() === pName.trim().toLowerCase() && p.dob === pDob);
+        
+        return sameIdentity && p.event === ev;
+      });
+
+      if (isDuplicateForEvent) {
+        duplicateEvents.push(ev);
+      } else {
+        eventsToCreateOrUpdate.push(ev);
       }
-      const sameIdentity = 
-        (p.ic && pIc.trim() && p.ic.trim().toLowerCase() === pIc.trim().toLowerCase()) ||
-        (p.name.trim().toLowerCase() === pName.trim().toLowerCase() && p.dob === pDob);
-      
-      const sameCategory = p.ageGroup === pAgeGroup && p.weightClass === pWeightClass;
-      const sameEvent = p.event === pEvent;
-      
-      return sameIdentity && sameCategory && sameEvent;
     });
 
-    if (isDuplicate) {
-      triggerMsg(`This athlete (${pName.trim()}) is already registered for the ${pEvent} event in the ${pAgeGroup} / ${pWeightClass} category. Duplicate registrations are not allowed.`, 'error');
-      return;
-    }
+    const primaryEvent = eventsToRegister[0] || pEvent || 'Kyorugi';
+    const primaryWc = pEventWeightClasses[primaryEvent] || (primaryEvent === pEvent ? pWeightClass : '') || getWeightClassesForEvent(activeComp, primaryEvent)[0] || 'OPEN WEIGHT';
 
     const data: Partial<Player> = {
       name: pName.trim(),
@@ -3571,9 +3931,8 @@ export default function App() {
       dob: pDob,
       gender: pGender,
       club: pClub.trim(),
-      event: pEvent,
       ageGroup: pAgeGroup,
-      weightClass: pWeightClass,
+      weightClass: primaryWc,
       photo: pendingPhoto || undefined,
       schoolName: pSchoolName.trim(),
       schoolCode: pSchoolCode.trim(),
@@ -3581,51 +3940,82 @@ export default function App() {
     };
 
     let updatedList = [...players];
-    let finalId = selectedPlayerId;
-    if (selectedPlayerId) {
-      updatedList = players.map(p => p.id === selectedPlayerId ? { ...p, ...data } as Player : p);
-    } else {
-      if (selectedMasterId) {
-        finalId = selectedMasterId;
-        if (players.some(p => p.id === finalId)) {
-          triggerMsg('This athlete is already registered in this tournament. Please edit their existing entry.', 'error');
-          return;
-        }
-      } else {
-        const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
-        finalId = `PLY-${randomPart}`;
-      }
-      const newPlayer: Player = {
-        id: finalId,
-        compId,
-        name: pName.trim(),
-        ic: pIc.trim(),
-        dob: pDob,
-        gender: pGender,
-        club: pClub.trim(),
-        coachUsername: user || 'demo',
-        event: pEvent,
-        ageGroup: pAgeGroup,
-        weightClass: pWeightClass,
-        photo: pendingPhoto || undefined,
-        createdAt: new Date().toISOString(),
-        weighIn: null,
-        schoolName: pSchoolName.trim(),
-        schoolCode: pSchoolCode.trim(),
-        race: pRace,
-      };
-      updatedList.push(newPlayer);
-      setSelectedPlayerId(finalId);
-    }
 
-    savePlayersToStorage(compId, updatedList);
-    
-    // Save to master roster
-    if (finalId) {
+    if (selectedPlayerId) {
+      if (duplicateEvents.includes(eventsToRegister[0])) {
+        triggerMsg(`This athlete (${pName.trim()}) is already registered for the ${eventsToRegister[0]} event. Duplicate registrations for the same event are not allowed.`, 'error');
+        return;
+      }
+
+      updatedList = players.map(p => p.id === selectedPlayerId ? { ...p, ...data, event: eventsToRegister[0] } as Player : p);
+
+      // If coach checked additional new events in the same edit session
+      const additionalEvents = eventsToCreateOrUpdate.filter(ev => ev !== eventsToRegister[0]);
+      additionalEvents.forEach(extraEv => {
+        const extraWc = pEventWeightClasses[extraEv] || getWeightClassesForEvent(activeComp, extraEv)[0] || 'OPEN WEIGHT';
+        const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
+        const extraPlayer: Player = {
+          id: `PLY-${randomPart}`,
+          compId,
+          name: pName.trim(),
+          ic: pIc.trim(),
+          dob: pDob,
+          gender: pGender,
+          club: pClub.trim(),
+          coachUsername: user || 'demo',
+          event: extraEv,
+          ageGroup: pAgeGroup,
+          weightClass: extraWc,
+          photo: pendingPhoto || undefined,
+          createdAt: new Date().toISOString(),
+          weighIn: null,
+          schoolName: pSchoolName.trim(),
+          schoolCode: pSchoolCode.trim(),
+          race: pRace,
+        };
+        updatedList.push(extraPlayer);
+      });
+
+      savePlayersToStorage(compId, updatedList);
+      triggerMsg(`Athlete record updated successfully${additionalEvents.length > 0 ? ` with ${additionalEvents.length} extra event(s)` : ''}.`, 'ok');
+    } else {
+      if (eventsToCreateOrUpdate.length === 0) {
+        triggerMsg(`Athlete (${pName.trim()}) is already registered for all selected event(s): ${duplicateEvents.join(', ')}.`, 'error');
+        return;
+      }
+
+      eventsToCreateOrUpdate.forEach(ev => {
+        const evWc = pEventWeightClasses[ev] || (ev === pEvent ? pWeightClass : '') || getWeightClassesForEvent(activeComp, ev)[0] || 'OPEN WEIGHT';
+        const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
+        const newPlayer: Player = {
+          id: `PLY-${randomPart}`,
+          compId,
+          name: pName.trim(),
+          ic: pIc.trim(),
+          dob: pDob,
+          gender: pGender,
+          club: pClub.trim(),
+          coachUsername: user || 'demo',
+          event: ev,
+          ageGroup: pAgeGroup,
+          weightClass: evWc,
+          photo: pendingPhoto || undefined,
+          createdAt: new Date().toISOString(),
+          weighIn: null,
+          schoolName: pSchoolName.trim(),
+          schoolCode: pSchoolCode.trim(),
+          race: pRace,
+        };
+        updatedList.push(newPlayer);
+      });
+
+      savePlayersToStorage(compId, updatedList);
+
+      const masterKey = selectedMasterId || pIc.trim() || pName.trim();
       saveMasterAthletesToStorage({
         ...masterAthletes,
-        [finalId]: {
-          id: finalId,
+        [masterKey]: {
+          id: masterKey,
           name: pName.trim(),
           ic: pIc.trim(),
           dob: pDob,
@@ -3638,6 +4028,12 @@ export default function App() {
           race: pRace,
         }
       });
+
+      if (duplicateEvents.length > 0) {
+        triggerMsg(`Registered for ${eventsToCreateOrUpdate.join(', ')}! (Skipped duplicate event: ${duplicateEvents.join(', ')})`, 'ok');
+      } else {
+        triggerMsg(`Successfully registered ${pName.trim()} for ${eventsToCreateOrUpdate.length} event(s): ${eventsToCreateOrUpdate.join(', ')}!`, 'ok');
+      }
     }
 
     triggerMsg(selectedPlayerId ? 'Athlete record updated.' : 'Athlete registered successfully.', 'ok');
@@ -3684,7 +4080,15 @@ export default function App() {
 
       const events = activeComp.events && activeComp.events.length > 0 ? activeComp.events : ['Kyorugi', 'Poomsae'];
       const ageGroups = activeComp.ageGroups && activeComp.ageGroups.length > 0 ? activeComp.ageGroups : ['Junior (15 to 17 Years Old)'];
-      const weightClasses = activeComp.weightClasses && activeComp.weightClasses.length > 0 ? activeComp.weightClasses : ['FIN BELOW 45KG'];
+      
+      const allDivisionsSet = new Set<string>(activeComp.weightClasses || []);
+      events.forEach(ev => {
+        const evWcs = getWeightClassesForEvent(activeComp, ev);
+        evWcs.forEach(w => allDivisionsSet.add(w));
+      });
+      const weightClasses = Array.from(allDivisionsSet);
+      if (weightClasses.length === 0) weightClasses.push('OPEN WEIGHT');
+
       const genders = ['Male', 'Female'];
       const races = ['Malay', 'Chinese', 'Indian', 'Lain-lain'];
       const clubsList = globalClubs.length > 0
@@ -4037,16 +4441,24 @@ export default function App() {
             errors.push({ rowNum, name: rawName, error: 'Missing Weight Class (Required).' });
             rowHasError = true;
           } else {
-            const found = activeComp.weightClasses.find(wc => wc.toLowerCase() === rawWeightClass.toLowerCase());
+            const validWcs = getWeightClassesForEvent(activeComp, matchedEvent || rawEvent);
+            const found = validWcs.find(wc => wc.toLowerCase() === rawWeightClass.toLowerCase());
             if (found) {
               matchedWeightClass = found;
             } else {
-              const partialFound = activeComp.weightClasses.find(wc => wc.toLowerCase().includes(rawWeightClass.toLowerCase()));
+              const partialFound = validWcs.find(wc => wc.toLowerCase().includes(rawWeightClass.toLowerCase()));
               if (partialFound) {
                 matchedWeightClass = partialFound;
               } else {
-                errors.push({ rowNum, name: rawName, error: `Weight Class "${rawWeightClass}" doesn't match competition weight categories.` });
-                rowHasError = true;
+                const globalFound = activeComp.weightClasses.find(wc => wc.toLowerCase() === rawWeightClass.toLowerCase() || wc.toLowerCase().includes(rawWeightClass.toLowerCase()));
+                if (globalFound) {
+                  matchedWeightClass = globalFound;
+                } else if (rawWeightClass.toUpperCase().includes('OPEN')) {
+                  matchedWeightClass = 'OPEN WEIGHT';
+                } else {
+                  errors.push({ rowNum, name: rawName, error: `Weight Class / Division "${rawWeightClass}" doesn't match tournament categories for ${matchedEvent || 'this event'}.` });
+                  rowHasError = true;
+                }
               }
             }
           }
@@ -4249,7 +4661,7 @@ export default function App() {
 
     const updated = players.map(p => {
       if (p.id === scanResult) {
-        const autoResult = evalWeight(p.weightClass, val);
+        const autoResult = evalWeight(p.weightClass, val, p.event);
         return {
           ...p,
           weighIn: {
@@ -4298,13 +4710,21 @@ export default function App() {
     if (!wc) return null;
     const s = wc.toUpperCase();
     let m;
-    if (m = s.match(/BELOW\s*([\d.]+)\s*KG/)) return { min: 0, max: parseFloat(m[1]) };
-    if (m = s.match(/([\d.]+)\s*KG\s*&?\s*ABOVE/)) return { min: parseFloat(m[1]), max: Infinity };
+    if (m = s.match(/(?:BELOW|UNDER)\s*([\d.]+)\s*KG/)) return { min: 0, max: parseFloat(m[1]) };
+    if (m = s.match(/([\d.]+)\s*KG\s*(?:&?\s*ABOVE|&?\s*OVER)/)) return { min: parseFloat(m[1]), max: Infinity };
+    if (m = s.match(/(?:OVER|ABOVE)\s*([\d.]+)\s*KG/)) return { min: parseFloat(m[1]), max: Infinity };
     if (m = s.match(/([\d.]+)\s*KG\s*-\s*([\d.]+)\s*KG/)) return { min: parseFloat(m[1]), max: parseFloat(m[2]) };
+    if (m = s.match(/([\d.]+)\s*-\s*([\d.]+)\s*KG/)) return { min: parseFloat(m[1]), max: parseFloat(m[2]) };
     return null;
   };
 
-  const evalWeight = (wc: string, actual: number) => {
+  const evalWeight = (wc: string, actual: number, eventName?: string) => {
+    if (eventName && isExemptFromStrictWeightScale(eventName, wc)) {
+      return 'PASS';
+    }
+    if (wc && wc.toUpperCase().includes('OPEN')) {
+      return 'PASS';
+    }
     const r = parseWeightRange(wc);
     if (!r) return 'MANUAL';
     return (actual >= r.min && actual <= r.max) ? 'PASS' : 'FAIL';
@@ -4773,6 +5193,24 @@ export default function App() {
       {/* VIEW ENGINE CONTAINER */}
       <main className={`flex-grow ${getLayoutWidthClass()} w-full mx-auto px-4 py-6 sm:px-6 lg:px-8 print:hidden`}>
         
+        {/* PARENT INDEMNITY FORM SCREEN */}
+        {screen === 'parentIndemnity' && (
+          <ParentIndemnityForm
+            indemnityPlayer={indemnityPlayer}
+            indemnityComp={indemnityComp}
+            indemnityLoading={indemnityLoading}
+            indemnityCoach={indemnityCoach}
+            coaches={coaches}
+            triggerMsg={triggerMsg}
+            setScreen={setScreen}
+            onPlayerUpdated={(updatedPlayer) => {
+              setPlayers(prev => prev.map(p => p.id === updatedPlayer.id ? updatedPlayer : p));
+              setIndemnityPlayer(updatedPlayer);
+            }}
+            role={role}
+          />
+        )}
+
         {/* LOGIN SCREEN */}
         {screen === 'login' && (
           <div className="max-w-[520px] mx-auto my-12 bg-surface rounded-2xl shadow-xl border border-line overflow-hidden transition-all duration-300">
@@ -6095,23 +6533,41 @@ export default function App() {
                                     <span>View</span>
                                   </button>
                                 ) : (
-                                  <button
-                                    onClick={() => {
-                                      const url = window.location.origin + window.location.pathname + '?indemnity=' + p.id;
-                                      navigator.clipboard.writeText(url);
-                                      triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
-                                    }}
-                                    className="text-text-dim hover:text-gold text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
-                                    title="Copy parental indemnity form link"
-                                  >
-                                    <Copy className="w-3 h-3 text-text-dim" />
-                                    <span>Copy Link</span>
-                                  </button>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => {
+                                        const url = `${window.location.origin}${window.location.pathname}?screen=parentIndemnity&athleteId=${p.id}&indemnityComp=${p.compId || activeComp?.id || ''}`;
+                                        navigator.clipboard.writeText(url);
+                                        triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
+                                      }}
+                                      className="text-text-dim hover:text-gold text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                      title="Copy parental indemnity form link"
+                                    >
+                                      <Copy className="w-3 h-3 text-text-dim" />
+                                      <span>Copy Link</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleOpenIndemnityForm(p)}
+                                      className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer ml-1"
+                                      title="Open and fill indemnity form for athlete"
+                                    >
+                                      <ExternalLink className="w-3 h-3 text-gold" />
+                                      <span>Open Form</span>
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </td>
                              <td className="p-4 text-right">
                                <div className="flex items-center justify-end space-x-2">
+                                 <button
+                                   onClick={() => handleAddAnotherEventForAthlete(p)}
+                                   className="bg-gold/15 hover:bg-gold/25 text-gold border border-gold/30 px-2 py-1 rounded text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                   title="Register this athlete for another event in this tournament"
+                                 >
+                                   <Plus className="w-3 h-3" />
+                                   <span>+ Event</span>
+                                 </button>
                                  <button 
                                    onClick={() => { setSelectedPlayerId(p.id); setScreen('idCard'); }}
                                    className="bg-emerald-950/40 text-gold hover:bg-emerald-900/50 p-1.5 rounded border border-emerald-900/50 transition"
@@ -6472,30 +6928,99 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Tournament Event *</label>
-                        <select 
-                          value={pEvent}
-                          onChange={(e) => setPEvent(e.target.value)}
-                          className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                        >
-                          {activeComp.events.map(ev => (
-                            <option key={ev} value={ev}>{ev}</option>
-                          ))}
-                        </select>
-                      </div>
+                    <div className="space-y-4">
+                      {/* TOURNAMENT EVENT SELECTION (Single & Multi-Event) */}
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                            Tournament Event(s) *
+                          </label>
+                          <span className="text-[11px] text-gold font-semibold">
+                            {pEvents.length} event{pEvents.length === 1 ? '' : 's'} selected {pEvents.length > 1 ? '(Multi-Event Package)' : ''}
+                          </span>
+                        </div>
+
+                        {/* Multi-event selection pills/grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-2.5 bg-ink border border-line rounded-xl max-h-48 overflow-y-auto">
+                          {activeComp.events.map(ev => {
+                            const isSelected = pEvents.includes(ev);
+                            return (
+                              <button
+                                key={ev}
+                                type="button"
+                                onClick={() => {
+                                  let next: string[];
+                                  if (isSelected) {
+                                    if (pEvents.length <= 1) {
+                                      triggerMsg('At least one event must be selected.', 'error');
+                                      return;
+                                    }
+                                    next = pEvents.filter(e => e !== ev);
+                                    setPEventWeightClasses(prev => {
+                                      const copy = { ...prev };
+                                      delete copy[ev];
+                                      return copy;
+                                    });
+                                  } else {
+                                    next = [...pEvents, ev];
+                                    if (!pEventWeightClasses[ev]) {
+                                      const evWcs = getWeightClassesForEvent(activeComp, ev);
+                                      setPEventWeightClasses(prev => ({ ...prev, [ev]: evWcs[0] || 'OPEN WEIGHT' }));
+                                    }
+                                  }
+                                  setPEvents(next);
+                                  setPEvent(next[0] || ev);
+                                  if (next.length === 1) {
+                                    const onlyEv = next[0];
+                                    const evWcs = getWeightClassesForEvent(activeComp, onlyEv);
+                                    const sel = pEventWeightClasses[onlyEv] || evWcs[0] || 'OPEN WEIGHT';
+                                    setPWeightClass(sel);
+                                  }
+                                }}
+                                className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium border transition cursor-pointer text-left ${
+                                  isSelected
+                                    ? 'bg-gold/15 border-gold text-gold font-bold shadow-sm'
+                                    : 'bg-surface/50 border-line text-text-dim hover:text-text hover:border-line/80'
+                                }`}
+                              >
+                                <span className="truncate pr-1">{ev}</span>
+                                <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border text-[10px] font-bold ${
+                                  isSelected ? 'bg-gold text-ink border-gold' : 'border-line bg-ink text-transparent'
+                                }`}>
+                                  ✓
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] text-text-dim/80 mt-1.5 flex items-center gap-1">
+                          <span>💡 Athletes can participate in multiple events in the same tournament (e.g. Kyorugi, Kyukpa, Speed Kicking).</span>
+                        </p>
+                      </div>
+
+                      {/* AGE GROUP CATEGORY SELECTION */}
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
+                          <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
                             Age Group Category *
                           </label>
-                          {birthInfo.birthYear && (
-                            <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <CheckCircle className="w-2.5 h-2.5 text-gold shrink-0" />
-                              <span>Auto-Matched (Born {birthInfo.birthYear})</span>
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowAgeGroupDetailsModal(true)}
+                              className="text-[11px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                              title="View official Age Group Category specification chart photo"
+                            >
+                              <Camera className="w-3.5 h-3.5 text-gold" />
+                              <span>View Age Group Chart</span>
+                            </button>
+                            {birthInfo.birthYear && (
+                              <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <CheckCircle className="w-2.5 h-2.5 text-gold shrink-0" />
+                                <span>Auto-Matched ({birthInfo.birthYear})</span>
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <select 
                           value={pAgeGroup}
@@ -6526,22 +7051,107 @@ export default function App() {
                 );
               })()}
 
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Target Weight Class *</label>
-                <select 
-                  value={pWeightClass}
-                  onChange={(e) => setPWeightClass(e.target.value)}
-                  className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
-                >
-                  {activeComp.weightClasses.length === 0 ? (
-                    <option value="">No weight classes defined by admin</option>
-                  ) : (
-                    activeComp.weightClasses.map(wc => (
-                      <option key={wc} value={wc}>{wc}</option>
-                    ))
-                  )}
-                </select>
-              </div>
+              {/* EVENT-SPECIFIC TARGET WEIGHT CLASS & DIVISION SELECTION */}
+              {(() => {
+                const effectiveEvents = pEvents.length > 0 ? pEvents : [pEvent || (activeComp.events?.[0] || 'Kyorugi')];
+
+                if (effectiveEvents.length === 1) {
+                  const singleEv = effectiveEvents[0];
+                  const wcList = getWeightClassesForEvent(activeComp, singleEv);
+                  const currentSelectedWc = pEventWeightClasses[singleEv] || pWeightClass || wcList[0] || '';
+                  const label = getEventWeightClassLabel(singleEv);
+
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                          {label} *
+                        </label>
+                        <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded-full">
+                          {singleEv}
+                        </span>
+                      </div>
+                      <select 
+                        value={currentSelectedWc}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPWeightClass(val);
+                          setPEventWeightClasses(prev => ({ ...prev, [singleEv]: val }));
+                        }}
+                        className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
+                      >
+                        {wcList.length === 0 ? (
+                          <option value="">No divisions defined for {singleEv}</option>
+                        ) : (
+                          wcList.map(wc => (
+                            <option key={wc} value={wc}>{wc}</option>
+                          ))
+                        )}
+                      </select>
+                      <p className="text-[11px] text-text-dim">
+                        Target division configured specifically for the <strong className="text-text font-medium">{singleEv}</strong> discipline.
+                      </p>
+                    </div>
+                  );
+                }
+
+                // Multi-event selection: each event gets its own target weight class / category dropdown
+                return (
+                  <div className="bg-ink/30 border border-gold/30 rounded-2xl p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-line/40 pb-2.5">
+                      <div>
+                        <h4 className="text-xs font-bold text-gold uppercase tracking-wider flex items-center gap-1.5">
+                          <Scale className="w-4 h-4" />
+                          Target Divisions per Event ({effectiveEvents.length} Events Selected)
+                        </h4>
+                        <p className="text-[11px] text-text-dim mt-0.5">
+                          Different tournament events feature distinct weight categories and format divisions:
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {effectiveEvents.map(ev => {
+                        const wcList = getWeightClassesForEvent(activeComp, ev);
+                        const currentVal = pEventWeightClasses[ev] || (ev === pEvent ? pWeightClass : '') || wcList[0] || '';
+                        const label = getEventWeightClassLabel(ev);
+                        return (
+                          <div key={ev} className="bg-surface border border-line rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:border-line-hover transition">
+                            <div className="min-w-[160px] shrink-0">
+                              <span className="text-xs font-bold text-text flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-gold"></span>
+                                {ev}
+                              </span>
+                              <span className="text-[10px] text-text-dim block mt-0.5">{label}</span>
+                            </div>
+                            <div className="flex-1 w-full sm:w-auto">
+                              <select 
+                                value={currentVal}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setPEventWeightClasses(prev => ({ ...prev, [ev]: val }));
+                                  if (ev === effectiveEvents[0]) {
+                                    setPWeightClass(val);
+                                  }
+                                }}
+                                className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
+                              >
+                                {wcList.length === 0 ? (
+                                  <option value="">No divisions defined for {ev}</option>
+                                ) : (
+                                  wcList.map(wc => (
+                                    <option key={wc} value={wc}>{wc}</option>
+                                  ))
+                                )}
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Athlete Portrait Photograph</label>
@@ -8786,6 +9396,12 @@ export default function App() {
                       setEditCompRegistrationCloseDate(activeComp.registrationCloseDate || activeComp.date || '');
                       setEditCompPasscode(activeComp.staffCode || '');
                       setEditCompCurrency(activeComp.currency || 'RM');
+                      setEditCompEvents(activeComp.events || []);
+                      setEditCompFeeModel(activeComp.feeModel || 'STANDARD');
+                      setEditCompPkgFirst(activeComp.packageFirstEventFee || '80');
+                      setEditCompPkgSecond(activeComp.packageSecondEventFee || '40');
+                      setEditCompPkgSub(activeComp.packageSubsequentEventFee || '20');
+                      setEditCompPkgFive(activeComp.packageFiveEventFee || '150');
                       setShowEditCompModal(true);
                     }}
                     className="text-text-dim hover:text-gold transition p-1 hover:bg-gold/10 rounded-lg"
@@ -9460,6 +10076,15 @@ export default function App() {
                   <div className="flex justify-between items-center">
                     <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">Age brackets</label>
                     <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAgeGroupDetailsModal(true)}
+                        className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1"
+                        title="Upload or view official age group specification chart photo"
+                      >
+                        <Camera className="w-3 h-3 text-gold" />
+                        <span>{activeComp.ageGroupDetailsPhotoUrl ? 'Chart Photo (Uploaded)' : 'Upload Chart Photo'}</span>
+                      </button>
                       <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
                         {isAIExtractingAge ? (
                           <>
@@ -9527,12 +10152,33 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* WEIGHT CLASSES */}
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">Weight Class Divisions</label>
-                    <div className="flex gap-2">
-                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
+                {/* EVENT-SPECIFIC WEIGHT CLASSES & TARGET DIVISIONS */}
+                <div className="space-y-3 bg-surface/50 border border-line rounded-2xl p-4 lg:col-span-2">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-line/40 pb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Scale className="w-4 h-4 text-gold" />
+                        <label className="block text-xs font-bold text-text uppercase tracking-wider">
+                          Tournament Event Divisions & Weight Classes
+                        </label>
+                      </div>
+                      <p className="text-[11px] text-text-dim mt-0.5">
+                        Configure distinct target weight classes and format divisions for each tournament event discipline.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleLoadEventPreset(selectedWcEvent || activeComp.events[0] || 'Kyorugi')}
+                        className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold transition"
+                        title={`Reset to standard divisions preset for ${selectedWcEvent || activeComp.events[0] || 'Kyorugi'}`}
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Load Standard Preset</span>
+                      </button>
+
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2.5 py-1.5 rounded-lg transition flex items-center gap-1">
                         {isAIExtractingWc ? (
                           <>
                             <RefreshCw className="w-3 h-3 animate-spin" />
@@ -9546,50 +10192,177 @@ export default function App() {
                               type="file" 
                               accept="image/*"
                               className="hidden"
-                              onChange={(e) => handleAIExtractCategories(e, 'weightClasses')}
+                              onChange={(e) => handleAIExtractCategories(e, 'weightClasses', selectedWcEvent || activeComp.events[0] || 'Kyorugi')}
                             />
                           </>
                         )}
                       </label>
-                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
+
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2.5 py-1.5 rounded-lg transition flex items-center gap-1">
                         <Upload className="w-3 h-3" />
-                        <span>Upload CSV/Excel</span>
+                        <span>Upload Excel</span>
                         <input 
                           type="file" 
                           accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
                           className="hidden"
-                          onChange={(e) => handleUploadCategories(e, 'weightClasses')}
+                          onChange={(e) => handleUploadCategories(e, 'weightClasses', selectedWcEvent || activeComp.events[0] || 'Kyorugi')}
                         />
                       </label>
                     </div>
                   </div>
-                  <div className="flex space-x-2">
-                    <input 
-                      type="text" 
-                      value={newWc}
-                      onChange={(e) => setNewWc(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddCat('weightClasses', newWc, setNewWc); }}
-                      placeholder="e.g. FEATHER 41.01KG-45KG" 
-                      className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
-                    />
-                    <button 
-                      onClick={() => handleAddCat('weightClasses', newWc, setNewWc)}
-                      className="bg-surface-2 hover:bg-line text-text border border-line px-3 py-2 rounded-xl text-xs font-bold"
+
+                  {/* EVENT SELECTOR PILLS */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider">
+                      Select Discipline to Configure:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {activeComp.events.map(ev => {
+                        const currentEv = selectedWcEvent || activeComp.events[0] || 'Kyorugi';
+                        const isSelected = currentEv === ev;
+                        const count = getWeightClassesForEvent(activeComp, ev).length;
+                        return (
+                          <button
+                            key={ev}
+                            type="button"
+                            onClick={() => setSelectedWcEvent(ev)}
+                            className={`text-xs px-3 py-1.5 rounded-xl border font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-gold text-ink border-gold font-bold shadow-sm'
+                                : 'bg-ink text-text-dim hover:text-text border-line hover:border-gold/40'
+                            }`}
+                          >
+                            <span>{ev}</span>
+                            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                              isSelected ? 'bg-ink/20 text-ink' : 'bg-surface text-text-dim'
+                            }`}>
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ACTIVE EVENT CONFIGURATION INPUT & CHIPS */}
+                  {(() => {
+                    const currentEv = selectedWcEvent || activeComp.events[0] || 'Kyorugi';
+                    const currentWcList = getWeightClassesForEvent(activeComp, currentEv);
+                    const label = getEventWeightClassLabel(currentEv);
+
+                    return (
+                      <div className="bg-ink/60 border border-line rounded-xl p-3.5 space-y-3">
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-1">
+                          <span className="text-xs font-bold text-gold flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-gold"></span>
+                            Configuring: {currentEv} ({label})
+                          </span>
+                          <span className="text-[11px] text-text-dim">
+                            {currentWcList.length} division{currentWcList.length === 1 ? '' : 's'} assigned to athletes in {currentEv}
+                          </span>
+                        </div>
+
+                        <div className="flex space-x-2">
+                          <input 
+                            type="text" 
+                            value={newWc}
+                            onChange={(e) => setNewWc(e.target.value)}
+                            onKeyDown={(e) => { 
+                              if (e.key === 'Enter') handleAddEventWeightClass(currentEv, newWc, setNewWc); 
+                            }}
+                            placeholder={
+                              currentEv.toLowerCase().includes('kyorugi') 
+                                ? 'e.g. FEATHER 41.01KG-45KG or BELOW 45KG'
+                                : currentEv.toLowerCase().includes('poomsae')
+                                ? 'e.g. INDIVIDUAL RECOGNIZED or PAIR POOMSAE'
+                                : currentEv.toLowerCase().includes('speed')
+                                ? 'e.g. SPEED SPRINT (30 SECONDS)'
+                                : 'e.g. OPEN DIVISION or LIGHTWEIGHT'
+                            }
+                            className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                          />
+                          <button 
+                            onClick={() => handleAddEventWeightClass(currentEv, newWc, setNewWc)}
+                            className="bg-gold hover:bg-yellow-400 text-ink px-3 py-2 rounded-xl text-xs font-bold transition shrink-0"
+                          >
+                            Add to {currentEv}
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-2 bg-ink rounded-xl border border-line">
+                          {currentWcList.length === 0 ? (
+                            <div className="w-full text-center py-3 text-[11px] text-text-dim italic">
+                              No divisions defined for {currentEv} yet. Click "Load Standard Preset" or type to add custom divisions.
+                            </div>
+                          ) : (
+                            currentWcList.map((wc, i) => (
+                              <span key={i} className="inline-flex items-center text-[10px] bg-surface border border-line px-2.5 py-1 rounded-lg text-text font-medium">
+                                <span>{wc}</span>
+                                <button 
+                                  onClick={() => handleRemoveEventWeightClass(currentEv, i)}
+                                  className="ml-1.5 text-red-500 hover:text-red-400 text-xs font-bold"
+                                  title={`Remove division from ${currentEv}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* TOURNAMENT EVENTS & DISCIPLINES */}
+                <div className="space-y-3 lg:col-span-2 pt-2 border-t border-line/40">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-text uppercase tracking-widest">
+                        Tournament Events & Disciplines ({activeComp.events?.length || 0})
+                      </label>
+                      <p className="text-[11px] text-text-dim">
+                        Disciplines available for multi-event athlete registration (including Kyukpa, Speed Kicking, Rope Skipping).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddAllStandardEvents}
+                      className="text-[10px] text-gold hover:text-gold/80 border border-gold/30 hover:border-gold/60 px-2.5 py-1 rounded-lg transition shrink-0"
                     >
-                      Add Division
+                      + Include Standard 9 Disciplines
                     </button>
                   </div>
 
-                  <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-2 bg-ink rounded-xl border border-line">
-                    {activeComp.weightClasses.length === 0 ? (
-                      <span className="text-[10px] text-text-dim/60 italic p-1">No custom weight divisions defined.</span>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="text" 
+                      value={newEvent}
+                      onChange={(e) => setNewEvent(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddCat('events', newEvent, setNewEvent); }}
+                      placeholder="e.g. Speed Kicking, Kyukpa, Skipping Rope" 
+                      className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                    />
+                    <button 
+                      onClick={() => handleAddCat('events', newEvent, setNewEvent)}
+                      className="bg-surface-2 hover:bg-line text-text border border-line px-3 py-2 rounded-xl text-xs font-bold"
+                    >
+                      Add Event
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-ink rounded-xl border border-line">
+                    {!activeComp.events || activeComp.events.length === 0 ? (
+                      <span className="text-[10px] text-text-dim/60 italic p-1">No custom events defined.</span>
                     ) : (
-                      activeComp.weightClasses.map((wc, i) => (
-                        <span key={i} className="inline-flex items-center text-[10px] bg-surface border border-line px-2 py-1 rounded text-text font-medium">
-                          <span>{wc}</span>
+                      activeComp.events.map((ev, i) => (
+                        <span key={i} className="inline-flex items-center text-[10px] bg-surface border border-gold/30 px-2.5 py-1 rounded-lg text-text font-medium">
+                          <span className="text-gold font-bold mr-1">#{i + 1}</span>
+                          <span>{ev}</span>
                           <button 
-                            onClick={() => handleRemoveCat('weightClasses', i)}
+                            onClick={() => handleRemoveCat('events', i)}
                             className="ml-1.5 text-red-500 hover:text-red-400 text-xs font-bold"
+                            title={`Remove ${ev}`}
                           >
                             ×
                           </button>
@@ -9599,8 +10372,210 @@ export default function App() {
                   </div>
                 </div>
 
+              </div>
+            </div>
 
+            {/* COMPETITION FEES & SPECIAL PACKAGE PRICING */}
+            <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-gold" />
+                    Competition Fees & Special Package Pricing
+                  </h3>
+                  <p className="text-xs text-text-dim">
+                    Configure standard event fees or multi-event special package tiers for this championship ({activeComp.currency || 'RM'}).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplySpecialSGDPackagePreset}
+                  className="bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 cursor-pointer"
+                  title="Load $80 1st / $40 2nd / $20 subsequent / $150 5-events SGD package preset"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Apply Special SGD Package ($80 / $40 / $20 / $150)</span>
+                </button>
+              </div>
 
+              {/* Fee Model Selector */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Fee Calculation Model</label>
+                  <select
+                    value={feeModelInput}
+                    onChange={(e) => setFeeModelInput(e.target.value as 'STANDARD' | 'SPECIAL_PACKAGE')}
+                    className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-gold font-medium"
+                  >
+                    <option value="STANDARD">Standard (Per-Event Pricing)</option>
+                    <option value="SPECIAL_PACKAGE">Special Package Tiers (Multi-Event Discount)</option>
+                  </select>
+                  <p className="text-[10px] text-text-dim mt-1.5">
+                    {feeModelInput === 'SPECIAL_PACKAGE' 
+                      ? 'Athletes joining multiple events receive tiered package pricing (e.g. $80 1st, $40 2nd, $20 subsequent, $150 for 5 events).'
+                      : 'Athletes are billed the sum of each individual event entered.'}
+                  </p>
+                </div>
+
+                <div className="bg-ink/30 p-3 rounded-xl border border-line/60 flex flex-col justify-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gold mb-1">Pricing Rule Overview</span>
+                  <p className="text-[11px] text-text-dim leading-relaxed">
+                    {feeModelInput === 'SPECIAL_PACKAGE' ? (
+                      <>
+                        <strong className="text-text">1st Event:</strong> {formatCurrency(parseFeeToNumber(packageFirstEventFeeInput || '80'), packageFirstEventFeeInput, activeComp.currency)} · <strong className="text-text">2nd Event:</strong> {formatCurrency(parseFeeToNumber(packageSecondEventFeeInput || '40'), packageSecondEventFeeInput, activeComp.currency)} · <strong className="text-text">Subsequent:</strong> {formatCurrency(parseFeeToNumber(packageSubsequentEventFeeInput || '20'), packageSubsequentEventFeeInput, activeComp.currency)} (Kyukpa, Speed Kicking, Rope Skipping) · <strong className="text-text">5 Events:</strong> {formatCurrency(parseFeeToNumber(packageFiveEventFeeInput || '150'), packageFiveEventFeeInput, activeComp.currency)}
+                      </>
+                    ) : (
+                      'Each discipline has an independent entry fee. Total club fee equals the sum of all participant events.'
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Special Package Tiers */}
+              {feeModelInput === 'SPECIAL_PACKAGE' && (
+                <div className="p-4 bg-ink/40 border border-line rounded-xl space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-bold text-gold uppercase tracking-wider">Special Package Tier Rates ({activeComp.currency || 'RM'})</h4>
+                    <span className="text-[10px] text-text-dim">Subsequent event fee applies to Kyukpa, Speed Kicking, Rope Skipping, etc.</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">1st Event Fee</label>
+                      <input 
+                        type="text"
+                        value={packageFirstEventFeeInput}
+                        onChange={(e) => setPackageFirstEventFeeInput(e.target.value)}
+                        placeholder="e.g. 80"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">2nd Event Fee</label>
+                      <input 
+                        type="text"
+                        value={packageSecondEventFeeInput}
+                        onChange={(e) => setPackageSecondEventFeeInput(e.target.value)}
+                        placeholder="e.g. 40"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Subsequent Event Fee</label>
+                      <input 
+                        type="text"
+                        value={packageSubsequentEventFeeInput}
+                        onChange={(e) => setPackageSubsequentEventFeeInput(e.target.value)}
+                        placeholder="e.g. 20"
+                        title="Per subsequent event, including Kyukpa, Speed Kicking, Rope Skipping"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">5 Event Package Bundle</label>
+                      <input 
+                        type="text"
+                        value={packageFiveEventFeeInput}
+                        onChange={(e) => setPackageFiveEventFeeInput(e.target.value)}
+                        placeholder="e.g. 150"
+                        className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Individual Discipline Fees */}
+              <div className="pt-2">
+                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-3">Individual Discipline Reference Fees</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Kyorugi</label>
+                    <input 
+                      type="text"
+                      value={kyorugiFeeInput}
+                      onChange={(e) => setKyorugiFeeInput(e.target.value)}
+                      placeholder="e.g. 80"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Poomsae</label>
+                    <input 
+                      type="text"
+                      value={poomsaeFeeInput}
+                      onChange={(e) => setPoomsaeFeeInput(e.target.value)}
+                      placeholder="e.g. 80"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Para</label>
+                    <input 
+                      type="text"
+                      value={paraFeeInput}
+                      onChange={(e) => setParaFeeInput(e.target.value)}
+                      placeholder="e.g. 80"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Virtual</label>
+                    <input 
+                      type="text"
+                      value={virtualFeeInput}
+                      onChange={(e) => setVirtualFeeInput(e.target.value)}
+                      placeholder="e.g. 50"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Kyukpa</label>
+                    <input 
+                      type="text"
+                      value={kyukpaFeeInput}
+                      onChange={(e) => setKyukpaFeeInput(e.target.value)}
+                      placeholder="e.g. 20"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Speed Kicking</label>
+                    <input 
+                      type="text"
+                      value={speedKickingFeeInput}
+                      onChange={(e) => setSpeedKickingFeeInput(e.target.value)}
+                      placeholder="e.g. 20"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-text-dim uppercase tracking-wider mb-1">Skipping Rope</label>
+                    <input 
+                      type="text"
+                      value={skippingRopeFeeInput}
+                      onChange={(e) => setSkippingRopeFeeInput(e.target.value)}
+                      placeholder="e.g. 20"
+                      className="w-full bg-ink/50 border border-line rounded-xl px-3 py-2 text-xs text-text placeholder-text-dim focus:outline-none focus:border-gold font-medium font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end items-center gap-3 pt-3 border-t border-line/20">
+                {feeUpdateSuccess && (
+                  <span className="text-emerald-500 text-xs font-bold animate-fade-in flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    Fees Saved Successfully
+                  </span>
+                )}
+                <button
+                  onClick={() => handleUpdateEventFees(kyorugiFeeInput, poomsaeFeeInput, paraFeeInput, virtualFeeInput, kyukpaFeeInput, speedKickingFeeInput, skippingRopeFeeInput, feeModelInput, packageFirstEventFeeInput, packageSecondEventFeeInput, packageSubsequentEventFeeInput, packageFiveEventFeeInput)}
+                  className="bg-gold hover:opacity-90 text-ink px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Save Participant & Package Fees
+                </button>
               </div>
             </div>
 
@@ -9689,7 +10664,7 @@ export default function App() {
                               }`}>
                                 {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
                               </span>
-                              {p.indemnityStatus === 'Completed' && (
+                              {p.indemnityStatus === 'Completed' ? (
                                 <button
                                   onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
                                   className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
@@ -9697,6 +10672,27 @@ export default function App() {
                                 >
                                   <Eye className="w-3.5 h-3.5 text-gold" />
                                 </button>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      const url = `${window.location.origin}${window.location.pathname}?screen=parentIndemnity&athleteId=${p.id}&indemnityComp=${p.compId || activeComp?.id || ''}`;
+                                      navigator.clipboard.writeText(url);
+                                      triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
+                                    }}
+                                    className="text-text-dim hover:text-gold text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                    title="Copy parental indemnity form link"
+                                  >
+                                    <Copy className="w-3.5 h-3.5 text-text-dim" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenIndemnityForm(p)}
+                                    className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer ml-1"
+                                    title="Open and fill indemnity form for athlete"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5 text-gold" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </td>
@@ -10397,7 +11393,7 @@ export default function App() {
                               }`}>
                                 {p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending'}
                               </span>
-                              {p.indemnityStatus === 'Completed' && (
+                              {p.indemnityStatus === 'Completed' ? (
                                 <button
                                   onClick={() => { setSelectedIndemnityPlayer(p); setShowViewIndemnityModal(true); }}
                                   className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
@@ -10405,6 +11401,27 @@ export default function App() {
                                 >
                                   <Eye className="w-3.5 h-3.5 text-gold" />
                                 </button>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      const url = `${window.location.origin}${window.location.pathname}?screen=parentIndemnity&athleteId=${p.id}&indemnityComp=${p.compId || activeComp?.id || ''}`;
+                                      navigator.clipboard.writeText(url);
+                                      triggerMsg(`Indemnity form link copied for ${p.name}!`, 'ok');
+                                    }}
+                                    className="text-text-dim hover:text-gold text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer"
+                                    title="Copy parental indemnity form link"
+                                  >
+                                    <Copy className="w-3.5 h-3.5 text-text-dim" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenIndemnityForm(p)}
+                                    className="text-gold hover:underline text-[10px] font-semibold flex items-center gap-0.5 shrink-0 cursor-pointer ml-1"
+                                    title="Open and fill indemnity form for athlete"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5 text-gold" />
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </td>
@@ -12258,6 +13275,7 @@ export default function App() {
             setSelectedIndemnityPlayer(player);
             setShowViewIndemnityModal(true);
         }}
+        onOpenIndemnityForm={handleOpenIndemnityForm}
         triggerMsg={triggerMsg}
       />
       
@@ -12295,8 +13313,31 @@ export default function App() {
         setEditCompPasscode={setEditCompPasscode}
         editCompCurrency={editCompCurrency}
         setEditCompCurrency={setEditCompCurrency}
+        editCompEvents={editCompEvents}
+        setEditCompEvents={setEditCompEvents}
+        editCompFeeModel={editCompFeeModel}
+        setEditCompFeeModel={setEditCompFeeModel}
+        editCompPkgFirst={editCompPkgFirst}
+        setEditCompPkgFirst={setEditCompPkgFirst}
+        editCompPkgSecond={editCompPkgSecond}
+        setEditCompPkgSecond={setEditCompPkgSecond}
+        editCompPkgSub={editCompPkgSub}
+        setEditCompPkgSub={setEditCompPkgSub}
+        editCompPkgFive={editCompPkgFive}
+        setEditCompPkgFive={setEditCompPkgFive}
         saveCompsToStorage={saveCompsToStorage}
         triggerMsg={triggerMsg}
+      />
+
+      <AgeGroupDetailsModal
+        isOpen={showAgeGroupDetailsModal}
+        onClose={() => setShowAgeGroupDetailsModal(false)}
+        compName={activeComp?.name}
+        photoUrl={activeComp?.ageGroupDetailsPhotoUrl}
+        ageGroups={activeComp?.ageGroups}
+        onUploadPhoto={handleUploadAgeGroupChartPhoto}
+        onRemovePhoto={handleRemoveAgeGroupChartPhoto}
+        canManage={role === 'admin' || role === 'organizer'}
       />
       
       <RefereeAccommodationModal

@@ -16,6 +16,8 @@ interface ParentIndemnityFormProps {
   coaches?: Record<string, Coach>;
   triggerMsg: (text: string, type: 'error' | 'ok') => void;
   setScreen: (screen: string) => void;
+  onPlayerUpdated?: (player: Player) => void;
+  role?: string | null;
 }
 
 export default function ParentIndemnityForm({
@@ -25,7 +27,9 @@ export default function ParentIndemnityForm({
   indemnityCoach,
   coaches,
   triggerMsg,
-  setScreen
+  setScreen,
+  onPlayerUpdated,
+  role
 }: ParentIndemnityFormProps) {
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [playersList, setPlayersList] = useState<Player[]>([]);
@@ -230,21 +234,21 @@ export default function ParentIndemnityForm({
     try {
       setSubmitting(true);
       
-      const trimmedCanvas = sigCanvasRef.current?.getTrimmedCanvas();
+      const sourceCanvas = sigCanvasRef.current?.getCanvas();
       let signatureDataUrl = '';
-      if (trimmedCanvas) {
+      if (sourceCanvas) {
         // Paint a white background and compress the signature as a highly lightweight JPEG
         const compressCanvas = document.createElement('canvas');
-        compressCanvas.width = trimmedCanvas.width;
-        compressCanvas.height = trimmedCanvas.height;
+        compressCanvas.width = sourceCanvas.width;
+        compressCanvas.height = sourceCanvas.height;
         const ctx = compressCanvas.getContext('2d');
         if (ctx) {
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, compressCanvas.width, compressCanvas.height);
-          ctx.drawImage(trimmedCanvas, 0, 0);
+          ctx.drawImage(sourceCanvas, 0, 0);
           signatureDataUrl = compressCanvas.toDataURL('image/jpeg', 0.8);
         } else {
-          signatureDataUrl = trimmedCanvas.toDataURL('image/png');
+          signatureDataUrl = sourceCanvas.toDataURL('image/png');
         }
       }
 
@@ -269,6 +273,9 @@ export default function ParentIndemnityForm({
       }
 
       await savePlayerToFirestore(updatedPlayer);
+      if (onPlayerUpdated) {
+        onPlayerUpdated(updatedPlayer);
+      }
       setSubmitted(true);
       triggerMsg('Parental Indemnity Form submitted successfully!', 'ok');
     } catch (err) {
@@ -315,6 +322,16 @@ export default function ParentIndemnityForm({
         <p className="text-xs text-text-dim italic">
           Your club Head Coach has been notified in real-time. You may now close this browser tab safely.
         </p>
+
+        <button
+          onClick={() => {
+            window.history.pushState({}, '', window.location.pathname);
+            setScreen(role ? (role === 'admin' ? 'adminCompDetail' : role === 'organizer' ? 'organizerDashboard' : 'coachRoster') : 'login');
+          }}
+          className="w-full bg-surface-2 hover:bg-line border border-line text-text font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer"
+        >
+          {role ? 'Return to Dashboard' : 'Return to Portal Login'}
+        </button>
       </div>
     );
   }
@@ -331,6 +348,18 @@ export default function ParentIndemnityForm({
       <div className="max-w-xl mx-auto my-6 bg-surface rounded-2xl border border-line shadow-xl overflow-hidden animate-fade-in">
         {/* Banner */}
         <div className="p-6 bg-gradient-to-b from-gold/10 to-transparent border-b border-line text-center relative">
+          <button
+            type="button"
+            onClick={() => {
+              window.history.pushState({}, '', window.location.pathname);
+              setScreen(role ? (role === 'admin' ? 'adminCompDetail' : role === 'organizer' ? 'organizerDashboard' : 'coachRoster') : 'login');
+            }}
+            className="absolute right-4 top-4 text-xs text-text-dim hover:text-gold flex items-center gap-1 font-semibold transition cursor-pointer bg-surface-2/70 hover:bg-line px-2.5 py-1 rounded-lg border border-line"
+            title="Return to main portal"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>{role ? 'Back to App' : 'Login'}</span>
+          </button>
           <Trophy className="w-8 h-8 text-gold mx-auto mb-1.5" />
           <h2 className="text-lg font-bold uppercase tracking-wider text-text">{indemnityComp.name}</h2>
           <p className="text-xs text-text-dim">Parental Consent & Liability Release Portal</p>
@@ -505,6 +534,19 @@ export default function ParentIndemnityForm({
             <span className="hidden sm:inline">Choose another</span>
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => {
+            window.history.pushState({}, '', window.location.pathname);
+            setScreen(role ? (role === 'admin' ? 'adminCompDetail' : role === 'organizer' ? 'organizerDashboard' : 'coachRoster') : 'login');
+          }}
+          className="absolute right-4 top-6 text-xs text-text-dim hover:text-gold flex items-center gap-1 font-semibold transition cursor-pointer bg-surface-2/70 hover:bg-line px-2.5 py-1 rounded-lg border border-line"
+          title="Return to main portal"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>{role ? 'Back to App' : 'Login'}</span>
+        </button>
 
         <Trophy className="w-8 h-8 text-gold mx-auto mb-1.5" />
         <h2 className="text-lg font-bold uppercase tracking-wider text-text">Parental Consent & Indemnity</h2>

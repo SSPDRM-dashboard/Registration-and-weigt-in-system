@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, X, Search, CheckCircle, Clock, Eye, Copy, Share2 } from 'lucide-react';
+import { Shield, X, Search, CheckCircle, Clock, Eye, Copy, Share2, ExternalLink } from 'lucide-react';
 import { Player } from '../../types';
 
 interface IndemnityDashboardModalProps {
@@ -12,6 +12,7 @@ interface IndemnityDashboardModalProps {
   indemnityFilterStatus: 'All' | 'Completed' | 'Pending';
   setIndemnityFilterStatus: (status: 'All' | 'Completed' | 'Pending') => void;
   onViewIndemnity: (player: Player) => void;
+  onOpenIndemnityForm?: (player: Player) => void;
   triggerMsg: (text: string, type: 'error' | 'ok') => void;
 }
 
@@ -25,6 +26,7 @@ export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = (
   indemnityFilterStatus,
   setIndemnityFilterStatus,
   onViewIndemnity,
+  onOpenIndemnityForm,
   triggerMsg,
 }) => {
   if (!isOpen) return null;
@@ -158,7 +160,7 @@ export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = (
                   </thead>
                   <tbody className="divide-y divide-line">
                     {filteredIndemnityAthletes.map((athlete) => {
-                      const linkUrl = `${window.location.origin}${window.location.pathname}?screen=parentIndemnity&athleteId=${athlete.id}`;
+                      const linkUrl = `${window.location.origin}${window.location.pathname}?screen=parentIndemnity&athleteId=${athlete.id}&indemnityComp=${athlete.compId || ''}`;
                       const waText = encodeURIComponent(
                         `Hi Parent/Guardian, please complete and digitally sign the official Taekwondo Tournament Indemnity Form for ${athlete.name}: ${linkUrl}`
                       );
@@ -209,6 +211,19 @@ export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = (
                                 </button>
                               ) : (
                                 <>
+                                  {onOpenIndemnityForm && (
+                                    <button
+                                      onClick={() => {
+                                        onClose();
+                                        onOpenIndemnityForm(athlete);
+                                      }}
+                                      className="bg-gold/15 hover:bg-gold/25 text-gold border border-gold/30 font-bold px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-wide transition cursor-pointer flex items-center gap-1"
+                                      title="Open and fill indemnity form directly"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                      <span>Open Form</span>
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => {
                                       navigator.clipboard.writeText(linkUrl);

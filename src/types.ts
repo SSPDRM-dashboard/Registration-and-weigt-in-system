@@ -66,6 +66,7 @@ export interface Competition {
   genders: string[];
   ageGroups: string[];
   weightClasses: string[];
+  eventWeightClasses?: Record<string, string[]>;
   isActive?: boolean;
   idCardBgUrl?: string;
   idCardFields?: IdCardField[];
@@ -89,6 +90,7 @@ export interface Competition {
   hideScaleReadout?: boolean;
   affiliatedClubs?: string[];
   rings?: string[];
+  ageGroupDetailsPhotoUrl?: string;
 }
 
 export interface Coach {
