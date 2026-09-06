@@ -2345,6 +2345,80 @@ export default function App() {
     }
   };
 
+  const handleRemoveRefereeFromComp = async (refId: string) => {
+    try {
+      await deleteRefereeFromFirestore(refId);
+      const updated = referees.filter(r => r.id !== refId);
+      setReferees(updated);
+      setConfirmDeleteRefereeId(null);
+      if (inlineSelectedReferee?.id === refId) {
+        setInlineSelectedReferee(null);
+        setInlineSelectedRole('None');
+      }
+      triggerMsg('Referee removed from tournament.', 'ok');
+    } catch (err) {
+      console.error(err);
+      triggerMsg('Failed to remove referee.', 'error');
+    }
+  };
+
+  const handleExportRefereeLedger = () => {
+    if (!activeComp) return;
+    
+    const compRefs = referees.filter(r => r.compId === activeComp.id);
+    
+    const headers = [
+      "Name",
+      "NRIC/Passport",
+      "Phone",
+      "Club",
+      "State",
+      "Role",
+      "Distance (KM)",
+      "Accommodation",
+      "Bank Name",
+      "Bank Account",
+      "Daily Rate",
+      "Total Days",
+      "Travel Pay",
+      "Overtime Pay",
+      "Other Pay",
+      "Total Payout"
+    ];
+    
+    const rows = compRefs.map(r => {
+      const allowance = getRefereeAllowance(r, refereeFees, activeComp.currency);
+      return [
+        `"${r.fullName}"`,
+        `'${r.nric || ''}'`,
+        `'${r.phone || ''}'`,
+        `"${r.clubName || ''}"`,
+        `"${r.residentialLocation || ''}"`,
+        `"${r.specialRole || 'Standard'}"`,
+        r.distance || 0,
+        r.accommodation || 'No',
+        `"${r.bankName || ''}"`,
+        `'${r.bankAccount || ''}'`,
+        allowance.dailyRate,
+        allowance.days,
+        allowance.travelPay,
+        allowance.otPay,
+        allowance.othersPay,
+        allowance.totalPay
+      ].join(',');
+    });
+    
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${activeComp.name.replace(/\s+/g, '_')}_Referee_Ledger.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleRicLogin = () => {
     const ic = ricLoginNric.trim();
     if (!ic) {
@@ -12516,14 +12590,42 @@ export default function App() {
                                   {selectedRef.clubName || 'No Club'} • {selectedRef.phone || 'No Phone'}
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenRefereeEditProfile(selectedRef)}
-                                className="text-[9px] font-bold text-gold hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-                                title="Open full referee profile"
-                              >
-                                <ExternalLink className="w-3 h-3" /> Edit Full Profile
-                              </button>
+                              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRefereeEditProfile(selectedRef)}
+                                  className="text-[9px] font-bold text-gold hover:underline flex items-center gap-1 cursor-pointer"
+                                  title="Open full referee profile"
+                                >
+                                  <ExternalLink className="w-3 h-3" /> Edit Full Profile
+                                </button>
+                                {confirmDeleteRefereeId === selectedRef.id ? (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveRefereeFromComp(selectedRef.id)}
+                                      className="text-[9px] bg-red-600 hover:bg-red-700 text-white font-bold px-2 py-0.5 rounded shadow-sm transition"
+                                    >
+                                      Confirm Remove
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteRefereeId(null)}
+                                      className="text-[9px] bg-surface-2 border border-line text-text hover:bg-line px-2 py-0.5 rounded transition"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteRefereeId(selectedRef.id)}
+                                    className="text-[9px] font-bold text-red-500 hover:text-red-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3 h-3" /> Remove Referee
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Role Selector Grid */}
@@ -12681,7 +12783,7 @@ export default function App() {
                   >
                     <Plus className="w-3 h-3" /> Add Referee
                   </button>
-                  <button className="bg-gold text-ink px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider hover:opacity-90 transition flex items-center gap-1.5">
+                  <button onClick={handleExportRefereeLedger} className="bg-gold text-ink px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider hover:opacity-90 transition flex items-center gap-1.5">
                     <Download className="w-3 h-3" /> Export Ledger to Excel
                   </button>
                 </div>
@@ -13124,19 +13226,32 @@ export default function App() {
 
                           {/* 9. ACTIONS */}
                           <td className="py-3.5 px-4 align-top text-center min-w-[100px]">
-                            <button
-                              onClick={async () => {
-                                if (window.confirm(`Remove ${r.fullName} from officiating?`)) {
-                                  const updatedRefs = referees.filter(x => x.id !== r.id);
-                                  setReferees(updatedRefs);
-                                  localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
-                                }
-                              }}
-                              className="text-xs font-semibold border border-red-500/40 text-red-500 bg-red-500/10 hover:bg-red-500/20 px-3.5 py-1.5 rounded-lg transition active:scale-95 cursor-pointer shadow-sm"
-                              title="Remove referee from officiating list"
-                            >
-                              Remove
-                            </button>
+                            {confirmDeleteRefereeId === r.id ? (
+                              <div className="flex flex-col gap-1 items-center">
+                                <button
+                                  onClick={async () => {
+                                    await handleRemoveRefereeFromComp(r.id);
+                                  }}
+                                  className="text-[10px] font-bold bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded shadow-sm transition"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteRefereeId(null)}
+                                  className="text-[10px] text-text-dim hover:text-white transition"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDeleteRefereeId(r.id)}
+                                className="text-xs font-semibold border border-red-500/40 text-red-500 bg-red-500/10 hover:bg-red-500/20 px-3.5 py-1.5 rounded-lg transition active:scale-95 cursor-pointer shadow-sm"
+                                title="Remove referee from officiating list"
+                              >
+                                Remove
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

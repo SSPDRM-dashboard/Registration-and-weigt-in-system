@@ -18,7 +18,7 @@ import { Competition, Player, Coach, Organizer, Referee } from './types';
 
 // Suppress non-critical connection retry warnings in dev/sandboxed environments
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {
   // ignore
 }
@@ -52,7 +52,7 @@ export interface FirestoreErrorInfo {
 const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
-  experimentalAutoDetectLongPolling: true,
+  experimentalForceLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId || "ai-studio-remixdojangreg-319c83eb-bdb0-4d44-85fd-888ad8af99fe");
 const auth = getAuth(app);
 
@@ -476,7 +476,9 @@ export async function fetchRefereesForComp(compId: string): Promise<Referee[]> {
     const snap = await getDocs(q);
     const rawList: { docId: string; data: Referee }[] = [];
     snap.forEach((doc) => {
-      rawList.push({ docId: doc.id, data: doc.data() as Referee });
+      const data = doc.data() as Referee;
+      data.id = doc.id;
+      rawList.push({ docId: doc.id, data });
     });
     
     const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
@@ -529,10 +531,12 @@ export async function saveRefereeToFirestore(referee: Referee): Promise<void> {
 
 export async function deleteRefereeFromFirestore(refereeId: string): Promise<void> {
   try {
+    if (!refereeId) throw new Error("Missing referee ID");
     const docRef = doc(db, 'referees', refereeId);
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `referees/${refereeId}`);
+    throw error;
   }
 }
 
@@ -543,7 +547,9 @@ export function subscribeToRefereesForComp(compId: string, callback: (referees: 
   const unsubscribe = onSnapshot(q, (snap) => {
     const rawList: { docId: string; data: Referee }[] = [];
     snap.forEach((doc) => {
-      rawList.push({ docId: doc.id, data: doc.data() as Referee });
+      const data = doc.data() as Referee;
+      data.id = doc.id;
+      rawList.push({ docId: doc.id, data });
     });
     
     const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
@@ -635,6 +641,7 @@ export function subscribeToMyReferees(nricCleaned: string, callback: (referees: 
     const raw: Referee[] = [];
     snap.forEach((doc) => {
       const data = doc.data() as Referee;
+      data.id = doc.id;
       if (data.nric && data.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === nricCleaned) {
         raw.push(data);
       }
