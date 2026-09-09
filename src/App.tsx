@@ -2362,6 +2362,58 @@ export default function App() {
     }
   };
 
+  const handleExportClubPayment = (clubName: string, athletes: Player[], clubTotalAmount: number, isSpecialPackage: boolean) => {
+    if (!activeComp) return;
+    
+    const headers = [
+      "Name",
+      "NRIC/Passport",
+      "Event(s)",
+      "Age Group",
+      "Weight Class",
+      "Fee (Calculated)"
+    ];
+    
+    const sortedAthletes = [...athletes].sort((a, b) => a.name.localeCompare(b.name));
+    
+    const rows = sortedAthletes.map(p => {
+      let athleteFee = 0;
+      
+      if (!isSpecialPackage) {
+        const ev = (p.event || '').toLowerCase();
+        if (ev.includes('kyorugi')) athleteFee += parseFeeToNumber(activeComp?.kyorugiFee);
+        if (ev.includes('poomsae')) athleteFee += parseFeeToNumber(activeComp?.poomsaeFee);
+        if (ev.includes('para')) athleteFee += parseFeeToNumber(activeComp?.paraFee);
+        if (ev.includes('virtual')) athleteFee += parseFeeToNumber(activeComp?.virtualFee);
+        if (ev.includes('kyukpa')) athleteFee += parseFeeToNumber(activeComp?.kyukpaFee);
+        if (ev.includes('speed kicking')) athleteFee += parseFeeToNumber(activeComp?.speedKickingFee);
+        if (ev.includes('skipping rope')) athleteFee += parseFeeToNumber(activeComp?.skippingRopeFee);
+      }
+      
+      return [
+        `"${p.name}"`,
+        `'${p.ic || ''}'`,
+        `"${p.event || ''}"`,
+        `"${p.ageGroup || ''}"`,
+        `"${p.weightClass || ''}"`,
+        isSpecialPackage ? "Bundled Package" : formatCurrency(athleteFee, '', activeComp?.currency)
+      ].join(',');
+    });
+    
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + headers.join(',') + "\n" 
+      + rows.join('\n') + "\n\n"
+      + `,,,,,Total Amount:,${formatCurrency(clubTotalAmount, '', activeComp?.currency)}`;
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Payment_Details_${clubName.replace(/[^a-zA-Z0-9]/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleExportRefereeLedger = () => {
     if (!activeComp) return;
     
@@ -11367,10 +11419,25 @@ export default function App() {
                         
                         const sampleFee = activeComp?.kyorugiFee || activeComp?.poomsaeFee || activeComp?.paraFee || activeComp?.virtualFee || activeComp?.kyukpaFee || activeComp?.speedKickingFee || activeComp?.skippingRopeFee || (isSpecialPackage ? (activeComp?.packageFirstEventFee || '80') : '');
                         const totalAmountFormatted = formatCurrency(clubTotalAmount, sampleFee, activeComp?.currency);
+                        const clubCoaches = Object.values(coaches).filter(c => c.club && c.club.toUpperCase() === club.toUpperCase());
 
                         return (
                           <tr key={club} className="hover:bg-surface-2/50 transition">
-                            <td className="p-4 text-text-dim font-medium">{club}</td>
+                            <td className="p-4 text-text-dim font-medium">
+                              <div className="flex flex-col gap-1">
+                                <span className="text-sm font-bold text-text">{club}</span>
+                                {clubCoaches.length > 0 && (
+                                  <div className="flex flex-col gap-0.5 mt-1 border-t border-line/30 pt-1">
+                                    {clubCoaches.map((c, idx) => (
+                                      <div key={idx} className="flex flex-col text-[10px]">
+                                        <span className="text-text-dim font-semibold">Coach: {c.name}</span>
+                                        <span className="text-text-dim opacity-80">{c.phone} | {c.email}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
                             <td className="p-4 text-center font-mono text-text">{counts.kyorugi > 0 ? counts.kyorugi : '-'}</td>
                             <td className="p-4 text-center font-mono text-text">{counts.poomsae > 0 ? counts.poomsae : '-'}</td>
                             <td className="p-4 text-center font-mono text-text">{counts.para > 0 ? counts.para : '-'}</td>
@@ -11381,19 +11448,29 @@ export default function App() {
                             <td className="p-4 text-center font-mono font-bold text-text">{counts.total}</td>
                             <td className="p-4 text-center font-mono font-bold text-gold">{totalAmountFormatted}</td>
                             <td className="p-4 text-center">
-                              {receipt ? (
+                              <div className="flex flex-col gap-2 items-center">
+                                {receipt ? (
+                                  <button
+                                    onClick={() => setSelectedClubReceipt({ clubName: club, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
+                                    className="bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/60 px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer w-full max-w-[110px]"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>View Receipt</span>
+                                  </button>
+                                ) : (
+                                  <span className="bg-red-950 text-red-400 border border-red-900/40 px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center justify-center select-none w-full max-w-[110px]">
+                                    Pending Receipt
+                                  </span>
+                                )}
                                 <button
-                                  onClick={() => setSelectedClubReceipt({ clubName: club, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
-                                  className="bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/60 px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 mx-auto cursor-pointer"
+                                  onClick={() => handleExportClubPayment(club, counts.athletes, clubTotalAmount, Boolean(isSpecialPackage))}
+                                  className="bg-surface-2 text-gold hover:bg-line border border-gold/30 hover:border-gold/60 px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer w-full max-w-[110px]"
+                                  title="Download Payment Details Ledger"
                                 >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>View Receipt</span>
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>Details</span>
                                 </button>
-                              ) : (
-                                <span className="bg-red-950 text-red-400 border border-red-900/40 px-2.5 py-1 rounded-lg text-[10px] font-medium inline-block select-none">
-                                  Pending Receipt
-                                </span>
-                              )}
+                              </div>
                             </td>
                           </tr>
                         );
