@@ -11,7 +11,8 @@ import {
   where,
   onSnapshot,
   getDoc,
-  setLogLevel
+  setLogLevel,
+  deleteField
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
@@ -512,13 +513,18 @@ export async function saveRefereeToFirestore(referee: Referee): Promise<void> {
       ? `${referee.compId}_${cleanIc}` 
       : (referee.id || (cleanIc ? `ACC_${cleanIc}` : `REF_${Date.now()}`));
 
-    const normalizedReferee: Referee = {
+    const normalizedReferee: any = {
       ...referee,
       id: canonicalId,
     };
+    
+    // Explicitly delete undefined fields from Firestore using deleteField()
+    if (normalizedReferee.kyorugiDays === undefined) normalizedReferee.kyorugiDays = deleteField();
+    if (normalizedReferee.poomsaeDays === undefined) normalizedReferee.poomsaeDays = deleteField();
+    if (normalizedReferee.virtualDays === undefined) normalizedReferee.virtualDays = deleteField();
 
     const docRef = doc(db, 'referees', canonicalId);
-    await setDoc(docRef, normalizedReferee);
+    await setDoc(docRef, normalizedReferee, { merge: true });
 
     // If there was an old prefix (e.g. RIC_... or REF_...), clean it up
     if (referee.id && referee.id !== canonicalId) {

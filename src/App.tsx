@@ -2365,7 +2365,7 @@ export default function App() {
   const handleExportRefereeLedger = () => {
     if (!activeComp) return;
     
-    const compRefs = referees.filter(r => r.compId === activeComp.id);
+    const compRefs = referees.filter(r => r.compId === activeComp.id).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
     
     const headers = [
       "Name",
@@ -2373,13 +2373,20 @@ export default function App() {
       "Phone",
       "Club",
       "State",
+      "Kyorugi Status",
+      "Poomsae Status",
       "Role",
       "Distance (KM)",
       "Accommodation",
       "Bank Name",
       "Bank Account",
-      "Daily Rate",
       "Total Days",
+      "Kyorugi Days",
+      "Kyorugi Pay",
+      "Poomsae Days",
+      "Poomsae Pay",
+      "Virtual Days",
+      "Virtual Pay",
       "Travel Pay",
       "Overtime Pay",
       "Other Pay",
@@ -2388,19 +2395,32 @@ export default function App() {
     
     const rows = compRefs.map(r => {
       const allowance = getRefereeAllowance(r, refereeFees, activeComp.currency);
+      
+      let kDays = allowance.kyorugiDays;
+      let kPay = allowance.kyorugiPay;
+      let pDays = allowance.poomsaeDays;
+      let pPay = allowance.poomsaePay;
+
       return [
         `"${r.fullName}"`,
         `'${r.nric || ''}'`,
         `'${r.phone || ''}'`,
         `"${r.clubName || ''}"`,
         `"${r.residentialLocation || ''}"`,
+        `"${r.kyorugiStatus || 'None'}"`,
+        `"${r.poomsaeStatus || 'None'}"`,
         `"${r.specialRole || 'Standard'}"`,
         r.distance || 0,
         r.accommodation || 'No',
         `"${r.bankName || ''}"`,
         `'${r.bankAccount || ''}'`,
-        allowance.dailyRate,
         allowance.days,
+        kDays,
+        kPay,
+        pDays,
+        pPay,
+        allowance.virtualDays,
+        allowance.virtualPay,
         allowance.travelPay,
         allowance.otPay,
         allowance.othersPay,
@@ -3759,21 +3779,24 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ab = evt.target?.result as ArrayBuffer;
+        const wb = XLSX.read(ab, { type: 'array' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         
         // Convert to JSON, array of arrays
-        const data = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
+        const data = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
         
-        // Extract the first column items, filter out empty, flatten
+        // Extract the first non-empty cell in each row, filter out empty, flatten
         const newItems: string[] = [];
         data.forEach(row => {
-          if (row && row.length > 0 && row[0]) {
-            const val = String(row[0]).trim();
-            if (val) {
-              newItems.push(val);
+          if (row && Array.isArray(row) && row.length > 0) {
+            const firstCell = row.find(cell => cell !== undefined && cell !== null && String(cell).trim() !== '');
+            if (firstCell) {
+              const val = String(firstCell).trim();
+              if (val) {
+                newItems.push(val);
+              }
             }
           }
         });
@@ -3784,14 +3807,14 @@ export default function App() {
           await saveGlobalClubs(combined);
           triggerMsg(`Successfully imported ${newItems.length} global clubs/states.`, 'ok');
         } else {
-          triggerMsg('No valid items found in the first column.', 'error');
+          triggerMsg('No valid items found in the uploaded file.', 'error');
         }
       } catch (err) {
         console.error(err);
         triggerMsg('Error parsing the file.', 'error');
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
     e.target.value = ''; // reset input
   };
 
@@ -12375,7 +12398,7 @@ export default function App() {
 
             {/* REFEREE ROLES CONFIGURATION */}
             {(() => {
-              const tourneyRefs = referees.filter(r => r.compId === activeComp.id);
+              const tourneyRefs = referees.filter(r => r.compId === activeComp.id).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
               const appointedRefs = tourneyRefs.filter(r => r.specialRole && r.specialRole !== 'None');
               const standardRefs = tourneyRefs.filter(r => !r.specialRole || r.specialRole === 'None');
 
@@ -12803,7 +12826,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line/50">
-                    {referees.filter(r => r.compId === activeComp.id).map(r => {
+                    {referees.filter(r => r.compId === activeComp.id).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')).map(r => {
                       const totalAllowance = getRefereeAllowance(r, refereeFees);
                       const refPass = r.password || refereeAccounts.find(a => a.nric && (a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === (r.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()))?.password || '••••••••';
                       return (
@@ -13056,7 +13079,7 @@ export default function App() {
                                     </div>
                                   </div>
 
-                                  {/* Merge Standard Button */}
+                                  {/* Revert to Standard Button */}
                                   <button
                                     type="button"
                                     onClick={async () => {
@@ -13068,14 +13091,15 @@ export default function App() {
                                         poomsaeDays: undefined,
                                         virtualDays: undefined
                                       };
+                                      
                                       const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                       setReferees(updatedRefs);
                                       localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
                                       saveRefereeToFirestore(updatedRef).catch(() => {});
                                     }}
-                                    className="text-red-500 hover:text-red-400 text-xs font-semibold text-center mt-1 cursor-pointer transition tracking-wide select-none"
+                                    className="text-red-500 hover:text-red-400 text-[10px] font-semibold text-center mt-1 cursor-pointer transition tracking-wide select-none bg-red-500/10 hover:bg-red-500/20 px-2 py-1 rounded-md"
                                   >
-                                    Merge Standard
+                                    Revert to Standard
                                   </button>
                                 </div>
 
@@ -13502,12 +13526,13 @@ export default function App() {
         refereeFees={refereeFees}
         refereeAccounts={refereeAccounts}
         saveRefereeToFirestore={async (ref) => {
+            await saveRefereeToFirestore(ref);
             const updated = [...referees.filter(r => r.id !== ref.id), ref];
             setReferees(updated);
             localStorage.setItem(`app:referees:${activeComp?.id}`, JSON.stringify(updated));
         }}
         saveRefereeAccount={async (ref) => {
-            const updated = [...refereeAccounts.filter(r => r.id !== ref.id), ref];
+            const updated = [...refereeAccounts.filter(r => r.nric !== ref.nric), ref];
             setRefereeAccounts(updated);
             localStorage.setItem('app:refereeAccounts', JSON.stringify(updated));
         }}
