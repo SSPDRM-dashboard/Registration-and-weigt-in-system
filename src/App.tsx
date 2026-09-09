@@ -7388,9 +7388,9 @@ export default function App() {
             </button>
 
             {(() => {
-              const p = players.find(pl => pl.id === selectedPlayerId);
-              if (!p) return <div className="text-center text-slate-400 py-12">Athlete profile not found.</div>;
-              const belt = beltColorFor(p.ageGroup);
+              const p = players.find(pl => pl.id === selectedPlayerId) || (staffPasses.find(sp => sp.id === selectedPlayerId) as unknown as Player);
+              if (!p) return <div className="text-center text-slate-400 py-12">Profile not found.</div>;
+              const belt = beltColorFor(p.ageGroup || '');
               const fields = getIdCardFields(activeComp);
 
               const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
@@ -10772,11 +10772,12 @@ export default function App() {
                       <span>Download Total Summary (Excel)</span>
                     </button>
                     <button 
-                      onClick={() => setShowPrintAllCardsModal(true)}
-                      className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                      onClick={() => downloadAllSelectedCards(players)}
+                      disabled={isDownloadingAll}
+                      className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Printer className="w-4 h-4" />
-                      <span>Print & Download ID Cards</span>
+                      <span>{isDownloadingAll ? 'Generating ZIP...' : 'Print & Download ID Cards'}</span>
                     </button>
                   </div>
                 )}
@@ -11527,11 +11528,12 @@ export default function App() {
                         <Download className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => setShowPrintAllCardsModal(true)}
-                        className="bg-gold hover:opacity-90 text-ink font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer whitespace-nowrap"
+                        onClick={() => downloadAllSelectedCards(players)}
+                        disabled={isDownloadingAll}
+                        className="bg-gold hover:opacity-90 text-ink font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Printer className="w-4 h-4" />
-                        <span>Print All</span>
+                        <span>{isDownloadingAll ? 'Wait...' : 'Print All'}</span>
                       </button>
                     </div>
                   )}
@@ -12196,9 +12198,21 @@ export default function App() {
 
             {/* Right Column: List */}
             <div className="lg:col-span-8 bg-surface rounded-2xl border border-line p-6 shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-text mb-4 border-b border-line/50 pb-3">
-                Generated Staff Passes ({staffPasses.length})
-              </h3>
+              <div className="flex justify-between items-center mb-4 border-b border-line/50 pb-3">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text">
+                  Generated Staff Passes ({staffPasses.length})
+                </h3>
+                {staffPasses.length > 0 && (
+                  <button
+                    onClick={() => downloadAllSelectedCards(staffPasses)}
+                    disabled={isDownloadingAll}
+                    className="bg-gold hover:opacity-90 text-ink font-bold px-3 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>{isDownloadingAll ? 'Generating ZIP...' : 'Download Passes (ZIP)'}</span>
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {staffPasses.map(p => (
                   <div key={p.id} className="bg-ink border border-line rounded-xl p-4 flex flex-col justify-between">
@@ -12207,12 +12221,23 @@ export default function App() {
                       <div className="text-xs text-gold font-semibold uppercase">{p.event}</div>
                       <div className="text-[10px] text-text-dim mt-1 uppercase tracking-wider">{p.club}</div>
                     </div>
-                    <button
-                      onClick={() => setStaffPasses(staffPasses.filter(sp => sp.id !== p.id))}
-                      className="mt-3 text-[10px] text-red-500 hover:text-red-400 font-bold uppercase tracking-wider text-left cursor-pointer"
-                    >
-                      Delete Pass
-                    </button>
+                    <div className="mt-4 flex items-center justify-between border-t border-line/40 pt-3">
+                      <button
+                        onClick={() => {
+                          setSelectedPlayerId(p.id);
+                          setScreen('idCard');
+                        }}
+                        className="text-[10px] text-gold hover:text-white font-bold uppercase tracking-wider cursor-pointer flex items-center gap-1"
+                      >
+                        <Eye className="w-3 h-3" /> Preview
+                      </button>
+                      <button
+                        onClick={() => setStaffPasses(staffPasses.filter(sp => sp.id !== p.id))}
+                        className="text-[10px] text-red-500 hover:text-red-400 font-bold uppercase tracking-wider cursor-pointer flex items-center gap-1"
+                      >
+                        <X className="w-3 h-3" /> Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {staffPasses.length === 0 && (
@@ -13728,6 +13753,195 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* HIDDEN BATCH RENDERER FOR ID CARDS AND STAFF PASSES */}
+      <div className="absolute top-[-9999px] left-[-9999px] z-[-1] opacity-0 pointer-events-none">
+        {activeComp && [...players, ...staffPasses.map(sp => ({ ...sp, ageGroup: 'STAFF', gender: '', weightClass: '', dob: '', poomsaePattern: '', ic: '', photo: '' } as unknown as Player))].map(p => {
+          const belt = beltColorFor(p.ageGroup || '');
+          const fieldsList = getIdCardFields(activeComp);
+          
+          const getFontSizePx = (size: 'xs' | 'sm' | 'base' | 'lg' | 'xl' | '2xl' | '3xl', defaultVal: string): string => {
+            const map: Record<string, string> = {
+              'xs': '9px',
+              'sm': '11px',
+              'base': '13px',
+              'lg': '16px',
+              'xl': '20px',
+              '2xl': '24px',
+              '3xl': '28px'
+            };
+            return map[size] || defaultVal;
+          };
+
+          return (
+            <div 
+              key={`batch-${p.id}`}
+              id={`batch-card-${p.id}`}
+              className="w-[336px] h-[480px] bg-gradient-to-br from-[#12211C] to-[#0A1310] border border-slate-700/60 rounded-3xl overflow-hidden relative flex flex-col justify-between shrink-0"
+            >
+              {activeComp.idCardBgUrl && (
+                <>
+                  <div className="absolute inset-0 z-0 bg-cover bg-center" style={{ backgroundImage: `url(${activeComp.idCardBgUrl})` }} />
+                  <div className="absolute inset-0 z-0 bg-black/40 mix-blend-multiply" />
+                </>
+              )}
+              
+              <div className="relative z-10 h-full flex flex-col justify-between text-[11px] py-3">
+                {fieldsList.filter(f => f.visible).map(field => {
+                  if (field.id === 'header') {
+                    return (
+                      <div key="header" className={`h-8 bg-gradient-to-r from-[#D32F2F] via-[#D32F2F] to-[#1976D2] flex ${
+                        field.align === 'left' ? 'justify-start gap-1.5' :
+                        field.align === 'right' ? 'justify-end gap-1.5' :
+                        field.align === 'center' ? 'justify-center gap-1.5' :
+                        'justify-between'
+                      } items-center px-3.5 shrink-0 shadow-sm w-full`}>
+                        <span className="font-display font-bold tracking-wider uppercase drop-shadow-sm truncate" style={{ fontSize: (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') ? `${parseInt(getFontSizePx(field.fontSize, '8px'), 10) + 3}px` : getFontSizePx(field.fontSize, '8px'), color: field.color || '#ffffff' }}>{activeComp.name}</span>
+                      </div>
+                    );
+                  }
+                  if (field.id === 'belt') {
+                    return (
+                      <div key="belt" className="h-1.5 w-full shrink-0" style={{ backgroundColor: belt }}></div>
+                    );
+                  }
+
+                  return (
+                    <div key={field.id} className="px-4.5 py-1 shrink-0">
+                      {(() => {
+                        if (field.id === 'photo') {
+                          return (
+                            <div className={`flex ${
+                              field.align === 'left' ? 'justify-start' :
+                              field.align === 'right' ? 'justify-end' :
+                              'justify-center'
+                            }`}>
+                              <div className="w-[105px] h-[135px] bg-slate-900 border-[3px] border-white/20 shadow-xl overflow-hidden relative rounded-xl">
+                                {p.photo ? (
+                                  <img src={p.photo} alt={p.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center opacity-30">
+                                    <User className="w-12 h-12 text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+                        if (field.id === 'name') {
+                          return (
+                            <div className={
+                              field.align === 'left' ? 'text-left' :
+                              field.align === 'right' ? 'text-right' :
+                              'text-center'
+                            }>
+                              <h3 className="font-display font-bold leading-tight tracking-wide uppercase line-clamp-2" style={{ fontSize: getFontSizePx(field.fontSize, '12px'), color: field.color || '#ffffff' }}>{p.name}</h3>
+                            </div>
+                          );
+                        }
+                        if (field.id === 'club') {
+                          return (
+                            <div className={
+                              field.align === 'left' ? 'text-left' :
+                              field.align === 'right' ? 'text-right' :
+                              'text-center'
+                            }>
+                              <p className="uppercase tracking-widest font-semibold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#a0aec0' }}>{p.club}</p>
+                            </div>
+                          );
+                        }
+                        if (field.id === 'athleteId') {
+                          if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') return null;
+                          return (
+                            <div className={
+                              field.align === 'left' ? 'text-left' :
+                              field.align === 'right' ? 'text-right' :
+                              'text-center'
+                            }>
+                              <span className="inline-block bg-surface border border-line font-mono px-1.5 py-0.5 rounded font-bold" style={{ fontSize: getFontSizePx(field.fontSize, '8px'), color: field.color || '#D4AF37' }}>{p.id}</span>
+                            </div>
+                          );
+                        }
+                        if (field.id === 'metadata') {
+                          if (p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') {
+                            return (
+                              <div key="metadata" className="px-4 py-1 shrink-0 flex items-center justify-center border-t border-line/30 pt-4 pb-2">
+                                <span 
+                                  className="font-display font-bold tracking-widest uppercase text-white" 
+                                  style={{ 
+                                    fontSize: `${parseInt(getFontSizePx(field.fontSize, '20px'), 10) + 10}px`, 
+                                    color: field.color || '#ffffff' 
+                                  }}
+                                >
+                                  {p.event}
+                                </span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className={`grid grid-cols-2 gap-2 text-[9px] border-t border-line/30 pt-2 ${
+                              field.align === 'left' ? 'text-left' :
+                              field.align === 'right' ? 'text-right' :
+                              'text-center'
+                            }`}>
+                              <div>
+                                <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Category</span>
+                                <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.ageGroup}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">Gender</span>
+                                <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.gender}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold font-sans">Weight</span>
+                                <span className="font-medium line-clamp-1" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[6px] text-text-dim/60 uppercase tracking-widest font-bold">DOB</span>
+                                <span className="font-medium" style={{ fontSize: getFontSizePx(field.fontSize, '9px'), color: field.color || '#ffffff' }}>{p.dob}</span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        if (field.id === 'qrcode') {
+                          const containerClass = 
+                            field.align === 'right' ? 'flex flex-row-reverse items-center justify-between' :
+                            field.align === 'center' ? 'flex flex-col items-center justify-center gap-1.5 text-center' :
+                            'flex items-center justify-between';
+                          
+                          const textAlignmentClass = 
+                            field.align === 'right' ? 'text-left min-w-0' :
+                            field.align === 'center' ? 'text-center min-w-0' :
+                            'text-right min-w-0';
+
+                          return (
+                            <div className={`${containerClass} border-t border-dashed border-line/30 pt-2`}>
+                              <div className="bg-white p-0.5 rounded inline-block shadow shrink-0">
+                                <QRCodeSVG 
+                                  value={`${activeComp.id}::${p.id}`} 
+                                  size={32} 
+                                  level="M" 
+                                  includeMargin={false}
+                                />
+                              </div>
+                              <div className={textAlignmentClass}>
+                                {!(p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF') && <p className="font-display font-bold uppercase tracking-wider bg-slate-950/30 px-1.5 py-0.5 rounded border border-white/10 text-white inline-block mb-1" style={{ fontSize: getFontSizePx(field.fontSize, '8px') }}>{p.event}</p>}
+                                  <p className="font-display font-bold uppercase tracking-wider" style={{ fontSize: getFontSizePx(field.fontSize, '7px'), color: field.color || '#D4AF37' }}>Tournament Entry Pass</p>
+                                <p className="mt-0.5 leading-normal text-[6px]" style={{ fontSize: getFontSizePx(field.fontSize, '6px'), color: field.color || '#a0aec0', opacity: 0.85 }}>Scan to digitally verify {p.id.startsWith('STAFF-') || p.ageGroup === 'STAFF' ? 'personnel.' : 'athlete.'}</p>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
     </div>
   );
