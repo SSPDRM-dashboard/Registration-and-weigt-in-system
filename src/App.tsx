@@ -1280,7 +1280,7 @@ export default function App() {
           venue: 'National Taekwondo Arena',
           date: '2026-09-12',
           staffCode: 'weighin123',
-          events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
+          events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
           genders: ['Male', 'Female', 'Mix'],
           ageGroups: [
             'Super Cadet (9 To 10 Years Old)', 'Super Cadet (9 to 11 Years Old)', 'Cadet (11 to 12 Years Old)',
@@ -1321,10 +1321,10 @@ export default function App() {
       }
 
       // Ensure all loaded competitions include Kyukpa, Speed Kicking, and Skipping Rope in their events list
-      const standardEventsRequired = ['Kyukpa', 'Speed Kicking', 'Skipping Rope'];
+      const standardEventsRequired = ['Kyukpa', 'Speed Kicking', 'Skipping Rope', 'Recognize Poomsae 2'];
       let hadMissingEvents = false;
       loadedComps = loadedComps.map(c => {
-        const eventsList = c.events ? [...c.events] : ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'];
+        const eventsList = c.events ? [...c.events] : ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'];
         let changed = false;
         standardEventsRequired.forEach(ev => {
           if (!eventsList.includes(ev)) {
@@ -3315,7 +3315,7 @@ export default function App() {
       endDate: ncEndDate || '',
       registrationCloseDate: ncRegistrationCloseDate || '',
       staffCode: ncCode || 'weighin123',
-      events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
+      events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
       genders: ['Male', 'Female', 'Mix'],
       ageGroups: [],
       weightClasses: [],
@@ -3770,7 +3770,7 @@ export default function App() {
   const handleAddAllStandardEvents = async () => {
     if (!compId) return;
     const STANDARD_ALL = [
-      'Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae',
+      'Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae',
       'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'
     ];
     const updated = competitions.map(c => {
