@@ -16,6 +16,14 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
+import { 
+  BASELINE_GLOBAL_CLUBS, 
+  BASELINE_COMPETITIONS, 
+  BASELINE_TERESA_PLAYERS, 
+  BASELINE_COACHES, 
+  BASELINE_ORGANIZERS, 
+  BASELINE_REFEREE_ACCOUNTS 
+} from './baselineData';
 
 // Suppress non-critical connection retry warnings in dev/sandboxed environments
 try {
@@ -72,6 +80,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     return;
   }
 
+  // Suppress quota errors
+  if (errMsg.includes('Quota limit exceeded')) {
+    console.warn(`[Firestore Quota Exceeded] Operation ${operationType} on ${path} will rely on local fallback.`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
     error: errMsg,
     authInfo: {
@@ -101,11 +115,21 @@ export async function fetchCompetitions(): Promise<Competition[]> {
     snap.forEach((doc) => {
       list.push(doc.data() as Competition);
     });
-    return list;
+    if (list.length > 0) {
+      try { localStorage.setItem('app:competitions', JSON.stringify(list)); } catch (e) {}
+      return list;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'competitions');
-    return [];
   }
+  try {
+    const cached = localStorage.getItem('app:competitions');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return BASELINE_COMPETITIONS;
 }
 
 export async function saveCompetition(comp: Competition): Promise<void> {
@@ -137,11 +161,21 @@ export async function fetchCoaches(): Promise<Record<string, Coach>> {
         coaches[data.username] = data;
       }
     });
-    return coaches;
+    if (Object.keys(coaches).length > 0) {
+      try { localStorage.setItem('app:coaches', JSON.stringify(coaches)); } catch (e) {}
+      return coaches;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'coaches');
-    return {};
   }
+  try {
+    const cached = localStorage.getItem('app:coaches');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && Object.keys(parsed).length > 0) return parsed;
+    }
+  } catch (e) {}
+  return BASELINE_COACHES;
 }
 
 export async function saveCoach(coach: Coach): Promise<void> {
@@ -174,11 +208,21 @@ export async function fetchOrganizers(): Promise<Record<string, Organizer>> {
         organizers[data.username] = data;
       }
     });
-    return organizers;
+    if (Object.keys(organizers).length > 0) {
+      try { localStorage.setItem('app:organizers', JSON.stringify(organizers)); } catch (e) {}
+      return organizers;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'organizers');
-    return {};
   }
+  try {
+    const cached = localStorage.getItem('app:organizers');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && Object.keys(parsed).length > 0) return parsed;
+    }
+  } catch (e) {}
+  return BASELINE_ORGANIZERS;
 }
 
 export async function saveOrganizer(organizer: Organizer): Promise<void> {
@@ -246,11 +290,24 @@ export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
     snap.forEach((doc) => {
       players.push(doc.data() as Player);
     });
-    return players;
+    if (players.length > 0) {
+      try { localStorage.setItem(`app:players:${compId}`, JSON.stringify(players)); } catch (e) {}
+      return players;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
-    return [];
   }
+  try {
+    const cached = localStorage.getItem(`app:players:${compId}`);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  if (compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'))) {
+    return BASELINE_TERESA_PLAYERS;
+  }
+  return [];
 }
 
 export async function savePlayerToFirestore(player: Player): Promise<void> {
@@ -396,10 +453,47 @@ export function subscribeToPlayersForComp(compId: string, callback: (players: Pl
     snap.forEach((doc) => {
       players.push(doc.data() as Player);
     });
-    callback(players);
+    if (players.length > 0) {
+      try { localStorage.setItem(`app:players:${compId}`, JSON.stringify(players)); } catch (e) {}
+      callback(players);
+    } else {
+      const cached = localStorage.getItem(`app:players:${compId}`);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            callback(parsed);
+            return;
+          }
+        } catch(e) {}
+      }
+      if (compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'))) {
+        callback(BASELINE_TERESA_PLAYERS);
+      } else {
+        callback([]);
+      }
+    }
   }, (error) => {
-    handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
-    onError(error as Error);
+    const isQuota = String(error).includes('Quota limit exceeded');
+    console.warn('[Firestore Quota Exceeded/Sync Error for Players]', isQuota ? 'Quota limit exceeded' : error);
+    const cached = localStorage.getItem(`app:players:${compId}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          callback(parsed);
+          return;
+        }
+      } catch(e) {}
+    }
+    if (compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'))) {
+      callback(BASELINE_TERESA_PLAYERS);
+      return;
+    }
+    if (!isQuota) {
+      handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
+      onError(error as Error);
+    }
   });
   
   return unsubscribe;
@@ -483,22 +577,6 @@ export async function fetchRefereesForComp(compId: string): Promise<Referee[]> {
     });
     
     const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
-
-    // Clean up stale duplicate document keys in background
-    const docsToDelete: string[] = [];
-    for (const item of rawList) {
-      const cleanIc = (item.data.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      if (!cleanIc) continue;
-      const canonicalId = `${compId}_${cleanIc}`;
-      if (item.docId !== canonicalId) {
-        docsToDelete.push(item.docId);
-      }
-    }
-    if (docsToDelete.length > 0) {
-      Promise.all(docsToDelete.map(id => deleteDoc(doc(db, 'referees', id)).catch(() => {}))).catch(() => {});
-      uniqueRefs.forEach(r => saveRefereeToFirestore(r).catch(() => {}));
-    }
-
     return uniqueRefs;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
@@ -559,22 +637,6 @@ export function subscribeToRefereesForComp(compId: string, callback: (referees: 
     });
     
     const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
-
-    // Asynchronous cleanup of duplicate documents if detected
-    const docsToDelete: string[] = [];
-    for (const item of rawList) {
-      const cleanIc = (item.data.nric || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      if (!cleanIc) continue;
-      const canonicalId = `${compId}_${cleanIc}`;
-      if (item.docId !== canonicalId) {
-        docsToDelete.push(item.docId);
-      }
-    }
-    if (docsToDelete.length > 0) {
-      Promise.all(docsToDelete.map(id => deleteDoc(doc(db, 'referees', id)).catch(() => {}))).catch(() => {});
-      uniqueRefs.forEach(r => saveRefereeToFirestore(r).catch(() => {}));
-    }
-
     callback(uniqueRefs);
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
@@ -594,11 +656,22 @@ export async function fetchRefereeAccounts(): Promise<Referee[]> {
     snap.forEach((doc) => {
       raw.push(doc.data() as Referee);
     });
-    return deduplicateReferees(raw);
+    const list = deduplicateReferees(raw);
+    if (list.length > 0) {
+      try { localStorage.setItem('app:refereeAccounts', JSON.stringify(list)); } catch (e) {}
+      return list;
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
-    return [];
   }
+  try {
+    const cached = localStorage.getItem('app:refereeAccounts');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return BASELINE_REFEREE_ACCOUNTS;
 }
 
 export async function saveRefereeAccount(ref: Referee): Promise<void> {
@@ -632,10 +705,40 @@ export function subscribeToRefereeAccounts(callback: (accounts: Referee[]) => vo
     snap.forEach((doc) => {
       raw.push(doc.data() as Referee);
     });
-    callback(deduplicateReferees(raw));
+    const deduped = deduplicateReferees(raw);
+    if (deduped.length > 0) {
+      try {
+        localStorage.setItem('app:refereeAccounts', JSON.stringify(deduped));
+      } catch (e) {}
+      callback(deduped);
+    } else {
+      const cached = localStorage.getItem('app:refereeAccounts');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            callback(parsed);
+            return;
+          }
+        } catch (e) {}
+      }
+      callback(BASELINE_REFEREE_ACCOUNTS);
+    }
   }, (error) => {
-    handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
-    onError(error as Error);
+    const isQuota = String(error).includes('Quota limit exceeded');
+    console.warn('[Firestore Referee Accounts Sync Error]', isQuota ? 'Quota limit exceeded' : error);
+    const cached = localStorage.getItem('app:refereeAccounts');
+    if (cached) {
+      try {
+        callback(JSON.parse(cached));
+        return;
+      } catch (e) {}
+    }
+    callback(BASELINE_REFEREE_ACCOUNTS);
+    if (!isQuota) {
+      handleFirestoreError(error, OperationType.GET, 'refereeAccounts');
+      onError(error as Error);
+    }
   });
   return unsubscribe;
 }
@@ -666,13 +769,22 @@ export async function fetchGlobalClubs(): Promise<string[] | null> {
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data();
-      return data.clubs || null;
+      if (data.clubs && Array.isArray(data.clubs) && data.clubs.length > 0) {
+        try { localStorage.setItem('app:globalClubs', JSON.stringify(data.clubs)); } catch(e) {}
+        return data.clubs;
+      }
     }
-    return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'globalSettings/clubs');
-    return null;
   }
+  try {
+    const cached = localStorage.getItem('app:globalClubs');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return BASELINE_GLOBAL_CLUBS;
 }
 
 export async function saveGlobalClubs(clubs: string[]): Promise<void> {
@@ -707,3 +819,59 @@ export async function saveAdminPasswordToFirestore(password: string): Promise<vo
   }
 }
 
+
+export async function fetchCoachByUsername(username: string): Promise<Coach | null> {
+  try {
+    const docRef = doc(db, 'coaches', username);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as Coach;
+    }
+    const q = query(collection(db, 'coaches'), where('username', '==', username));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      return querySnap.docs[0].data() as Coach;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  return null;
+}
+
+export async function fetchOrganizerByUsername(username: string): Promise<Organizer | null> {
+  try {
+    const docRef = doc(db, 'organizers', username);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as Organizer;
+    }
+    const q = query(collection(db, 'organizers'), where('username', '==', username));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      return querySnap.docs[0].data() as Organizer;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  return null;
+}
+
+export async function fetchRefereeAccountByNric(nric: string): Promise<Referee | null> {
+  try {
+    const cleanIc = nric.replace(/[^a-zA-Z0-9]/g, '');
+    const docRef = doc(db, 'refereeAccounts', cleanIc);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as Referee;
+    }
+    // Also try querying if document ID isn't exactly cleanIc
+    const q = query(collection(db, 'refereeAccounts'), where('nric', '==', nric));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      return querySnap.docs[0].data() as Referee;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  return null;
+}

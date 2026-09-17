@@ -34,6 +34,14 @@ import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
 import ExcelJS from 'exceljs';
 import { Competition, Player, Coach, WeighIn, Organizer, Referee, MatchAssignment } from './types';
+import { 
+  BASELINE_GLOBAL_CLUBS, 
+  BASELINE_COMPETITIONS, 
+  BASELINE_TERESA_PLAYERS, 
+  BASELINE_COACHES, 
+  BASELINE_ORGANIZERS, 
+  BASELINE_REFEREE_ACCOUNTS 
+} from './baselineData';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
 import { 
   DEFAULT_EVENT_WEIGHT_CLASSES, 
@@ -74,7 +82,7 @@ import {
   deduplicateReferees,
   fetchGlobalClubs,
   saveGlobalClubs,
-  fetchAdminPassword,
+  fetchAdminPassword, fetchCoachByUsername, fetchOrganizerByUsername, fetchRefereeAccountByNric,
   saveAdminPasswordToFirestore
 } from './firebase';
 import * as XLSX from 'xlsx';
@@ -449,12 +457,48 @@ export default function App() {
   const [user, setUser] = useState<string | null>(null); // username
   const [compId, setCompId] = useState<string | null>(null);
   
-  const [competitions, setCompetitions] = useState<Competition[]>([]);
-  const [coaches, setCoaches] = useState<Record<string, Coach>>({});
-  const [organizers, setOrganizers] = useState<Record<string, Organizer>>({});
+  const [competitions, setCompetitions] = useState<Competition[]>(() => {
+    try {
+      const s = localStorage.getItem('app:competitions');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return BASELINE_COMPETITIONS;
+  });
+  const [coaches, setCoaches] = useState<Record<string, Coach>>(() => {
+    try {
+      const s = localStorage.getItem('app:coaches');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (parsed && Object.keys(parsed).length > 0) return parsed;
+      }
+    } catch (e) {}
+    return BASELINE_COACHES;
+  });
+  const [organizers, setOrganizers] = useState<Record<string, Organizer>>(() => {
+    try {
+      const s = localStorage.getItem('app:organizers');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (parsed && Object.keys(parsed).length > 0) return parsed;
+      }
+    } catch (e) {}
+    return BASELINE_ORGANIZERS;
+  });
   const [players, setPlayers] = useState<Player[]>([]);
   const [referees, setReferees] = useState<Referee[]>([]);
-  const [refereeAccounts, setRefereeAccounts] = useState<Referee[]>([]);
+  const [refereeAccounts, setRefereeAccounts] = useState<Referee[]>(() => {
+    try {
+      const s = localStorage.getItem('app:refereeAccounts');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return BASELINE_REFEREE_ACCOUNTS;
+  });
   const [staffPasses, setStaffPasses] = useState<Player[]>([]);
   const [staffPassName, setStaffPassName] = useState('');
   const [staffPassRole, setStaffPassRole] = useState('Coach');
@@ -1152,7 +1196,16 @@ export default function App() {
   
   // Admin Navigation
   const [adminTab, setAdminTab] = useState<'tournaments' | 'coaches' | 'organizers' | 'security' | 'referees' | 'clubs' | 'ric'>('tournaments');
-  const [globalClubs, setGlobalClubs] = useState<string[]>([]);
+  const [globalClubs, setGlobalClubs] = useState<string[]>(() => {
+    try {
+      const s = localStorage.getItem('app:globalClubs');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return BASELINE_GLOBAL_CLUBS;
+  });
   const [newGlobalClubOption, setNewGlobalClubOption] = useState('');
 
   const [adminPassword, setAdminPassword] = useState<string>(() => {
@@ -1263,10 +1316,6 @@ export default function App() {
         if (storedComps) {
           try {
             loadedComps = JSON.parse(storedComps);
-            // Sync to cloud asynchronously
-            for (const c of loadedComps) {
-              saveCompetition(c).catch(err => console.warn("Failed to sync competition to cloud on boot:", err));
-            }
           } catch (e) {
             console.error("Failed to parse competitions", e);
           }
@@ -1274,53 +1323,19 @@ export default function App() {
       }
 
       if (loadedComps.length === 0) {
-        const defaultComps: Competition[] = [{
-          id: 'tmremaja2026',
-          name: 'TM National Remaja 2026',
-          venue: 'National Taekwondo Arena',
-          date: '2026-09-12',
-          staffCode: 'weighin123',
-          events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
-          genders: ['Male', 'Female', 'Mix'],
-          ageGroups: [
-            'Super Cadet (9 To 10 Years Old)', 'Super Cadet (9 to 11 Years Old)', 'Cadet (11 to 12 Years Old)',
-            'Cadet (12 to 14 Years Old)', 'Junior (13 to 14 Years Old)', 'Junior (15 to 17 Years Old)',
-            '12 to 14 Years Old', '15 to 17 Years Old', '16 years & Older'
-          ],
-          weightClasses: [
-            'All Colour Belt', 'BANTAM 21.01KG-24KG', 'BANTAM 23.01KG-26KG', 'BANTAM 33.01KG-37KG', 'BANTAM 37.01KG-41KG',
-            'BANTAM 44.01KG-46KG', 'BANTAM 48.01KG-51KG', 'FEATHER 24.01KG-27KG', 'FEATHER 26.01KG-29KG', 'FEATHER 37.01KG-41KG',
-            'FEATHER 41.01KG-45KG', 'FEATHER 46.01KG-49KG', 'FEATHER 51.01KG-55KG', 'FIN BELOW 18KG', 'FIN BELOW 20KG',
-            'FIN BELOW 29KG', 'FIN BELOW 33KG', 'FIN BELOW 42KG', 'FIN BELOW 45KG', 'FLY 18.01KG-21KG', 'FLY 20.01KG-23KG',
-            'FLY 29.01KG-33KG', 'FLY 33.01KG-37KG', 'FLY 42.01KG-44KG', 'FLY 45.01KG-48KG', 'HEAVY 38KG & ABOVE',
-            'HEAVY 40KG & ABOVE', 'HEAVY 59KG & ABOVE', 'HEAVY 65KG & ABOVE', 'HEAVY 68KG & ABOVE', 'HEAVY 78KG & ABOVE',
-            'LIGHT 27.01KG-30KG', 'LIGHT 29.01KG-32KG', 'LIGHT 41.01KG-44KG', 'LIGHT 45.01KG-49KG', 'LIGHT 49.01KG-52KG',
-            'LIGHT 55.01KG-59KG', 'LIGHT HEAVY 55.01KG-59KG', 'LIGHT HEAVY 61.01KG-65KG', 'LIGHT HEAVY 63.01KG-68KG',
-            'LIGHT HEAVY 73.01KG-78KG', 'LIGHT MIDDLE 47.01KG-51KG', 'LIGHT MIDDLE 53.01KG-57KG', 'LIGHT MIDDLE 55.01KG-59KG',
-            'LIGHT MIDDLE 63.01KG-68KG', 'MIDDLE 34.01KG-38KG', 'MIDDLE 36.01KG-40KG', 'MIDDLE 51.01KG-55KG',
-            'MIDDLE 57.01KG-61KG', 'MIDDLE 59.01KG-63KG', 'MIDDLE 68.01KG-73KG', 'Not Exceeding 58KG', 'Open Weight',
-            'Over 65KG', 'P21', 'P22', 'P23', 'Taegeuk 4 to Koryo', 'Taegeuk 4 to Taebaek', 'Taegeuk 5 to Pyongwon',
-            'WELTER 30.01KG-34KG', 'WELTER 32.01KG-36KG', 'WELTER 44.01KG-47KG', 'WELTER 49.01KG-53KG',
-            'WELTER 52.01KG-55KG', 'WELTER 59.01KG-63KG'
-          ],
-          affiliatedClubs: [
-            'SMART MA TAEKWONDO CLUB',
-            'SAUJANA TKD CLUB',
-            'TYC TAEKWONDO CLUB',
-            'MATSA TAEKWONDO CLUB',
-            'PUSAT SENI MEMPERTAHANKAN DIRI TAEKWONDO ACTION WTF',
-            'KORYO TAEKWONDO CLUB'
-          ],
-          isActive: true
-        }];
-        loadedComps = defaultComps;
-        for (const c of defaultComps) {
-          saveCompetition(c).catch(err => console.warn("Failed to seed default competition to cloud:", err));
-        }
-        localStorage.setItem('app:competitions', JSON.stringify(defaultComps));
+        loadedComps = BASELINE_COMPETITIONS;
+        localStorage.setItem('app:competitions', JSON.stringify(BASELINE_COMPETITIONS));
       }
 
-      // Ensure all loaded competitions include Kyukpa, Speed Kicking, and Skipping Rope in their events list
+      // Ensure stteresacup2026udkr is always present in competitions list
+      if (!loadedComps.some(c => c.id === 'stteresacup2026udkr')) {
+        const teresaComp = BASELINE_COMPETITIONS.find(c => c.id === 'stteresacup2026udkr');
+        if (teresaComp) {
+          loadedComps = [teresaComp, ...loadedComps];
+        }
+      }
+
+      // Ensure all loaded competitions include Kyukpa, Speed Kicking, Skipping Rope, and Recognize Poomsae 2
       const standardEventsRequired = ['Kyukpa', 'Speed Kicking', 'Skipping Rope', 'Recognize Poomsae 2'];
       let hadMissingEvents = false;
       loadedComps = loadedComps.map(c => {
@@ -1341,9 +1356,6 @@ export default function App() {
 
       if (hadMissingEvents) {
         localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
-        for (const c of loadedComps) {
-          saveCompetition(c).catch(err => console.warn("Failed to sync backfilled events to cloud:", err));
-        }
       }
 
       setCompetitions(loadedComps);
@@ -1354,94 +1366,27 @@ export default function App() {
         setOComp(activeComps[0]?.id || loadedComps[0]?.id || '');
       }
 
-      // 2. Fetch coaches
-      let loadedCoaches: Record<string, Coach> = {};
-      try {
-        const cloudCoaches = await fetchCoaches();
-        if (cloudCoaches) {
-          loadedCoaches = cloudCoaches;
+      // Hydrate local cache and proactively fetch coaches and organizers for immediate login
+      fetchCoaches().then(cloudCoaches => {
+        if (cloudCoaches && Object.keys(cloudCoaches).length > 0) {
+          setCoaches(cloudCoaches);
+          try { localStorage.setItem('app:coaches', JSON.stringify(cloudCoaches)); } catch (e) {}
         }
-      } catch (e) {
-        console.warn("Failed to fetch coaches from cloud, using local fallback:", e);
-      }
+      }).catch(() => {});
 
-      if (Object.keys(loadedCoaches).length === 0) {
-        const storedCoaches = localStorage.getItem('app:coaches');
-        if (storedCoaches) {
-          try {
-            loadedCoaches = JSON.parse(storedCoaches);
-            for (const username of Object.keys(loadedCoaches)) {
-              saveCoach({ ...loadedCoaches[username], username }).catch(err => console.warn("Failed to sync coach to cloud on boot:", err));
-            }
-          } catch (e) {
-            console.error("Failed to parse coaches", e);
-          }
+      fetchOrganizers().then(cloudOrgs => {
+        if (cloudOrgs && Object.keys(cloudOrgs).length > 0) {
+          setOrganizers(cloudOrgs);
+          try { localStorage.setItem('app:organizers', JSON.stringify(cloudOrgs)); } catch (e) {}
         }
+      }).catch(() => {});
+
+      const storedMaster = localStorage.getItem('app:masterAthletes');
+      if (storedMaster) {
+        try { setMasterAthletes(JSON.parse(storedMaster)); } catch (e) {}
       }
 
-      if (Object.keys(loadedCoaches).length === 0) {
-        const defaultCoaches = { 
-          demo: { password: 'demo123', name: 'Coach Demo', club: 'SMART MA TAEKWONDO CLUB', username: 'demo' } 
-        };
-        loadedCoaches = defaultCoaches;
-        saveCoach(defaultCoaches.demo).catch(err => console.warn("Failed to seed default coach to cloud:", err));
-        localStorage.setItem('app:coaches', JSON.stringify(defaultCoaches));
-      }
-      setCoaches(loadedCoaches);
-
-      // 3. Fetch organizers
-      let loadedOrganizers: Record<string, Organizer> = {};
-      try {
-        const cloudOrganizers = await fetchOrganizers();
-        if (cloudOrganizers) {
-          loadedOrganizers = cloudOrganizers;
-        }
-      } catch (e) {
-        console.warn("Failed to fetch organizers from cloud, using local fallback:", e);
-      }
-
-      if (Object.keys(loadedOrganizers).length === 0) {
-        const storedOrganizers = localStorage.getItem('app:organizers');
-        if (storedOrganizers) {
-          try {
-            loadedOrganizers = JSON.parse(storedOrganizers);
-            for (const username of Object.keys(loadedOrganizers)) {
-              saveOrganizer({ ...loadedOrganizers[username], username }).catch(err => console.warn("Failed to sync organizer to cloud on boot:", err));
-            }
-          } catch (e) {
-            console.error("Failed to parse organizers", e);
-          }
-        }
-      }
-      setOrganizers(loadedOrganizers);
-
-      // 4. Fetch masterAthletes
-      let loadedMaster: Record<string, Partial<Player>> = {};
-      try {
-        const cloudMaster = await fetchMasterAthletes();
-        if (cloudMaster) {
-          loadedMaster = cloudMaster;
-        }
-      } catch (e) {
-        console.warn("Failed to fetch masterAthletes from cloud, using local fallback:", e);
-      }
-
-      if (Object.keys(loadedMaster).length === 0) {
-        const storedMaster = localStorage.getItem('app:masterAthletes');
-        if (storedMaster) {
-          try {
-            loadedMaster = JSON.parse(storedMaster);
-            for (const id of Object.keys(loadedMaster)) {
-              saveMasterAthlete({ ...loadedMaster[id], id }).catch(err => console.warn("Failed to sync master athlete to cloud on boot:", err));
-            }
-          } catch (e) {
-            console.error("Failed to parse masterAthletes", e);
-          }
-        }
-      }
-      setMasterAthletes(loadedMaster);
-
-      // 5. Fetch globalClubs
+      // 5. Fetch globalClubs and ensure full affiliated list
       let loadedGlobalClubs: string[] | null = null;
       try {
         loadedGlobalClubs = await fetchGlobalClubs();
@@ -1449,19 +1394,14 @@ export default function App() {
         console.warn("Failed to fetch global clubs from cloud, using local fallback:", e);
       }
 
-      if (!loadedGlobalClubs) {
-        const defaultClubs = [
-          'SMART MA TAEKWONDO CLUB',
-          'SAUJANA TKD CLUB',
-          'TYC TAEKWONDO CLUB',
-          'MATSA TAEKWONDO CLUB',
-          'PUSAT SENI MEMPERTAHANKAN DIRI TAEKWONDO ACTION WTF',
-          'KORYO TAEKWONDO CLUB'
-        ];
-        loadedGlobalClubs = defaultClubs;
-        saveGlobalClubs(defaultClubs).catch(err => console.warn("Failed to seed default global clubs to cloud:", err));
+      if (!loadedGlobalClubs || loadedGlobalClubs.length === 0) {
+        loadedGlobalClubs = BASELINE_GLOBAL_CLUBS;
+      } else {
+        // Merge to guarantee all 21 clubs exist
+        loadedGlobalClubs = Array.from(new Set([...loadedGlobalClubs, ...BASELINE_GLOBAL_CLUBS]));
       }
       setGlobalClubs(loadedGlobalClubs);
+      try { localStorage.setItem('app:globalClubs', JSON.stringify(loadedGlobalClubs)); } catch(e) {}
 
       // 6. Fetch Admin Password
       try {
@@ -1482,6 +1422,28 @@ export default function App() {
 
     initData();
   }, []);
+
+  
+  // Fetch heavy collections if admin
+  useEffect(() => {
+    if (role === 'admin') {
+      fetchCoaches().then(cloudCoaches => {
+        if (Object.keys(cloudCoaches).length > 0) {
+          setCoaches(cloudCoaches);
+        }
+      });
+      fetchOrganizers().then(cloudOrgs => {
+        if (Object.keys(cloudOrgs).length > 0) {
+          setOrganizers(cloudOrgs);
+        }
+      });
+      fetchMasterAthletes().then(cloudMasters => {
+        if (Object.keys(cloudMasters).length > 0) {
+          setMasterAthletes(cloudMasters);
+        }
+      });
+    }
+  }, [role]);
 
   // Subscribe to referee accounts in real-time
   useEffect(() => {
@@ -1569,20 +1531,50 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     
     if (compId) {
+      // 1. Immediately hydrate from localStorage or baseline so UI displays instantly without lag or quota failure
+      const cached = localStorage.getItem(`app:players:${compId}`);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPlayers(parsed);
+          }
+        } catch (e) {}
+      } else if (compId === 'stteresacup2026udkr' || compId.toLowerCase().includes('teresa')) {
+        setPlayers(BASELINE_TERESA_PLAYERS);
+      }
+
+      const storedStaff = localStorage.getItem(`app:staffPasses:${compId}`);
+      if (storedStaff) {
+        try {
+          setStaffPasses(JSON.parse(storedStaff));
+        } catch (e) {}
+      } else {
+        setStaffPasses([]);
+      }
+
       unsubscribe = subscribeToPlayersForComp(compId, (cloudPlayers) => {
         let loadedPlayers = cloudPlayers;
-        // The previous fallback to localStorage when cloudPlayers.length === 0 caused deleted players 
-        // to be resurrected if another client still had them in localStorage.
-        setPlayers(loadedPlayers);
-        localStorage.setItem(`app:players:${compId}`, JSON.stringify(loadedPlayers));
-        
-        const storedStaff = localStorage.getItem(`app:staffPasses:${compId}`);
-        if (storedStaff) {
-          try {
-            setStaffPasses(JSON.parse(storedStaff));
-          } catch (e) {}
+        if (loadedPlayers && loadedPlayers.length > 0) {
+          setPlayers(loadedPlayers);
+          localStorage.setItem(`app:players:${compId}`, JSON.stringify(loadedPlayers));
         } else {
-          setStaffPasses([]);
+          // If cloud returns empty, preserve cached or baseline players
+          const stored = localStorage.getItem(`app:players:${compId}`);
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setPlayers(parsed);
+                return;
+              }
+            } catch (e) {}
+          }
+          if (compId === 'stteresacup2026udkr' || compId.toLowerCase().includes('teresa')) {
+            setPlayers(BASELINE_TERESA_PLAYERS);
+          } else {
+            setPlayers([]);
+          }
         }
       }, (err) => {
         console.error("Failed to sync players", err);
@@ -2021,7 +2013,7 @@ export default function App() {
   };
 
   // --- AUTHENTICATION ACTIONS ---
-  const handleOrganizerLogin = () => {
+  const handleOrganizerLogin = async () => {
     const u = cUser.trim();
     const p = cPass.trim();
     const orgEntry = Object.entries(organizers).find(
@@ -2091,14 +2083,28 @@ export default function App() {
     }
   };
 
-  const handleCoachLogin = () => {
+  const handleCoachLogin = async () => {
     const u = cUser.trim();
     const p = cPass.trim();
+    let acc = undefined;
+    let coachKey = u;
+
+    // Fast memory check
     const coachEntry = Object.entries(coaches).find(
       ([k, v]) => k.toLowerCase() === u.toLowerCase() || (v.username && v.username.toLowerCase() === u.toLowerCase())
     );
-    const acc = coachEntry ? coachEntry[1] : undefined;
-    const coachKey = coachEntry ? coachEntry[0] : u;
+    if (coachEntry) {
+      acc = coachEntry[1];
+      coachKey = coachEntry[0];
+    } else {
+      // Cloud check
+      const cloudCoach = await fetchCoachByUsername(u);
+      if (cloudCoach) {
+        acc = cloudCoach;
+        coachKey = cloudCoach.username || u;
+        setCoaches(prev => ({...prev, [coachKey]: cloudCoach}));
+      }
+    }
 
     if (!acc || (acc.password || '').toLowerCase() !== p.toLowerCase()) {
       triggerMsg('Invalid username or password.', 'error');
@@ -2150,7 +2156,7 @@ export default function App() {
     triggerMsg('Public View access password updated.', 'ok');
   };
 
-  const handleRefereeLogin = () => {
+  const handleRefereeLogin = async () => {
     const ic = refereeLoginNric.trim();
     if (!ic) {
       triggerMsg('Please enter your NRIC Number.', 'error');
@@ -2159,7 +2165,13 @@ export default function App() {
     const cleanIc = ic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
     // Check global referee accounts first
-    const account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    let account = refereeAccounts.find(a => a.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanIc);
+    if (!account) {
+      account = await fetchRefereeAccountByNric(cleanIc) || undefined;
+      if (account) {
+        setRefereeAccounts(prev => [...prev.filter(a => a.nric !== account!.nric), account!]);
+      }
+    }
     if (account) {
       if (account.password && (account.password || '').toLowerCase() !== refereeLoginPassword.trim().toLowerCase()) {
         triggerMsg('Invalid NRIC or Password.', 'error');
