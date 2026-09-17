@@ -14,7 +14,7 @@ import { IndemnityDashboardModal } from './components/modals/IndemnityDashboardM
 import { AthleteDatabaseModal } from './components/modals/AthleteDatabaseModal';
 import { PaymentReceiptModal } from './components/modals/PaymentReceiptModal';
 import { EditCompetitionModal } from './components/modals/EditCompetitionModal';
-import { AgeGroupDetailsModal } from './components/modals/AgeGroupDetailsModal';
+import { ChartPhotoModal } from './components/modals/ChartPhotoModal';
 import { AssignSpecialRolesModal } from './components/modals/AssignSpecialRolesModal';
 import { RefereeAccommodationModal } from './components/modals/RefereeAccommodationModal';
 import { CoachExcelImportModal } from './components/modals/CoachExcelImportModal';
@@ -796,6 +796,8 @@ export default function App() {
   const [editCompPkgSub, setEditCompPkgSub] = useState<string>('20');
   const [editCompPkgFive, setEditCompPkgFive] = useState<string>('150');
   const [showAgeGroupDetailsModal, setShowAgeGroupDetailsModal] = useState<boolean>(false);
+  const [showVirtualChartModal, setShowVirtualChartModal] = useState<boolean>(false);
+  const [showPoomsaeChartModal, setShowPoomsaeChartModal] = useState<boolean>(false);
 
   const [editingAccReferee, setEditingAccReferee] = useState<Referee | null>(null);
   const [editingDistanceRefereeId, setEditingDistanceRefereeId] = useState<string | null>(null);
@@ -1356,6 +1358,10 @@ export default function App() {
 
       if (hadMissingEvents) {
         localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
+        // Force a cloud sync for the missing events to ensure they persist
+        for (const c of loadedComps) {
+          saveCompetition(c).catch(() => {});
+        }
       }
 
       setCompetitions(loadedComps);
@@ -3695,7 +3701,7 @@ export default function App() {
 
   const handleLoadEventPreset = (eventName: string) => {
     if (!compId) return;
-    const presets = DEFAULT_EVENT_WEIGHT_CLASSES[eventName] || DEFAULT_EVENT_WEIGHT_CLASSES['Kyorugi'];
+    const presets = getWeightClassesForEvent(null, eventName);
     const updated = competitions.map(c => {
       if (c.id === compId) {
         const curMap = c.eventWeightClasses || {};
@@ -3743,7 +3749,7 @@ export default function App() {
     saveCompsToStorage(updated);
   };
 
-  const handleUploadAgeGroupChartPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadChartPhoto = (field: 'ageGroupDetailsPhotoUrl' | 'virtualChartPhotoUrl' | 'poomsaeChartPhotoUrl', e: React.ChangeEvent<HTMLInputElement>, successMsg: string) => {
     const file = e.target.files?.[0];
     if (!file || !compId) return;
     if (file.size > 8 * 1024 * 1024) {
@@ -3756,27 +3762,46 @@ export default function App() {
       if (!dataUrl) return;
       const updated = competitions.map(c => {
         if (c.id === compId) {
-          return { ...c, ageGroupDetailsPhotoUrl: dataUrl };
+          return { ...c, [field]: dataUrl };
         }
         return c;
       });
       await saveCompsToStorage(updated);
-      triggerMsg('Age group specifications chart photo uploaded successfully.', 'ok');
+      triggerMsg(successMsg, 'ok');
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const handleRemoveAgeGroupChartPhoto = async () => {
+  const handleRemoveChartPhoto = async (field: 'ageGroupDetailsPhotoUrl' | 'virtualChartPhotoUrl' | 'poomsaeChartPhotoUrl', successMsg: string) => {
     if (!compId) return;
     const updated = competitions.map(c => {
       if (c.id === compId) {
-        return { ...c, ageGroupDetailsPhotoUrl: undefined };
+        return { ...c, [field]: undefined };
       }
       return c;
     });
     await saveCompsToStorage(updated);
-    triggerMsg('Age group specifications chart photo removed.', 'ok');
+    triggerMsg(successMsg, 'ok');
+  };
+
+  const handleUploadAgeGroupChartPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleUploadChartPhoto('ageGroupDetailsPhotoUrl', e, 'Age group specifications chart photo uploaded successfully.');
+  };
+  const handleRemoveAgeGroupChartPhoto = () => {
+    handleRemoveChartPhoto('ageGroupDetailsPhotoUrl', 'Age group specifications chart photo removed.');
+  };
+  const handleUploadVirtualChartPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleUploadChartPhoto('virtualChartPhotoUrl', e, 'Virtual Taekwondo chart photo uploaded successfully.');
+  };
+  const handleRemoveVirtualChartPhoto = () => {
+    handleRemoveChartPhoto('virtualChartPhotoUrl', 'Virtual Taekwondo chart photo removed.');
+  };
+  const handleUploadPoomsaeChartPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleUploadChartPhoto('poomsaeChartPhotoUrl', e, 'Poomsae chart photo uploaded successfully.');
+  };
+  const handleRemovePoomsaeChartPhoto = () => {
+    handleRemoveChartPhoto('poomsaeChartPhotoUrl', 'Poomsae chart photo removed.');
   };
 
   const handleAddAllStandardEvents = async () => {
@@ -7170,15 +7195,6 @@ export default function App() {
                             Age Group Category *
                           </label>
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setShowAgeGroupDetailsModal(true)}
-                              className="text-[11px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
-                              title="View official Age Group Category specification chart photo"
-                            >
-                              <Camera className="w-3.5 h-3.5 text-gold" />
-                              <span>View Age Group Chart</span>
-                            </button>
                             {birthInfo.birthYear && (
                               <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded-full flex items-center gap-1">
                                 <CheckCircle className="w-2.5 h-2.5 text-gold shrink-0" />
@@ -7229,9 +7245,44 @@ export default function App() {
                   return (
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center">
-                        <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
-                          {label} *
-                        </label>
+                        <div className="flex items-center gap-2">
+                          <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                            {label} *
+                          </label>
+                          {singleEv.toLowerCase().includes('kyorugi') && activeComp.ageGroupDetailsPhotoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAgeGroupDetailsModal(true)}
+                              className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                              title="View official Kyorugi specification chart photo"
+                            >
+                              <Camera className="w-3 h-3 text-gold" />
+                              <span>View Chart</span>
+                            </button>
+                          )}
+                          {singleEv.toLowerCase().includes('virtual') && activeComp.virtualChartPhotoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setShowVirtualChartModal(true)}
+                              className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                              title="View official Virtual Taekwondo specification chart photo"
+                            >
+                              <Camera className="w-3 h-3 text-gold" />
+                              <span>View Chart</span>
+                            </button>
+                          )}
+                          {singleEv.toLowerCase().includes('poomsae') && activeComp.poomsaeChartPhotoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setShowPoomsaeChartModal(true)}
+                              className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                              title="View official Poomsae specification chart photo"
+                            >
+                              <Camera className="w-3 h-3 text-gold" />
+                              <span>View Chart</span>
+                            </button>
+                          )}
+                        </div>
                         <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded-full">
                           {singleEv}
                         </span>
@@ -7287,10 +7338,45 @@ export default function App() {
                           <div key={ev} className="bg-surface border border-line rounded-xl p-3 flex flex-col gap-2.5 hover:border-line-hover transition">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                               <div className="min-w-[160px] shrink-0">
-                                <span className="text-xs font-bold text-text flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-gold"></span>
-                                  {ev}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-text flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-gold"></span>
+                                    {ev}
+                                  </span>
+                                  {ev.toLowerCase().includes('kyorugi') && activeComp.ageGroupDetailsPhotoUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowAgeGroupDetailsModal(true)}
+                                      className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2 py-0.5 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                                      title="View official Kyorugi specification chart photo"
+                                    >
+                                      <Camera className="w-3 h-3 text-gold" />
+                                      <span>View Chart</span>
+                                    </button>
+                                  )}
+                                  {ev.toLowerCase().includes('virtual') && activeComp.virtualChartPhotoUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowVirtualChartModal(true)}
+                                      className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2 py-0.5 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                                      title="View official Virtual Taekwondo specification chart photo"
+                                    >
+                                      <Camera className="w-3 h-3 text-gold" />
+                                      <span>View Chart</span>
+                                    </button>
+                                  )}
+                                  {ev.toLowerCase().includes('poomsae') && activeComp.poomsaeChartPhotoUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowPoomsaeChartModal(true)}
+                                      className="text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2 py-0.5 rounded-lg flex items-center gap-1 font-semibold transition cursor-pointer"
+                                      title="View official Poomsae specification chart photo"
+                                    >
+                                      <Camera className="w-3 h-3 text-gold" />
+                                      <span>View Chart</span>
+                                    </button>
+                                  )}
+                                </div>
                                 <span className="text-[10px] text-text-dim block mt-0.5">{label}</span>
                               </div>
                               <div className="flex-1 w-full sm:w-auto">
@@ -10264,9 +10350,9 @@ export default function App() {
                 
                 {/* AGE GROUPS */}
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                     <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">Age brackets</label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => setShowAgeGroupDetailsModal(true)}
@@ -10274,7 +10360,25 @@ export default function App() {
                         title="Upload or view official age group specification chart photo"
                       >
                         <Camera className="w-3 h-3 text-gold" />
-                        <span>{activeComp.ageGroupDetailsPhotoUrl ? 'Chart Photo (Uploaded)' : 'Upload Chart Photo'}</span>
+                        <span>{activeComp.ageGroupDetailsPhotoUrl ? 'Kyorugi Chart Photo (Uploaded)' : 'Kyorugi Chart Photo'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowVirtualChartModal(true)}
+                        className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1"
+                        title="Upload or view Virtual Taekwondo chart photo"
+                      >
+                        <Camera className="w-3 h-3 text-gold" />
+                        <span>{activeComp.virtualChartPhotoUrl ? 'Virtual Chart Photo (Uploaded)' : 'Virtual Chart Photo'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowPoomsaeChartModal(true)}
+                        className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1"
+                        title="Upload or view Poomsae chart photo"
+                      >
+                        <Camera className="w-3 h-3 text-gold" />
+                        <span>{activeComp.poomsaeChartPhotoUrl ? 'Poomsae Chart Photo (Uploaded)' : 'Poomsae Chart Photo'}</span>
                       </button>
                       <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1">
                         {isAIExtractingAge ? (
@@ -13613,14 +13717,45 @@ export default function App() {
         triggerMsg={triggerMsg}
       />
 
-      <AgeGroupDetailsModal
+      <ChartPhotoModal
         isOpen={showAgeGroupDetailsModal}
         onClose={() => setShowAgeGroupDetailsModal(false)}
+        title="Age Group Category Specifications"
+        description="Official Division & Birth Year Chart"
         compName={activeComp?.name}
         photoUrl={activeComp?.ageGroupDetailsPhotoUrl}
-        ageGroups={activeComp?.ageGroups}
+        categories={activeComp?.ageGroups}
+        categoriesLabel="Configured Tournament Age Brackets"
         onUploadPhoto={handleUploadAgeGroupChartPhoto}
         onRemovePhoto={handleRemoveAgeGroupChartPhoto}
+        canManage={role === 'admin' || role === 'organizer'}
+      />
+
+      <ChartPhotoModal
+        isOpen={showVirtualChartModal}
+        onClose={() => setShowVirtualChartModal(false)}
+        title="Virtual Taekwondo Specifications"
+        description="Official Virtual Taekwondo Chart"
+        compName={activeComp?.name}
+        photoUrl={activeComp?.virtualChartPhotoUrl}
+        categories={activeComp?.eventWeightClasses?.['Virtual Taekwondo'] || []}
+        categoriesLabel="Configured Virtual Taekwondo Divisions"
+        onUploadPhoto={handleUploadVirtualChartPhoto}
+        onRemovePhoto={handleRemoveVirtualChartPhoto}
+        canManage={role === 'admin' || role === 'organizer'}
+      />
+
+      <ChartPhotoModal
+        isOpen={showPoomsaeChartModal}
+        onClose={() => setShowPoomsaeChartModal(false)}
+        title="Poomsae Category Specifications"
+        description="Official Poomsae Division Chart"
+        compName={activeComp?.name}
+        photoUrl={activeComp?.poomsaeChartPhotoUrl}
+        categories={activeComp?.eventWeightClasses?.['Recognize Poomsae'] || []}
+        categoriesLabel="Configured Poomsae Categories"
+        onUploadPhoto={handleUploadPoomsaeChartPhoto}
+        onRemovePhoto={handleRemovePoomsaeChartPhoto}
         canManage={role === 'admin' || role === 'organizer'}
       />
       

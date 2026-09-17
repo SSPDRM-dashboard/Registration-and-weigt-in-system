@@ -1,23 +1,29 @@
 import React, { useState } from 'react';
 import { X, ZoomIn, ZoomOut, Download, AlertCircle, FileText, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
 
-interface AgeGroupDetailsModalProps {
+interface ChartPhotoModalProps {
   isOpen: boolean;
   onClose: () => void;
+  title: string;
+  description?: string;
   compName?: string;
   photoUrl?: string;
-  ageGroups?: string[];
+  categories?: string[];
+  categoriesLabel?: string;
   onUploadPhoto?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemovePhoto?: () => void;
   canManage?: boolean;
 }
 
-export const AgeGroupDetailsModal: React.FC<AgeGroupDetailsModalProps> = ({
+export const ChartPhotoModal: React.FC<ChartPhotoModalProps> = ({
   isOpen,
   onClose,
+  title,
+  description,
   compName,
   photoUrl,
-  ageGroups = [],
+  categories = [],
+  categoriesLabel = "Configured Categories",
   onUploadPhoto,
   onRemovePhoto,
   canManage = false,
@@ -49,10 +55,10 @@ export const AgeGroupDetailsModal: React.FC<AgeGroupDetailsModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-bold text-text uppercase tracking-wider">
-                Age Group Category Specifications
+                {title}
               </h2>
               <p className="text-xs text-text-dim">
-                {compName ? `${compName} · ` : ''}Official Division & Birth Year Chart
+                {compName ? `${compName} · ` : ''}{description || 'Official Division Chart'}
               </p>
             </div>
           </div>
@@ -123,7 +129,7 @@ export const AgeGroupDetailsModal: React.FC<AgeGroupDetailsModalProps> = ({
                   )}
                   <a
                     href={photoUrl}
-                    download="age-group-details.png"
+                    download="chart.png"
                     className="bg-surface hover:bg-surface-2 border border-line px-3 py-1.5 rounded-lg text-text font-semibold flex items-center gap-1.5 transition text-xs"
                   >
                     <Download className="w-3.5 h-3.5 text-gold" />
@@ -133,13 +139,15 @@ export const AgeGroupDetailsModal: React.FC<AgeGroupDetailsModalProps> = ({
               </div>
 
               {/* Photo Display Frame */}
-              <div className="bg-ink/80 rounded-2xl border border-line p-2 overflow-auto flex items-center justify-center min-h-[340px] max-h-[60vh]">
-                <img
-                  src={photoUrl}
-                  alt="Age Group Category Specifications"
-                  style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center' }}
-                  className="max-w-full h-auto object-contain rounded-lg transition-transform duration-150"
-                />
+              <div className="bg-ink/80 rounded-2xl border border-line p-2 overflow-auto min-h-[340px] max-h-[60vh] relative">
+                <div className="w-full h-full flex items-start justify-center min-w-min min-h-min">
+                  <img
+                    src={photoUrl}
+                    alt={title}
+                    style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center' }}
+                    className="max-w-none w-auto h-auto rounded-lg transition-transform duration-150 shadow-md"
+                  />
+                </div>
               </div>
             </div>
           ) : (
@@ -149,17 +157,17 @@ export const AgeGroupDetailsModal: React.FC<AgeGroupDetailsModalProps> = ({
               </div>
               <div className="max-w-md mx-auto space-y-1.5">
                 <h3 className="text-sm font-bold text-text uppercase tracking-wide">
-                  No Age Group Chart Uploaded Yet
+                  No Chart Uploaded Yet
                 </h3>
                 <p className="text-xs text-text-dim leading-relaxed">
-                  Upload an image of the official Age Group Category breakdown, birth year matrix, or guidelines poster so coaches can reference it when registering athletes.
+                  Upload an image of the official {title.toLowerCase()} guidelines or breakdown poster so coaches can reference it when registering athletes.
                 </p>
               </div>
               {canManage && onUploadPhoto && (
                 <div className="pt-2">
                   <label className="inline-flex items-center gap-2 bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer shadow-md transition">
                     <Upload className="w-4 h-4" />
-                    <span>Upload Age Group Chart Photo</span>
+                    <span>Upload Chart Photo</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -173,14 +181,14 @@ export const AgeGroupDetailsModal: React.FC<AgeGroupDetailsModalProps> = ({
           )}
 
           {/* Fallback/Accompanying text list of categories */}
-          {ageGroups.length > 0 && (
+          {categories.length > 0 && (
             <div className="bg-ink/40 border border-line rounded-xl p-4 space-y-2">
               <div className="flex items-center gap-2 text-xs font-bold text-text uppercase tracking-wider">
                 <FileText className="w-4 h-4 text-gold" />
-                <span>Configured Tournament Age Brackets ({ageGroups.length})</span>
+                <span>{categoriesLabel} ({categories.length})</span>
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                {ageGroups.map((ag, idx) => (
+                {categories.map((ag, idx) => (
                   <span
                     key={idx}
                     className="text-[11px] bg-surface border border-line px-2.5 py-1 rounded-lg text-text font-medium"

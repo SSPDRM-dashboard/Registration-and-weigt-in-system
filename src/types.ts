@@ -92,6 +92,8 @@ export interface Competition {
   affiliatedClubs?: string[];
   rings?: string[];
   ageGroupDetailsPhotoUrl?: string;
+  virtualChartPhotoUrl?: string;
+  poomsaeChartPhotoUrl?: string;
 }
 
 export interface Coach {
