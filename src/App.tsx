@@ -47,8 +47,7 @@ import {
   DEFAULT_EVENT_WEIGHT_CLASSES, 
   getEventWeightClassLabel, 
   getWeightClassesForEvent, 
-  isExemptFromStrictWeightScale,
-  POOMSAE_PATTERNS
+  isExemptFromStrictWeightScale
 } from './utils/eventWeightClasses';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
 import { 
@@ -7331,8 +7330,6 @@ export default function App() {
                         const wcList = getWeightClassesForEvent(activeComp, ev);
                         const currentVal = pEventWeightClasses[ev] || (ev === pEvent ? pWeightClass : '') || wcList[0] || '';
                         const label = getEventWeightClassLabel(ev);
-                        const isPoomsae = ev.toLowerCase().includes('poomsae');
-                        const currentPattern = pEventPoomsaePatterns[ev] || '';
                         
                         return (
                           <div key={ev} className="bg-surface border border-line rounded-xl p-3 flex flex-col gap-2.5 hover:border-line-hover transition">
@@ -7401,26 +7398,6 @@ export default function App() {
                                 </select>
                               </div>
                             </div>
-                            
-                            {isPoomsae && (
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mt-2 pt-2 border-t border-line/40">
-                                <div className="min-w-[160px] shrink-0">
-                                  <span className="text-[10px] text-text-dim block uppercase font-bold tracking-wide">Poomsae Pattern</span>
-                                </div>
-                                <div className="flex-1 w-full sm:w-auto">
-                                  <select
-                                    value={currentPattern}
-                                    onChange={(e) => setPEventPoomsaePatterns(prev => ({ ...prev, [ev]: e.target.value }))}
-                                    className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition font-medium"
-                                  >
-                                    <option value="">-- Select Pattern (Optional) --</option>
-                                    {POOMSAE_PATTERNS.map(pattern => (
-                                      <option key={pattern} value={pattern}>{pattern}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-                            )}
                           </div>
                         );
                       })}
