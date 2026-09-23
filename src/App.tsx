@@ -2390,32 +2390,97 @@ export default function App() {
       "Event(s)",
       "Age Group",
       "Weight Class",
-      "Fee (Calculated)"
+      "Fee (Calculated)",
+      "Amount"
     ];
     
-    const sortedAthletes = [...athletes].sort((a, b) => a.name.localeCompare(b.name));
-    
+    // Sort athletes primarily by name, then by event
+    const sortedAthletes = [...athletes].sort((a, b) => {
+      const nameComp = (a.name || '').localeCompare(b.name || '');
+      if (nameComp !== 0) return nameComp;
+      return (a.event || '').localeCompare(b.event || '');
+    });
+
+    const athleteTotalEvents: Record<string, number> = {};
+    sortedAthletes.forEach(p => {
+      const cleanIc = p.ic ? p.ic.trim().toLowerCase() : '';
+      const isDummyIc = !cleanIc || cleanIc === '0' || cleanIc === '-' || cleanIc === 'n/a' || cleanIc === 'none' || cleanIc === 'nil' || cleanIc.length < 4;
+      const key = isDummyIc ? (p.name || '').trim().toLowerCase() : cleanIc;
+      athleteTotalEvents[key] = (athleteTotalEvents[key] || 0) + 1;
+    });
+
+    const athleteEventIndices: Record<string, number> = {};
+
+    const pkgFirst = parseFeeToNumber(activeComp?.packageFirstEventFee || '80');
+    const pkgSecond = parseFeeToNumber(activeComp?.packageSecondEventFee || '40');
+    const pkgSub = parseFeeToNumber(activeComp?.packageSubsequentEventFee || '20');
+    const pkgFive = parseFeeToNumber(activeComp?.packageFiveEventFee || '150');
+
     const rows = sortedAthletes.map(p => {
-      let athleteFee = 0;
-      
-      if (!isSpecialPackage) {
+      const cleanIc = p.ic ? p.ic.trim().toLowerCase() : '';
+      const isDummyIc = !cleanIc || cleanIc === '0' || cleanIc === '-' || cleanIc === 'n/a' || cleanIc === 'none' || cleanIc === 'nil' || cleanIc.length < 4;
+      const key = isDummyIc ? (p.name || '').trim().toLowerCase() : cleanIc;
+
+      const eventIdx = athleteEventIndices[key] || 0;
+      athleteEventIndices[key] = eventIdx + 1;
+      const totalEvents = athleteTotalEvents[key] || 1;
+
+      let eventFee = 0;
+      let tierLabel = 'Standard Event Fee';
+
+      if (isSpecialPackage) {
+        if (totalEvents === 5) {
+          if (eventIdx === 0) { eventFee = pkgFirst; tierLabel = "1st Event Package"; }
+          else if (eventIdx === 1) { eventFee = pkgSecond; tierLabel = "2nd Event Package"; }
+          else if (eventIdx === 2) { eventFee = pkgSub; tierLabel = "3rd Event Package"; }
+          else if (eventIdx === 3) { 
+            eventFee = Math.max(0, pkgFive - (pkgFirst + pkgSecond + pkgSub)); 
+            tierLabel = "4th Event (5-Pack Bundle)"; 
+          }
+          else { 
+            eventFee = 0; 
+            tierLabel = "5th Event (5-Pack Included)"; 
+          }
+        } else {
+          const cycleIdx = eventIdx % 5;
+          if (cycleIdx === 0) {
+            eventFee = pkgFirst;
+            tierLabel = "1st Event Package";
+          } else if (cycleIdx === 1) {
+            eventFee = pkgSecond;
+            tierLabel = "2nd Event Package";
+          } else if (cycleIdx === 2) {
+            eventFee = pkgSub;
+            tierLabel = "3rd Event Package";
+          } else if (cycleIdx === 3) {
+            eventFee = pkgSub;
+            tierLabel = "4th Event Package";
+          } else {
+            const previousFour = pkgFirst + pkgSecond + (pkgSub * 2);
+            eventFee = Math.max(0, pkgFive - previousFour);
+            tierLabel = "5th Event (5-Pack Included)";
+          }
+        }
+      } else {
         const ev = (p.event || '').toLowerCase();
-        if (ev.includes('kyorugi')) athleteFee += parseFeeToNumber(activeComp?.kyorugiFee);
-        if (ev.includes('poomsae')) athleteFee += parseFeeToNumber(activeComp?.poomsaeFee);
-        if (ev.includes('para')) athleteFee += parseFeeToNumber(activeComp?.paraFee);
-        if (ev.includes('virtual')) athleteFee += parseFeeToNumber(activeComp?.virtualFee);
-        if (ev.includes('kyukpa')) athleteFee += parseFeeToNumber(activeComp?.kyukpaFee);
-        if (ev.includes('speed kicking')) athleteFee += parseFeeToNumber(activeComp?.speedKickingFee);
-        if (ev.includes('skipping rope')) athleteFee += parseFeeToNumber(activeComp?.skippingRopeFee);
+        if (ev.includes('kyorugi')) eventFee += parseFeeToNumber(activeComp?.kyorugiFee);
+        if (ev.includes('poomsae')) eventFee += parseFeeToNumber(activeComp?.poomsaeFee);
+        if (ev.includes('para')) eventFee += parseFeeToNumber(activeComp?.paraFee);
+        if (ev.includes('virtual')) eventFee += parseFeeToNumber(activeComp?.virtualFee);
+        if (ev.includes('kyukpa')) eventFee += parseFeeToNumber(activeComp?.kyukpaFee);
+        if (ev.includes('speed kicking')) eventFee += parseFeeToNumber(activeComp?.speedKickingFee);
+        if (ev.includes('skipping rope')) eventFee += parseFeeToNumber(activeComp?.skippingRopeFee);
+        tierLabel = "Standard Event Fee";
       }
-      
+
       return [
-        `"${p.name}"`,
+        `"${(p.name || '').replace(/"/g, '""')}"`,
         `'${p.ic || ''}'`,
-        `"${p.event || ''}"`,
-        `"${p.ageGroup || ''}"`,
-        `"${p.weightClass || ''}"`,
-        isSpecialPackage ? "Bundled Package" : formatCurrency(athleteFee, '', activeComp?.currency)
+        `"${(p.event || '').replace(/"/g, '""')}"`,
+        `"${(p.ageGroup || '').replace(/"/g, '""')}"`,
+        `"${(p.weightClass || '').replace(/"/g, '""')}"`,
+        `"${tierLabel}"`,
+        `"${formatCurrency(eventFee, '', activeComp?.currency)}"`
       ].join(',');
     });
     
@@ -6473,7 +6538,9 @@ export default function App() {
                 const eventAthletes = coachAthletes.filter(p => !p.id.startsWith('STAFF-') && p.ageGroup !== 'STAFF');
                 const groupedByIC: Record<string, number> = {};
                 eventAthletes.forEach(p => {
-                  const key = p.ic ? p.ic.trim().toLowerCase() : p.name.trim().toLowerCase();
+                  const cleanIc = p.ic ? p.ic.trim().toLowerCase() : '';
+                  const isDummyIc = !cleanIc || cleanIc === '0' || cleanIc === '-' || cleanIc === 'n/a' || cleanIc === 'none' || cleanIc === 'nil' || cleanIc.length < 4;
+                  const key = isDummyIc ? p.name.trim().toLowerCase() : cleanIc;
                   groupedByIC[key] = (groupedByIC[key] || 0) + 1;
                 });
                 
@@ -11552,7 +11619,9 @@ export default function App() {
 
                           const groupedByIC: Record<string, number> = {};
                           counts.athletes.forEach((p: Player) => {
-                            const key = p.ic ? p.ic.trim().toLowerCase() : p.name.trim().toLowerCase();
+                            const cleanIc = p.ic ? p.ic.trim().toLowerCase() : '';
+                            const isDummyIc = !cleanIc || cleanIc === '0' || cleanIc === '-' || cleanIc === 'n/a' || cleanIc === 'none' || cleanIc === 'nil' || cleanIc.length < 4;
+                            const key = isDummyIc ? p.name.trim().toLowerCase() : cleanIc;
                             groupedByIC[key] = (groupedByIC[key] || 0) + 1;
                           });
                           
