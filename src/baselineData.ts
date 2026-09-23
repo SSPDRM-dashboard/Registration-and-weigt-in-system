@@ -26,35 +26,6 @@ export const BASELINE_GLOBAL_CLUBS: string[] = [
 
 export const BASELINE_COMPETITIONS: Competition[] = [
   {
-    "id": "15thrtschampionshdry",
-    "venue": "Pulau Pinang",
-    "endDate": "2026-07-19",
-    "date": "2026-07-17",
-    "name": "15th RTS Championship 2026",
-    "isActive": true,
-    "weightClasses": [],
-    "staffCode": "1",
-    "events": [
-      "Kyorugi",
-      "Para Kyorugi",
-      "Recognize Poomsae",
-      "Free Style Poomsae",
-      "Para Poomsae",
-      "Virtual Taekwondo",
-      "Kyukpa",
-      "Speed Kicking",
-      "Skipping Rope",
-      "Recognize Poomsae 2"
-    ],
-    "registrationCloseDate": "",
-    "genders": [
-      "Male",
-      "Female",
-      "Mix"
-    ],
-    "ageGroups": []
-  },
-  {
     "endDate": "2026-09-05",
     "date": "2026-09-05",
     "name": "SMART MA CLOSE CHAMPIONSHIP 2026",

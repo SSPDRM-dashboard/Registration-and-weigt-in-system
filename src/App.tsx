@@ -69,6 +69,7 @@ import {
   deletePlayerFromFirestore,
   fetchPlayerById,
   fetchCompetitionById,
+  isCompetitionDeleted,
   fetchRefereesForComp,
   saveRefereeToFirestore,
   deleteRefereeFromFirestore,
@@ -461,10 +462,13 @@ export default function App() {
       const s = localStorage.getItem('app:competitions');
       if (s) {
         const parsed = JSON.parse(s);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter((c: Competition) => c && c.id && !isCompetitionDeleted(c.id));
+          if (valid.length > 0) return valid;
+        }
       }
     } catch (e) {}
-    return BASELINE_COMPETITIONS;
+    return BASELINE_COMPETITIONS.filter(c => !isCompetitionDeleted(c.id));
   });
   const [coaches, setCoaches] = useState<Record<string, Coach>>(() => {
     try {
@@ -1073,7 +1077,11 @@ export default function App() {
 
         // 2. Resolve Tournament / Competition
         const targetCompId = compIdParam || matchedPlayer?.compId;
-        if (targetCompId) {
+        const isTargetDeleted = targetCompId ? isCompetitionDeleted(targetCompId) : false;
+
+        if (isTargetDeleted) {
+          triggerMsg('This tournament has been closed or removed by the organizer.', 'error');
+        } else if (targetCompId) {
           try {
             matchedComp = await fetchCompetitionById(targetCompId);
           } catch (e) {
@@ -1085,19 +1093,19 @@ export default function App() {
               const raw = localStorage.getItem('app:competitions');
               if (raw) {
                 const comps: Competition[] = JSON.parse(raw);
-                matchedComp = comps.find(c => c.id === targetCompId || (c.id && c.id.toLowerCase() === targetCompId.toLowerCase())) || null;
+                matchedComp = comps.find(c => (c.id === targetCompId || (c.id && c.id.toLowerCase() === targetCompId.toLowerCase())) && !isCompetitionDeleted(c.id)) || null;
               }
             } catch {}
           }
         }
 
-        // Fallback: active competition or first competition
-        if (!matchedComp) {
+        // Fallback: active competition or first valid non-deleted competition
+        if (!matchedComp && !isTargetDeleted) {
           try {
             const raw = localStorage.getItem('app:competitions');
             if (raw) {
               const comps: Competition[] = JSON.parse(raw);
-              matchedComp = comps.find(c => c.isActive !== false) || comps[0] || null;
+              matchedComp = comps.find(c => c.isActive !== false && !isCompetitionDeleted(c.id)) || comps.find(c => !isCompetitionDeleted(c.id)) || null;
             }
           } catch {}
         }
@@ -1105,13 +1113,15 @@ export default function App() {
         if (matchedPlayer) {
           setIndemnityPlayer(matchedPlayer);
         }
-        if (matchedComp) {
+        if (matchedComp && !isCompetitionDeleted(matchedComp.id)) {
           setIndemnityComp(matchedComp);
+        } else {
+          setIndemnityComp(null);
         }
 
         setIndemnityLoading(false);
 
-        if (!matchedPlayer && athleteId) {
+        if (!matchedPlayer && athleteId && !isTargetDeleted) {
           triggerMsg('Athlete record not found for indemnity form.', 'error');
         }
       };
@@ -1126,11 +1136,11 @@ export default function App() {
   // Synchronize indemnityComp with competitions if competitions load slightly after URL parsing
   useEffect(() => {
     if (screen === 'parentIndemnity' && !indemnityComp && competitions.length > 0) {
-      if (indemnityPlayer?.compId) {
-        const found = competitions.find(c => c.id === indemnityPlayer.compId);
+      if (indemnityPlayer?.compId && !isCompetitionDeleted(indemnityPlayer.compId)) {
+        const found = competitions.find(c => c.id === indemnityPlayer.compId && !isCompetitionDeleted(c.id));
         if (found) setIndemnityComp(found);
       } else {
-        const active = competitions.find(c => c.isActive !== false) || competitions[0];
+        const active = competitions.find(c => c.isActive !== false && !isCompetitionDeleted(c.id)) || competitions.find(c => !isCompetitionDeleted(c.id));
         if (active) setIndemnityComp(active);
       }
     }
@@ -1325,13 +1335,18 @@ export default function App() {
         }
       }
 
-      if (loadedComps.length === 0) {
-        loadedComps = BASELINE_COMPETITIONS;
-        localStorage.setItem('app:competitions', JSON.stringify(BASELINE_COMPETITIONS));
-      }
+      // Purge any deleted competitions from loadedComps
+      loadedComps = loadedComps.filter(c => c && c.id && !isCompetitionDeleted(c.id));
 
-      // Ensure stteresacup2026udkr is always present in competitions list
-      if (!loadedComps.some(c => c.id === 'stteresacup2026udkr')) {
+      if (loadedComps.length === 0) {
+        loadedComps = BASELINE_COMPETITIONS.filter(c => !isCompetitionDeleted(c.id));
+      }
+      try {
+        localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
+      } catch (e) {}
+
+      // Ensure stteresacup2026udkr is always present in competitions list if not deleted
+      if (!isCompetitionDeleted('stteresacup2026udkr') && !loadedComps.some(c => c.id === 'stteresacup2026udkr')) {
         const teresaComp = BASELINE_COMPETITIONS.find(c => c.id === 'stteresacup2026udkr');
         if (teresaComp) {
           loadedComps = [teresaComp, ...loadedComps];

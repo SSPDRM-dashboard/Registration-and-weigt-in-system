@@ -107,13 +107,32 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // --- FIRESTORE HELPERS ---
 
+export const KNOWN_DELETED_COMP_IDS: string[] = ['15thrtschampionshdry'];
+
+export function isCompetitionDeleted(compId: string): boolean {
+  if (!compId) return false;
+  const cleanId = compId.trim().toLowerCase();
+  if (KNOWN_DELETED_COMP_IDS.some(id => id.toLowerCase() === cleanId)) return true;
+  try {
+    const stored = localStorage.getItem('app:deletedComps');
+    if (stored) {
+      const list = JSON.parse(stored);
+      if (Array.isArray(list) && list.some((id: string) => id.toLowerCase() === cleanId)) return true;
+    }
+  } catch {}
+  return false;
+}
+
 export async function fetchCompetitions(): Promise<Competition[]> {
   try {
     const colRef = collection(db, 'competitions');
     const snap = await getDocs(colRef);
     const list: Competition[] = [];
     snap.forEach((doc) => {
-      list.push(doc.data() as Competition);
+      const data = doc.data() as Competition;
+      if (data && data.id && !isCompetitionDeleted(data.id)) {
+        list.push(data);
+      }
     });
     if (list.length > 0) {
       try { localStorage.setItem('app:competitions', JSON.stringify(list)); } catch (e) {}
@@ -126,10 +145,16 @@ export async function fetchCompetitions(): Promise<Competition[]> {
     const cached = localStorage.getItem('app:competitions');
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const filtered = parsed.filter((c: Competition) => c && c.id && !isCompetitionDeleted(c.id));
+        if (filtered.length > 0) {
+          try { localStorage.setItem('app:competitions', JSON.stringify(filtered)); } catch (e) {}
+          return filtered;
+        }
+      }
     }
   } catch (e) {}
-  return BASELINE_COMPETITIONS;
+  return BASELINE_COMPETITIONS.filter(c => !isCompetitionDeleted(c.id));
 }
 
 export async function saveCompetition(comp: Competition): Promise<void> {
@@ -143,6 +168,25 @@ export async function saveCompetition(comp: Competition): Promise<void> {
 
 export async function deleteCompetition(compId: string): Promise<void> {
   try {
+    if (!KNOWN_DELETED_COMP_IDS.includes(compId)) {
+      KNOWN_DELETED_COMP_IDS.push(compId);
+    }
+    try {
+      const stored = localStorage.getItem('app:deletedComps');
+      const list: string[] = stored ? JSON.parse(stored) : [];
+      if (!list.includes(compId)) {
+        list.push(compId);
+        localStorage.setItem('app:deletedComps', JSON.stringify(list));
+      }
+      // Also scrub from cached app:competitions immediately
+      const cached = localStorage.getItem('app:competitions');
+      if (cached) {
+        const comps: Competition[] = JSON.parse(cached);
+        const filtered = comps.filter(c => c && c.id !== compId);
+        localStorage.setItem('app:competitions', JSON.stringify(filtered));
+      }
+    } catch (e) {}
+
     const docRef = doc(db, 'competitions', compId);
     await deleteDoc(docRef);
   } catch (error) {
@@ -419,13 +463,16 @@ export async function fetchPlayerById(playerId: string): Promise<Player | null> 
 
 export async function fetchCompetitionById(compId: string): Promise<Competition | null> {
   const cleanId = (compId || '').trim();
-  if (!cleanId) return null;
+  if (!cleanId || isCompetitionDeleted(cleanId)) return null;
 
   try {
     const docRef = doc(db, 'competitions', cleanId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      return snap.data() as Competition;
+      const data = snap.data() as Competition;
+      if (data && !isCompetitionDeleted(data.id)) {
+        return data;
+      }
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `competitions/${cleanId}`);
@@ -436,7 +483,7 @@ export async function fetchCompetitionById(compId: string): Promise<Competition 
     const stored = localStorage.getItem('app:competitions');
     if (stored) {
       const list: Competition[] = JSON.parse(stored);
-      const found = list.find(c => c.id === cleanId || (c.id && c.id.toLowerCase() === cleanId.toLowerCase()));
+      const found = list.find(c => (c.id === cleanId || (c.id && c.id.toLowerCase() === cleanId.toLowerCase())) && !isCompetitionDeleted(c.id));
       if (found) return found;
     }
   } catch {}

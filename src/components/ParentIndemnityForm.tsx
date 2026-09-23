@@ -153,21 +153,21 @@ export default function ParentIndemnityForm({
     );
   }
 
-  // If no competition record is found at all, we show access denied
-  if (!indemnityComp) {
+  // If no competition record is found or competition is inactive, we show clear notice
+  if (!indemnityComp || indemnityComp.isActive === false) {
     return (
       <div className="max-w-md mx-auto my-12 p-8 bg-surface rounded-2xl border border-line shadow-xl text-center space-y-6">
-        <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
-          <ShieldAlert className="w-8 h-8 text-red-500" />
+        <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto border border-amber-500/20">
+          <ShieldAlert className="w-8 h-8 text-amber-500" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-bold text-text uppercase tracking-wider">Access Denied</h3>
+          <h3 className="text-lg font-bold text-text uppercase tracking-wider">Tournament Closed or Unavailable</h3>
           <p className="text-xs text-text-dim leading-relaxed">
-            We could not locate an active tournament record matching this digital indemnity token.
+            This tournament has concluded, closed registration, or been removed by the event organizers.
           </p>
         </div>
         <p className="text-[11px] bg-ink/50 p-3 rounded-lg text-text-dim text-left border border-line">
-          Please contact your club's Head Coach or Team Manager to generate a valid, up-to-date parental consent form link.
+          Please contact your club's Head Coach or Team Manager to get the correct, active parental consent link.
         </p>
         <button 
           onClick={() => setScreen('login')}
