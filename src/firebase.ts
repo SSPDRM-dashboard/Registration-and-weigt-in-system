@@ -81,7 +81,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   }
 
   // Suppress quota errors
-  if (errMsg.includes('Quota limit exceeded')) {
+  if (errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted') || errCode === 'resource-exhausted') {
     console.warn(`[Firestore Quota Exceeded] Operation ${operationType} on ${path} will rely on local fallback.`);
     return;
   }
@@ -637,10 +637,48 @@ export function subscribeToRefereesForComp(compId: string, callback: (referees: 
     });
     
     const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
+    if (uniqueRefs.length > 0) {
+      try { localStorage.setItem(`app:referees:${compId}`, JSON.stringify(uniqueRefs)); } catch (e) {}
+    }
     callback(uniqueRefs);
   }, (error) => {
-    handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
-    onError(error as Error);
+    const errMsg = (error as Error)?.message || String(error);
+    const errCode = (error as { code?: string })?.code;
+    const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted') || errCode === 'resource-exhausted';
+    console.warn('[Firestore Referees Sync Error]', isQuota ? 'Quota limit exceeded' : error);
+
+    const cached = localStorage.getItem(`app:referees:${compId}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          callback(parsed);
+          return;
+        }
+      } catch (e) {}
+    }
+
+    const cachedAccounts = localStorage.getItem('app:refereeAccounts');
+    if (cachedAccounts) {
+      try {
+        const parsedAccounts = JSON.parse(cachedAccounts);
+        if (Array.isArray(parsedAccounts)) {
+          const compRefs = parsedAccounts.filter((r: Referee) => r.compId === compId);
+          if (compRefs.length > 0) {
+            callback(compRefs);
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const baselineForComp = BASELINE_REFEREE_ACCOUNTS.filter(r => r.compId === compId);
+    callback(baselineForComp);
+
+    if (!isQuota) {
+      handleFirestoreError(error, OperationType.GET, `referees?compId=${compId}`);
+      onError(error as Error);
+    }
   });
   
   return unsubscribe;
@@ -725,7 +763,9 @@ export function subscribeToRefereeAccounts(callback: (accounts: Referee[]) => vo
       callback(BASELINE_REFEREE_ACCOUNTS);
     }
   }, (error) => {
-    const isQuota = String(error).includes('Quota limit exceeded');
+    const errMsg = (error as Error)?.message || String(error);
+    const errCode = (error as { code?: string })?.code;
+    const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted') || errCode === 'resource-exhausted';
     console.warn('[Firestore Referee Accounts Sync Error]', isQuota ? 'Quota limit exceeded' : error);
     const cached = localStorage.getItem('app:refereeAccounts');
     if (cached) {
@@ -755,10 +795,34 @@ export function subscribeToMyReferees(nricCleaned: string, callback: (referees: 
         raw.push(data);
       }
     });
-    callback(deduplicateReferees(raw));
+    const deduped = deduplicateReferees(raw);
+    if (deduped.length > 0) {
+      try { localStorage.setItem(`app:myReferees:${nricCleaned}`, JSON.stringify(deduped)); } catch (e) {}
+    }
+    callback(deduped);
   }, (error) => {
-    handleFirestoreError(error, OperationType.GET, `referees`);
-    onError(error as Error);
+    const errMsg = (error as Error)?.message || String(error);
+    const errCode = (error as { code?: string })?.code;
+    const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted') || errCode === 'resource-exhausted';
+    console.warn('[Firestore My Referees Sync Error]', isQuota ? 'Quota limit exceeded' : error);
+
+    const cached = localStorage.getItem(`app:myReferees:${nricCleaned}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          callback(parsed);
+          return;
+        }
+      } catch (e) {}
+    }
+    const baseline = BASELINE_REFEREE_ACCOUNTS.filter(r => r.nric && r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === nricCleaned);
+    callback(baseline);
+
+    if (!isQuota) {
+      handleFirestoreError(error, OperationType.GET, `referees`);
+      onError(error as Error);
+    }
   });
   return unsubscribe;
 }

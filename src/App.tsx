@@ -1459,7 +1459,9 @@ export default function App() {
         setRefereeAccounts(accounts);
       },
       (err) => {
-        console.error("Failed to sync referee accounts", err);
+        const errMsg = (err as Error)?.message || String(err);
+        const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
+        if (!isQuota) console.error("Failed to sync referee accounts", err);
       }
     );
     return () => {
@@ -1584,7 +1586,9 @@ export default function App() {
           }
         }
       }, (err) => {
-        console.error("Failed to sync players", err);
+        const errMsg = (err as Error)?.message || String(err);
+        const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
+        if (!isQuota) console.error("Failed to sync players", err);
       });
     } else {
       setPlayers([]);
@@ -1609,14 +1613,22 @@ export default function App() {
           const matched = cloudReferees.find(r => r.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanUser);
           if (matched) setActiveReferee(matched);
         }
-      }, (err) => console.error("Failed to sync referees", err));
+      }, (err) => {
+        const errMsg = (err as Error)?.message || String(err);
+        const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
+        if (!isQuota) console.error("Failed to sync referees", err);
+      });
     } else if (role === 'referee' && user) {
       const cleanUser = user.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       unsubscribe = subscribeToMyReferees(cleanUser, (myReferees) => {
         setReferees(myReferees);
         const matched = myReferees[0];
         if (matched) setActiveReferee(matched);
-      }, (err) => console.error("Failed to sync my referees", err));
+      }, (err) => {
+        const errMsg = (err as Error)?.message || String(err);
+        const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
+        if (!isQuota) console.error("Failed to sync my referees", err);
+      });
     } else {
       setReferees([]);
     }
@@ -1633,7 +1645,11 @@ export default function App() {
       const cleanUser = user.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const unsub = subscribeToMyReferees(cleanUser, (myRefs) => {
         setMyRefereeRegistrations(myRefs);
-      }, (err) => console.error("Failed to sync my referee registrations", err));
+      }, (err) => {
+        const errMsg = (err as Error)?.message || String(err);
+        const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
+        if (!isQuota) console.error("Failed to sync my referee registrations", err);
+      });
       return () => {
         if (unsub) unsub();
       };
@@ -6285,18 +6301,18 @@ export default function App() {
             {(() => {
               const coachClub = coaches[user || '']?.club || 'My Club';
               return (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface p-6 rounded-2xl border border-line shadow-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface p-6 rounded-2xl border border-line shadow-sm items-stretch">
                   {/* Box 1: Bank Details provided by Organizer */}
-                  <div className="space-y-4 flex flex-col justify-between">
+                  <div className="flex flex-col justify-between h-full space-y-4">
                     <div>
                       <h3 className="text-[15px] font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
-                        <Lock className="w-4 h-4 text-gold" />
+                        <Lock className="w-4 h-4 text-gold shrink-0" />
                         1. Bank details provided by organizer
                       </h3>
                       <p className="text-[13px] text-text-dim uppercase tracking-wider mb-3">Please use these credentials to pay registration fees</p>
                     </div>
 
-                    <div className="bg-ink/30 p-4 rounded-xl border border-line/50 space-y-3">
+                    <div className="flex-1 bg-ink/30 p-4 rounded-xl border border-line/50 flex flex-col justify-between space-y-3">
                       <div className="space-y-2">
                         <div className="flex justify-between items-center py-1.5 border-b border-line/30">
                           <span className="text-[13px] font-semibold text-text-dim uppercase">Bank Name</span>
@@ -6377,12 +6393,12 @@ export default function App() {
                       )}
                     </div>
 
-                    {activeComp.bankQrCode && (
-                      <div className="flex items-center gap-3 bg-gold/5 p-2 rounded-lg border border-gold/20 mt-1">
+                    {activeComp.bankQrCode ? (
+                      <div className="flex items-center gap-3 bg-gold/5 p-2 rounded-lg border border-gold/20 min-h-[76px]">
                         <img 
                           src={activeComp.bankQrCode} 
                           alt="Scan QR to Pay" 
-                          className="w-14 h-14 object-contain rounded bg-white p-0.5"
+                          className="w-14 h-14 object-contain rounded bg-white p-0.5 shrink-0"
                           referrerPolicy="no-referrer"
                         />
                         <div>
@@ -6390,14 +6406,16 @@ export default function App() {
                           <p className="text-[11px] text-text-dim">Scan with your banking app to transfer fees</p>
                         </div>
                       </div>
+                    ) : (
+                      <div className="hidden md:block min-h-[76px]" />
                     )}
                   </div>
 
                   {/* Box 2: Coach Receipt Upload */}
-                  <div className="flex flex-col justify-between">
+                  <div className="flex flex-col justify-between h-full space-y-4">
                     <div>
                       <h3 className="text-[15px] font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
-                        <FileText className="w-4 h-4 text-gold" />
+                        <FileText className="w-4 h-4 text-gold shrink-0" />
                         2. Coach to upload the payment receipt
                       </h3>
                       <p className="text-[13px] text-text-dim uppercase tracking-wider mb-3">Upload bank transaction receipt for your club registration ({coachClub})</p>
@@ -6407,57 +6425,57 @@ export default function App() {
                       const clubKey = coachClub.toUpperCase();
                       const receipt = activeComp.receipts?.[clubKey];
                       return (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-ink/25 p-4 rounded-xl border border-line/50">
-                          {/* Receipt Status and Thumbnail */}
-                          <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-lg p-2 bg-ink/10 h-32">
-                            {receipt ? (
-                              <div className="relative group w-24 h-24 flex flex-col justify-center items-center">
-                                <img 
-                                  src={receipt.receiptUrl} 
-                                  alt="Receipt preview" 
-                                  className="w-full h-16 object-cover rounded cursor-pointer border border-line"
-                                  onClick={() => setSelectedClubReceipt({ clubName: coachClub, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
-                                  referrerPolicy="no-referrer"
-                                />
-                                <div className="text-[11px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-0.5">
-                                  <CheckCircle className="w-2.5 h-2.5 text-green-400" />
-                                  <span>Submitted</span>
+                        <div className="flex-1 flex flex-col justify-center bg-ink/25 p-4 rounded-xl border border-line/50">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch h-full">
+                            {/* Receipt Status and Thumbnail */}
+                            <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-xl p-3 bg-ink/10 h-full min-h-[140px]">
+                              {receipt ? (
+                                <div className="relative group w-28 h-28 flex flex-col justify-center items-center">
+                                  <img 
+                                    src={receipt.receiptUrl} 
+                                    alt="Receipt preview" 
+                                    className="w-full h-16 object-cover rounded-lg cursor-pointer border border-line shadow-sm hover:opacity-90 transition"
+                                    onClick={() => setSelectedClubReceipt({ clubName: coachClub, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div className="text-[11px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-1">
+                                    <CheckCircle className="w-3 h-3 text-green-400" />
+                                    <span>Submitted</span>
+                                  </div>
+                                  <div className="text-[10px] text-text-dim text-center truncate w-full">
+                                    {receipt.uploadedAt}
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      const updated = competitions.map(c => {
+                                        if (c.id === compId) {
+                                          const nextRecs = { ...(c.receipts || {}) };
+                                          delete nextRecs[clubKey];
+                                          return { ...c, receipts: nextRecs };
+                                        }
+                                        return c;
+                                      });
+                                      saveCompsToStorage(updated);
+                                      triggerMsg('Receipt deleted.', 'ok');
+                                    }}
+                                    className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition shadow-md cursor-pointer"
+                                    title="Delete Receipt"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
-                                <div className="text-[10px] text-text-dim text-center truncate w-full">
-                                  {receipt.uploadedAt}
+                              ) : (
+                                <div className="text-center p-2">
+                                  <FileText className="w-8 h-8 text-text-dim/50 mx-auto mb-1.5" />
+                                  <span className="text-[13px] text-text-dim font-bold uppercase tracking-wider block">Pending</span>
                                 </div>
-                                <button
-                                  onClick={() => {
-                                    const updated = competitions.map(c => {
-                                      if (c.id === compId) {
-                                        const nextRecs = { ...(c.receipts || {}) };
-                                        delete nextRecs[clubKey];
-                                        return { ...c, receipts: nextRecs };
-                                      }
-                                      return c;
-                                    });
-                                    saveCompsToStorage(updated);
-                                    triggerMsg('Receipt deleted.', 'ok');
-                                  }}
-                                  className="absolute -top-1.5 -right-1.5 bg-red-500/90 text-white p-1 rounded-full hover:bg-red-600 transition"
-                                  title="Delete Receipt"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="text-center p-2">
-                                <FileText className="w-8 h-8 text-text-dim/50 mx-auto mb-1" />
-                                <span className="text-[13px] text-text-dim font-medium uppercase tracking-wider block">Pending</span>
-                              </div>
-                            )}
-                          </div>
+                              )}
+                            </div>
 
-                          {/* Upload action */}
-                          <div className="space-y-2">
-                            <label className="flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-lg p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-24">
-                              <Upload className="w-5 h-5 text-gold mb-1" />
-                              <span className="text-[13px] font-bold text-text-dim uppercase">Upload Receipt</span>
+                            {/* Upload action */}
+                            <label className="flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-xl p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-full min-h-[140px] group">
+                              <Upload className="w-6 h-6 text-gold mb-1.5 group-hover:scale-110 transition-transform" />
+                              <span className="text-[13px] font-bold text-text-dim group-hover:text-gold uppercase transition-colors">Upload Receipt</span>
                               <span className="text-[11px] text-text-dim">PNG/JPG up to 3MB</span>
                               <input 
                                 type="file" 
@@ -6483,6 +6501,18 @@ export default function App() {
                         </div>
                       );
                     })()}
+
+                    {/* Pricing Rule Overview shown at bottom aligned with Box 3 (QR code) */}
+                    {activeComp.feeModel === 'SPECIAL_PACKAGE' ? (
+                      <div className="bg-ink/30 p-2.5 rounded-xl border border-line/60 flex flex-col justify-center min-h-[76px] animate-fade-in">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gold mb-1">Pricing Rule Overview</span>
+                        <p className="text-[11px] text-text-dim leading-relaxed">
+                          <strong className="text-text">1st Event:</strong> {formatCurrency(parseFeeToNumber(activeComp.packageFirstEventFee || '80'), activeComp.packageFirstEventFee, activeComp.currency)} · <strong className="text-text">2nd Event:</strong> {formatCurrency(parseFeeToNumber(activeComp.packageSecondEventFee || '40'), activeComp.packageSecondEventFee, activeComp.currency)} · <strong className="text-text">Subsequent:</strong> {formatCurrency(parseFeeToNumber(activeComp.packageSubsequentEventFee || '20'), activeComp.packageSubsequentEventFee, activeComp.currency)} (Kyukpa, Speed Kicking, Rope Skipping) · <strong className="text-text">5 Events:</strong> {formatCurrency(parseFeeToNumber(activeComp.packageFiveEventFee || '150'), activeComp.packageFiveEventFee, activeComp.currency)}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="hidden md:block min-h-[76px]" />
+                    )}
                   </div>
                 </div>
               );
