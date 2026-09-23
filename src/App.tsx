@@ -1272,8 +1272,10 @@ export default function App() {
   const [indemnityFilterStatus, setIndemnityFilterStatus] = useState<'All' | 'Completed' | 'Pending'>('All');
   const [indemnitySearchQuery, setIndemnitySearchQuery] = useState('');
 
-  // Search filter
+  // Search & division filter
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedEventFilter, setSelectedEventFilter] = useState<string>('all');
   const [publicSearchQuery, setPublicSearchQuery] = useState('');
 
   // Master Athlete Search Engine states
@@ -5158,25 +5160,76 @@ export default function App() {
   // Filter players for coach dashboard (only showing their own players) or admin
   const coachFilteredPlayers = players.filter(p => {
     const matchesUser = role === 'coach' ? p.coachUsername === user : true;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.club.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (p.schoolName && p.schoolName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                          (p.schoolCode && p.schoolCode.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                          (p.race && p.race.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesUser && matchesSearch;
+    
+    // Category filter
+    const matchesCategory = selectedCategoryFilter === 'all' || 
+      (p.ageGroup && p.ageGroup.toLowerCase() === selectedCategoryFilter.toLowerCase());
+
+    // Event filter
+    const matchesEvent = selectedEventFilter === 'all' || 
+      (p.event && p.event.toLowerCase() === selectedEventFilter.toLowerCase());
+
+    if (!matchesUser || !matchesCategory || !matchesEvent) return false;
+
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+
+    // Tokenized multi-word search
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const combinedString = `
+      ${p.name || ''} 
+      ${p.id || ''} 
+      ${p.club || ''} 
+      ${p.schoolName || ''} 
+      ${p.schoolCode || ''} 
+      ${p.race || ''} 
+      ${p.event || ''} 
+      ${p.ageGroup || ''} 
+      ${p.gender || ''} 
+      ${p.ageGroup || ''} · ${p.gender || ''}
+      ${p.ageGroup || ''} - ${p.gender || ''}
+      ${p.weightClass || ''} 
+      ${p.poomsaePattern || ''}
+    `.toLowerCase();
+
+    return tokens.every(token => combinedString.includes(token));
   });
 
   const publicFilteredPlayers = players.filter(p => {
-    return p.name.toLowerCase().includes(publicSearchQuery.toLowerCase()) || 
-           p.id.toLowerCase().includes(publicSearchQuery.toLowerCase()) ||
-           p.club.toLowerCase().includes(publicSearchQuery.toLowerCase()) ||
-           (p.schoolName && p.schoolName.toLowerCase().includes(publicSearchQuery.toLowerCase())) ||
-           (p.schoolCode && p.schoolCode.toLowerCase().includes(publicSearchQuery.toLowerCase())) ||
-           (p.race && p.race.toLowerCase().includes(publicSearchQuery.toLowerCase()));
+    const q = publicSearchQuery.toLowerCase().trim();
+    if (!q) return true;
+
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const combinedString = `
+      ${p.name || ''} 
+      ${p.id || ''} 
+      ${p.club || ''} 
+      ${p.schoolName || ''} 
+      ${p.schoolCode || ''} 
+      ${p.race || ''} 
+      ${p.event || ''} 
+      ${p.ageGroup || ''} 
+      ${p.gender || ''} 
+      ${p.ageGroup || ''} · ${p.gender || ''}
+      ${p.ageGroup || ''} - ${p.gender || ''}
+      ${p.weightClass || ''} 
+      ${p.poomsaePattern || ''}
+    `.toLowerCase();
+
+    return tokens.every(token => combinedString.includes(token));
   });
 
   const activeComp = competitions.find(c => c.id === compId) || competitions.find(c => c.isActive !== false) || (competitions.length > 0 ? competitions[0] : undefined);
+  const availableDivisionCategories = Array.from(new Set([
+    ...(activeComp?.ageGroups || []),
+    ...players.map(p => p.ageGroup).filter((Boolean as unknown) as (x: any) => x is string)
+  ])).filter(Boolean).sort();
+
+  const availableEvents = Array.from(new Set([
+    ...(activeComp?.events || []),
+    ...players.map(p => p.event).filter((Boolean as unknown) as (x: any) => x is string)
+  ])).filter(Boolean).sort();
+
   const defaultRings = ['Ring 1', 'Ring 2', 'Ring 3', 'Ring 4'];
   const currentRings = (activeComp?.rings && activeComp.rings.length > 0) ? activeComp.rings : defaultRings;
 
@@ -6619,12 +6672,12 @@ export default function App() {
                 
                 {/* Search Bar & Indemnity Forms */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-                  <div className="relative w-full md:w-64">
+                  <div className="relative w-full md:w-80">
                     <input 
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search by name or code..."
+                      placeholder="Search name, ID, club, division, weight..."
                       className="w-full bg-ink border border-line text-xs rounded-xl py-2 pl-8 pr-4 text-text focus:outline-none focus:border-gold"
                     />
                     <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-2.5 top-2.5" />
@@ -10891,7 +10944,7 @@ export default function App() {
                         <th className="p-4">Name</th>
                         <th className="p-4">Club Represented</th>
                         <th className="p-4">Division Category</th>
-                        <th className="p-4">Weight Division</th>
+                        <th className="p-4">Weight / Target Division</th>
                         <th className="p-4">Weigh-In Scale status</th>
                         <th className="p-4">Indemnity</th>
                         {showSignatures && <th className="p-4 text-center">Signature</th>}
@@ -10920,8 +10973,17 @@ export default function App() {
                             )}
                           </td>
                           <td className="p-4 text-text">{p.club}</td>
-                          <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
-                          <td className="p-4 text-text-dim">{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-gold/15 text-gold border border-gold/30">
+                                {p.event || 'Kyorugi'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-text font-medium mt-1">
+                              {p.ageGroup || 'Open Age'}{p.gender ? ` · ${p.gender}` : ''}
+                            </div>
+                          </td>
+                          <td className="p-4 text-text font-medium">{p.weightClass || '—'}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</td>
                           <td className="p-4">
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
@@ -11582,15 +11644,41 @@ export default function App() {
                   <p className="text-[10px] text-text-dim">Search, edit, or manage weigh-ins for all registered athletes.</p>
                 </div>
                 
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5 w-full sm:w-auto flex-wrap">
+                  {/* Event Filter */}
+                  <select
+                    value={selectedEventFilter}
+                    onChange={(e) => setSelectedEventFilter(e.target.value)}
+                    className="bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
+                    title="Filter by Event Discipline"
+                  >
+                    <option value="all">All Events</option>
+                    {availableEvents.map(ev => (
+                      <option key={ev} value={ev}>{ev}</option>
+                    ))}
+                  </select>
+
+                  {/* Division Category Filter */}
+                  <select
+                    value={selectedCategoryFilter}
+                    onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                    className="bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition max-w-[200px] truncate"
+                    title="Filter by Division Category / Age Group"
+                  >
+                    <option value="all">All Division Categories</option>
+                    {availableDivisionCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+
                   {/* Search Bar */}
-                  <div className="relative w-full sm:w-64">
+                  <div className="relative w-full sm:w-72">
                     <input 
                       type="text" 
-                      placeholder="Search name, ID, or club..."
+                      placeholder="Search name, ID, club, division, weight..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text pl-9 focus:outline-none focus:border-gold transition"
+                      className="w-full bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text pl-9 pr-8 focus:outline-none focus:border-gold transition"
                     />
                     <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-3 top-2.5" />
                     {searchQuery && (
@@ -11602,6 +11690,19 @@ export default function App() {
                       </button>
                     )}
                   </div>
+
+                  {(selectedCategoryFilter !== 'all' || selectedEventFilter !== 'all' || searchQuery) && (
+                    <button
+                      onClick={() => {
+                        setSelectedCategoryFilter('all');
+                        setSelectedEventFilter('all');
+                        setSearchQuery('');
+                      }}
+                      className="text-[11px] text-gold hover:underline font-semibold px-1 py-1"
+                    >
+                      Reset Filters
+                    </button>
+                  )}
                   
                   {players.length > 0 && (
                     <div className="flex gap-2">
@@ -11646,7 +11747,7 @@ export default function App() {
                         <th className="p-4">Athlete Name</th>
                         <th className="p-4">Club/Team</th>
                         <th className="p-4">Division Category</th>
-                        <th className="p-4">Weight Division</th>
+                        <th className="p-4">Weight / Target Division</th>
                         <th className="p-4">Weigh-In Scale status</th>
                         <th className="p-4">Indemnity</th>
                         {showSignatures && <th className="p-4 text-center">Signature</th>}
@@ -11675,8 +11776,17 @@ export default function App() {
                             )}
                           </td>
                           <td className="p-4 text-text">{p.club}</td>
-                          <td className="p-4 text-text-dim">{p.ageGroup} · {p.gender}</td>
-                          <td className="p-4 text-text-dim">{p.weightClass}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-gold/15 text-gold border border-gold/30">
+                                {p.event || 'Kyorugi'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-text font-medium mt-1">
+                              {p.ageGroup || 'Open Age'}{p.gender ? ` · ${p.gender}` : ''}
+                            </div>
+                          </td>
+                          <td className="p-4 text-text font-medium">{p.weightClass || '—'}{p.poomsaePattern ? ` / ${p.poomsaePattern}` : ''}</td>
                           <td className="p-4">
                             <div className="flex flex-col gap-1 items-start">
                               {renderBadge(p.weighIn?.result)}
