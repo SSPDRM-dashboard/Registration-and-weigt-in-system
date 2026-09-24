@@ -89,6 +89,7 @@ export interface Competition {
   receipts?: Record<string, ClubReceipt>;
   publicViewPassword?: string;
   hideScaleReadout?: boolean;
+  allowCoachDownloadRoster?: boolean;
   affiliatedClubs?: string[];
   rings?: string[];
   ageGroupDetailsPhotoUrl?: string;

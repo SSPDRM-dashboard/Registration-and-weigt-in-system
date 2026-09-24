@@ -2706,3 +2706,36 @@ export const BASELINE_REFEREE_ACCOUNTS: Referee[] = [
     "bankName": "MAYBANK"
   }
 ];
+
+export function getBaselineMasterAthletes(): Record<string, Partial<Player>> {
+  const master: Record<string, Partial<Player>> = {};
+  if (Array.isArray(BASELINE_TERESA_PLAYERS)) {
+    BASELINE_TERESA_PLAYERS.forEach(p => {
+      if (!p || !p.name) return;
+      const key = (p.ic && p.ic.trim()) ? p.ic.trim() : (p.id || p.name.trim());
+      if (!master[key]) {
+        master[key] = {
+          id: p.id || key,
+          name: p.name,
+          ic: p.ic || '',
+          dob: p.dob || '',
+          gender: p.gender || '',
+          club: p.club || '',
+          schoolName: p.schoolName || '',
+          schoolCode: p.schoolCode || '',
+          race: p.race || '',
+          photo: p.photo || undefined,
+          coachUsername: p.coachUsername || ''
+        };
+      } else {
+        if (!master[key].photo && p.photo) master[key].photo = p.photo;
+        if (!master[key].dob && p.dob) master[key].dob = p.dob;
+        if (!master[key].schoolName && p.schoolName) master[key].schoolName = p.schoolName;
+        if (!master[key].schoolCode && p.schoolCode) master[key].schoolCode = p.schoolCode;
+        if (!master[key].race && p.race) master[key].race = p.race;
+        if (!master[key].coachUsername && p.coachUsername) master[key].coachUsername = p.coachUsername;
+      }
+    });
+  }
+  return master;
+}

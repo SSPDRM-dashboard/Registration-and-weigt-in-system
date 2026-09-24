@@ -40,7 +40,8 @@ import {
   BASELINE_TERESA_PLAYERS, 
   BASELINE_COACHES, 
   BASELINE_ORGANIZERS, 
-  BASELINE_REFEREE_ACCOUNTS 
+  BASELINE_REFEREE_ACCOUNTS,
+  getBaselineMasterAthletes
 } from './baselineData';
 import { DEMO_IMPORT, beltColorFor } from './demoData';
 import { 
@@ -52,6 +53,7 @@ import {
 import ParentIndemnityForm from './components/ParentIndemnityForm';
 import { 
   fetchCompetitions, 
+  subscribeToCompetitions,
   saveCompetition, 
   deleteCompetition, 
   fetchCoaches, 
@@ -506,7 +508,18 @@ export default function App() {
   const [staffPassName, setStaffPassName] = useState('');
   const [staffPassRole, setStaffPassRole] = useState('Coach');
   const [staffPassClub, setStaffPassClub] = useState('');
-  const [masterAthletes, setMasterAthletes] = useState<Record<string, Partial<Player>>>( {});
+  const [masterAthletes, setMasterAthletes] = useState<Record<string, Partial<Player>>>(() => {
+    try {
+      const stored = localStorage.getItem('app:masterAthletes');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          return { ...getBaselineMasterAthletes(), ...parsed };
+        }
+      }
+    } catch (e) {}
+    return getBaselineMasterAthletes();
+  });
 
   // Referee login / registration state
   const [refereeLoginNric, setRefereeLoginNric] = useState('');
@@ -1353,32 +1366,17 @@ export default function App() {
         }
       }
 
-      // Ensure all loaded competitions include Kyukpa, Speed Kicking, Skipping Rope, and Recognize Poomsae 2
-      const standardEventsRequired = ['Kyukpa', 'Speed Kicking', 'Skipping Rope', 'Recognize Poomsae 2'];
-      let hadMissingEvents = false;
+      // Sanitize and deduplicate events for all loaded competitions without overriding admin customizations
       loadedComps = loadedComps.map(c => {
-        const eventsList = c.events ? [...c.events] : ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo'];
-        let changed = false;
-        standardEventsRequired.forEach(ev => {
-          if (!eventsList.includes(ev)) {
-            eventsList.push(ev);
-            changed = true;
-          }
-        });
-        if (changed) {
-          hadMissingEvents = true;
-          return { ...c, events: eventsList };
-        }
-        return c;
+        const eventsList = (c.events && c.events.length > 0)
+          ? c.events
+          : ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'];
+        const deduplicated = Array.from(new Set(eventsList.map(ev => (typeof ev === 'string' ? ev.trim() : '')).filter(Boolean)));
+        return { ...c, events: deduplicated };
       });
-
-      if (hadMissingEvents) {
+      try {
         localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
-        // Force a cloud sync for the missing events to ensure they persist
-        for (const c of loadedComps) {
-          saveCompetition(c).catch(() => {});
-        }
-      }
+      } catch (e) {}
 
       setCompetitions(loadedComps);
 
@@ -1403,10 +1401,17 @@ export default function App() {
         }
       }).catch(() => {});
 
-      const storedMaster = localStorage.getItem('app:masterAthletes');
-      if (storedMaster) {
-        try { setMasterAthletes(JSON.parse(storedMaster)); } catch (e) {}
-      }
+      fetchMasterAthletes().then(cloudMasters => {
+        if (cloudMasters && Object.keys(cloudMasters).length > 0) {
+          setMasterAthletes(prev => {
+            const merged = { ...getBaselineMasterAthletes(), ...prev, ...cloudMasters };
+            try { localStorage.setItem('app:masterAthletes', JSON.stringify(merged)); } catch (e) {}
+            return merged;
+          });
+        }
+      }).catch(err => {
+        console.warn('Error fetching master athletes in initData:', err);
+      });
 
       // 5. Fetch globalClubs and ensure full affiliated list
       let loadedGlobalClubs: string[] | null = null;
@@ -1446,8 +1451,15 @@ export default function App() {
   }, []);
 
   
-  // Fetch heavy collections if admin
+  // Fetch heavy collections if admin or coach
   useEffect(() => {
+    if (role === 'admin' || role === 'coach') {
+      fetchMasterAthletes().then(cloudMasters => {
+        if (cloudMasters && Object.keys(cloudMasters).length > 0) {
+          setMasterAthletes(prev => ({ ...getBaselineMasterAthletes(), ...prev, ...cloudMasters }));
+        }
+      });
+    }
     if (role === 'admin') {
       fetchCoaches().then(cloudCoaches => {
         if (Object.keys(cloudCoaches).length > 0) {
@@ -1459,13 +1471,56 @@ export default function App() {
           setOrganizers(cloudOrgs);
         }
       });
-      fetchMasterAthletes().then(cloudMasters => {
-        if (Object.keys(cloudMasters).length > 0) {
-          setMasterAthletes(cloudMasters);
-        }
-      });
     }
   }, [role]);
+
+  // Auto-sync tournament players into masterAthletes so any player registered is instantly saved
+  useEffect(() => {
+    if (players && players.length > 0) {
+      setMasterAthletes(prev => {
+        let changed = false;
+        const updated = { ...prev };
+        players.forEach(p => {
+          if (!p || !p.name) return;
+          const key = (p.ic && p.ic.trim()) ? p.ic.trim() : (p.id || p.name.trim());
+          if (!updated[key]) {
+            updated[key] = {
+              id: p.id || key,
+              name: p.name,
+              ic: p.ic || '',
+              dob: p.dob || '',
+              gender: p.gender || '',
+              club: p.club || '',
+              schoolName: p.schoolName || '',
+              schoolCode: p.schoolCode || '',
+              race: p.race || '',
+              photo: p.photo || undefined,
+              coachUsername: p.coachUsername || user || ''
+            };
+            changed = true;
+          } else {
+            let recChanged = false;
+            const existing = { ...updated[key] };
+            if (!existing.photo && p.photo) { existing.photo = p.photo; recChanged = true; }
+            if (!existing.dob && p.dob) { existing.dob = p.dob; recChanged = true; }
+            if (!existing.schoolName && p.schoolName) { existing.schoolName = p.schoolName; recChanged = true; }
+            if (!existing.schoolCode && p.schoolCode) { existing.schoolCode = p.schoolCode; recChanged = true; }
+            if (!existing.race && p.race) { existing.race = p.race; recChanged = true; }
+            if (!existing.coachUsername && (p.coachUsername || user)) { existing.coachUsername = p.coachUsername || user || ''; recChanged = true; }
+            if (recChanged) {
+              updated[key] = existing;
+              changed = true;
+            }
+          }
+        });
+        if (changed) {
+          try { localStorage.setItem('app:masterAthletes', JSON.stringify(updated)); } catch (e) {}
+          return updated;
+        }
+        return prev;
+      });
+    }
+  }, [players, user]);
 
   // Subscribe to referee accounts in real-time
   useEffect(() => {
@@ -1477,6 +1532,29 @@ export default function App() {
         const errMsg = (err as Error)?.message || String(err);
         const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
         if (!isQuota) console.error("Failed to sync referee accounts", err);
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Subscribe to competitions in real-time across all devices (admin, coach, organizer, referees)
+  useEffect(() => {
+    const unsubscribe = subscribeToCompetitions(
+      (cloudComps) => {
+        if (cloudComps && cloudComps.length > 0) {
+          const valid = cloudComps.filter(c => c && c.id && !isCompetitionDeleted(c.id));
+          if (valid.length > 0) {
+            setCompetitions(valid);
+            try { localStorage.setItem('app:competitions', JSON.stringify(valid)); } catch (e) {}
+          }
+        }
+      },
+      (err) => {
+        const errMsg = (err as Error)?.message || String(err);
+        const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('resource-exhausted');
+        if (!isQuota) console.warn("Failed to sync competitions in real-time:", err);
       }
     );
     return () => {
@@ -2529,6 +2607,294 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const handleDownloadCoachRoster = async () => {
+    if (!activeComp) {
+      triggerMsg('No active tournament selected.', 'error');
+      return;
+    }
+
+    if (role === 'coach' && activeComp.allowCoachDownloadRoster === false) {
+      triggerMsg('Athlete roster download has been disabled by tournament administrators.', 'error');
+      return;
+    }
+
+    const coachClub = (user && coaches[user]?.club) ? coaches[user].club : '';
+    const coachClubNorm = coachClub.trim().toLowerCase();
+    const coachUserNorm = (user || '').trim().toLowerCase();
+
+    // Get coach's registered athletes
+    const myAthletes = players.filter(p => {
+      if (role !== 'coach') return true;
+      if (p.coachUsername && coachUserNorm && p.coachUsername.trim().toLowerCase() === coachUserNorm) return true;
+      if (coachClubNorm && p.club && p.club.trim().toLowerCase() === coachClubNorm) return true;
+      return false;
+    });
+
+    if (myAthletes.length === 0) {
+      triggerMsg('No athletes registered under your club or account for this tournament yet.', 'error');
+      return;
+    }
+
+    // Sort athletes primarily by name, then by event
+    const sortedAthletes = [...myAthletes].sort((a, b) => {
+      const nameComp = (a.name || '').localeCompare(b.name || '');
+      if (nameComp !== 0) return nameComp;
+      return (a.event || '').localeCompare(b.event || '');
+    });
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Tournament Admin System';
+      workbook.created = new Date();
+
+      const safeClub = (coachClub || user || 'Club').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const ws = workbook.addWorksheet(`${safeClub.slice(0, 20)} Roster`);
+
+      // Title & Tournament Info Header
+      ws.mergeCells('A1:Q1');
+      const titleCell = ws.getCell('A1');
+      titleCell.value = `${activeComp.name} - Official Athlete Roster`;
+      titleCell.font = { bold: true, size: 13, color: { argb: 'FFFFFF' } };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1E293B' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 30;
+
+      ws.mergeCells('A2:Q2');
+      const subCell = ws.getCell('A2');
+      subCell.value = `Club: ${coachClub || 'N/A'}  |  Coach: ${user || 'N/A'}  |  Generated: ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString()}  |  Total Entries: ${sortedAthletes.length}`;
+      subCell.font = { italic: true, size: 9, color: { argb: '475569' } };
+      subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(2).height = 20;
+
+      // Empty separator row
+      ws.getRow(3).height = 10;
+
+      // Define Columns
+      ws.getRow(4).values = [
+        'No.',
+        'Competitor Code',
+        'Athlete Full Name',
+        'NRIC / Passport',
+        'Gender',
+        'Date of Birth',
+        'Division Event',
+        'Age Group',
+        'Weight Class',
+        'Club / Dojang',
+        'School Name',
+        'School Code',
+        'Race',
+        'Weigh-In Status',
+        'Recorded Weight (kg)',
+        'Indemnity Form',
+        'Event Fee'
+      ];
+
+      // Format Header Row (Row 4)
+      const headerRow = ws.getRow(4);
+      headerRow.height = 26;
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 9 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F172A' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'CBD5E1' } },
+          bottom: { style: 'medium', color: { argb: '94A3B8' } },
+          left: { style: 'thin', color: { argb: 'CBD5E1' } },
+          right: { style: 'thin', color: { argb: 'CBD5E1' } }
+        };
+      });
+
+      // Calculate Fees for each entry
+      const athleteTotalEvents: Record<string, number> = {};
+      sortedAthletes.forEach(p => {
+        const cleanIc = p.ic ? p.ic.trim().toLowerCase() : '';
+        const isDummyIc = !cleanIc || cleanIc === '0' || cleanIc === '-' || cleanIc === 'n/a' || cleanIc === 'none' || cleanIc === 'nil' || cleanIc.length < 4;
+        const key = isDummyIc ? (p.name || '').trim().toLowerCase() : cleanIc;
+        athleteTotalEvents[key] = (athleteTotalEvents[key] || 0) + 1;
+      });
+
+      const athleteEventIndices: Record<string, number> = {};
+      const isSpecialPackage = activeComp.feeModel === 'SPECIAL_PACKAGE';
+      const pkgFirst = parseFeeToNumber(activeComp.packageFirstEventFee || '80');
+      const pkgSecond = parseFeeToNumber(activeComp.packageSecondEventFee || '40');
+      const pkgSub = parseFeeToNumber(activeComp.packageSubsequentEventFee || '20');
+      const pkgFive = parseFeeToNumber(activeComp.packageFiveEventFee || '150');
+
+      let grandTotalAmount = 0;
+
+      // Populate Data Rows
+      sortedAthletes.forEach((p, idx) => {
+        const rowNum = idx + 5;
+        const cleanIc = p.ic ? p.ic.trim().toLowerCase() : '';
+        const isDummyIc = !cleanIc || cleanIc === '0' || cleanIc === '-' || cleanIc === 'n/a' || cleanIc === 'none' || cleanIc === 'nil' || cleanIc.length < 4;
+        const key = isDummyIc ? (p.name || '').trim().toLowerCase() : cleanIc;
+
+        const eventIdx = athleteEventIndices[key] || 0;
+        athleteEventIndices[key] = eventIdx + 1;
+        const totalEvents = athleteTotalEvents[key] || 1;
+
+        let eventFee = 0;
+        if (isSpecialPackage) {
+          if (totalEvents === 5) {
+            if (eventIdx === 0) eventFee = pkgFirst;
+            else if (eventIdx === 1) eventFee = pkgSecond;
+            else if (eventIdx === 2) eventFee = pkgSub;
+            else if (eventIdx === 3) eventFee = Math.max(0, pkgFive - (pkgFirst + pkgSecond + pkgSub));
+            else eventFee = 0;
+          } else {
+            const cycleIdx = eventIdx % 5;
+            if (cycleIdx === 0) eventFee = pkgFirst;
+            else if (cycleIdx === 1) eventFee = pkgSecond;
+            else if (cycleIdx === 2) eventFee = pkgSub;
+            else if (cycleIdx === 3) eventFee = pkgSub;
+            else {
+              const previousFour = pkgFirst + pkgSecond + (pkgSub * 2);
+              eventFee = Math.max(0, pkgFive - previousFour);
+            }
+          }
+        } else {
+          const ev = (p.event || '').toLowerCase();
+          if (ev.includes('kyorugi')) eventFee += parseFeeToNumber(activeComp.kyorugiFee);
+          if (ev.includes('poomsae')) eventFee += parseFeeToNumber(activeComp.poomsaeFee);
+          if (ev.includes('para')) eventFee += parseFeeToNumber(activeComp.paraFee);
+          if (ev.includes('virtual')) eventFee += parseFeeToNumber(activeComp.virtualFee);
+          if (ev.includes('kyukpa')) eventFee += parseFeeToNumber(activeComp.kyukpaFee);
+          if (ev.includes('speed kicking')) eventFee += parseFeeToNumber(activeComp.speedKickingFee);
+          if (ev.includes('skipping rope')) eventFee += parseFeeToNumber(activeComp.skippingRopeFee);
+        }
+
+        grandTotalAmount += eventFee;
+
+        const weighInStatus = p.weighIn ? (p.weighIn.result || 'PASS') : 'Pending';
+        const recordedWeight = p.weighIn?.weight !== undefined && p.weighIn?.weight !== null ? `${p.weighIn.weight} kg` : '-';
+        const indemnityStr = p.indemnityStatus === 'Completed' ? 'Completed' : 'Pending';
+
+        const row = ws.getRow(rowNum);
+        row.values = [
+          idx + 1,
+          p.id || '',
+          p.name || '',
+          p.ic || '',
+          p.gender || '',
+          p.dob || '',
+          p.event || '',
+          p.ageGroup || '',
+          p.weightClass || '',
+          p.club || coachClub || '',
+          p.schoolName || '',
+          p.schoolCode || '',
+          p.race || '',
+          weighInStatus,
+          recordedWeight,
+          indemnityStr,
+          formatCurrency(eventFee, '', activeComp.currency)
+        ];
+
+        row.height = 20;
+
+        // Styling row cells
+        row.eachCell((cell, colNumber) => {
+          cell.font = { size: 9 };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'E2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
+            left: { style: 'thin', color: { argb: 'E2E8F0' } },
+            right: { style: 'thin', color: { argb: 'E2E8F0' } }
+          };
+          if (idx % 2 === 1) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F8FAFC' } };
+          }
+          if ([1, 2, 4, 5, 6, 12, 13, 14, 15, 16].includes(colNumber)) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else if (colNumber === 17) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.font = { bold: true, size: 9, color: { argb: '0F172A' } };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        });
+      });
+
+      // Total Row
+      const totalRowNum = sortedAthletes.length + 5;
+      const totalRow = ws.getRow(totalRowNum);
+      totalRow.values = [
+        '',
+        '',
+        `Total Athletes: ${Object.keys(athleteTotalEvents).length}`,
+        '',
+        '',
+        '',
+        `Total Entries: ${sortedAthletes.length}`,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        'Total Amount:',
+        formatCurrency(grandTotalAmount, '', activeComp.currency)
+      ];
+      totalRow.height = 24;
+      totalRow.eachCell((cell, colNumber) => {
+        cell.font = { bold: true, size: 9, color: { argb: '0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FEF3C7' } };
+        cell.border = {
+          top: { style: 'medium', color: { argb: 'D97706' } },
+          bottom: { style: 'double', color: { argb: 'D97706' } }
+        };
+        if (colNumber === 17) {
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        }
+      });
+
+      // Explicit Column Widths
+      ws.columns = [
+        { width: 6 },   // No.
+        { width: 16 },  // Competitor Code
+        { width: 28 },  // Full Name
+        { width: 18 },  // NRIC / Passport
+        { width: 10 },  // Gender
+        { width: 14 },  // DOB
+        { width: 22 },  // Division Event
+        { width: 32 },  // Age Group
+        { width: 26 },  // Weight Class
+        { width: 26 },  // Club / Dojang
+        { width: 24 },  // School Name
+        { width: 14 },  // School Code
+        { width: 12 },  // Race
+        { width: 16 },  // Weigh-In Status
+        { width: 20 },  // Recorded Weight
+        { width: 16 },  // Indemnity Form
+        { width: 16 }   // Event Fee
+      ];
+
+      // Enable grid lines
+      ws.views = [{ showGridLines: true }];
+
+      // Write to buffer and trigger download
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanCompName = activeComp.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.download = `${cleanCompName}_${safeClub}_Athletes_Roster.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      triggerMsg(`Downloaded athlete roster for ${coachClub || user} (${sortedAthletes.length} entries)`, 'ok');
+    } catch (err) {
+      console.error('Failed to export coach athletes roster:', err);
+      triggerMsg('Failed to export athletes roster to Excel.', 'error');
+    }
+  };
+
   const handleExportRefereeLedger = () => {
     if (!activeComp) return;
     
@@ -3430,7 +3796,7 @@ export default function App() {
       endDate: ncEndDate || '',
       registrationCloseDate: ncRegistrationCloseDate || '',
       staffCode: ncCode || 'weighin123',
-      events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
+      events: ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'],
       genders: ['Male', 'Female', 'Mix'],
       ageGroups: [],
       weightClasses: [],
@@ -3904,7 +4270,7 @@ export default function App() {
   const handleAddAllStandardEvents = async () => {
     if (!compId) return;
     const STANDARD_ALL = [
-      'Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Recognize Poomsae 2', 'Free Style Poomsae',
+      'Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae',
       'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'
     ];
     const updated = competitions.map(c => {
@@ -6283,33 +6649,73 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              {isRegistrationClosed(activeComp) ? (
-                <div className="w-full sm:w-auto bg-surface-2 border border-line text-text-dim font-bold text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-2 cursor-not-allowed">
-                  <Lock className="w-4 h-4" />
-                  <span>Registration Closed</span>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const cloud = await fetchCompetitions();
+                      if (cloud && cloud.length > 0) {
+                        setCompetitions(cloud);
+                        try { localStorage.setItem('app:competitions', JSON.stringify(cloud)); } catch (e) {}
+                        triggerMsg('Tournament events & details synchronized with cloud.', 'ok');
+                      }
+                    } catch (e) {
+                      triggerMsg('Synced with cloud.', 'ok');
+                    }
+                  }}
+                  className="w-full sm:w-auto bg-surface-2 border border-line hover:border-gold/50 text-text-dim hover:text-gold font-bold text-xs px-3 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Reload tournament events & divisions from cloud"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-gold" />
+                  <span>Sync Cloud</span>
+                </button>
+                {activeComp.allowCoachDownloadRoster !== false ? (
                   <button
-                    onClick={() => {
-                      setExcelParsedPlayers([]);
-                      setExcelValidationErrors([]);
-                      setShowCoachExcelModal(true);
-                    }}
-                    className="w-full sm:w-auto bg-surface border border-gold/40 hover:bg-gold/10 text-gold font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    onClick={handleDownloadCoachRoster}
+                    className="w-full sm:w-auto bg-surface-2 border border-gold/40 hover:bg-gold/10 text-gold font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Download your athletes roster Excel spreadsheet"
                   >
-                    <Upload className="w-4 h-4" />
-                    <span>Import via Excel</span>
+                    <Download className="w-4 h-4" />
+                    <span>Download Roster</span>
                   </button>
-                  <button
-                    onClick={() => handleOpenCoachPlayerForm()}
-                    className="w-full sm:w-auto bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                ) : (
+                  <div 
+                    className="w-full sm:w-auto bg-surface-2/60 border border-line text-text-dim/60 font-semibold text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-not-allowed"
+                    title="Roster download has been restricted by tournament administrators"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Register New Athlete</span>
-                  </button>
-                </div>
-              )}
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Download Roster (Disabled)</span>
+                  </div>
+                )}
+                {isRegistrationClosed(activeComp) ? (
+                  <div className="w-full sm:w-auto bg-surface-2 border border-line text-text-dim font-bold text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-2 cursor-not-allowed">
+                    <Lock className="w-4 h-4" />
+                    <span>Registration Closed</span>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setExcelParsedPlayers([]);
+                        setExcelValidationErrors([]);
+                        setShowCoachExcelModal(true);
+                      }}
+                      className="w-full sm:w-auto bg-surface border border-gold/40 hover:bg-gold/10 text-gold font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Import via Excel</span>
+                    </button>
+                    <button
+                      onClick={() => handleOpenCoachPlayerForm()}
+                      className="w-full sm:w-auto bg-gold hover:opacity-90 text-ink font-bold text-xs px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Register New Athlete</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* PAYMENT & BANKING SECTION FOR COACH */}
@@ -6782,9 +7188,9 @@ export default function App() {
                   <p className="text-xs text-text-dim">Verify skill matrices, print QR ID cards, and monitor live weigh-in feedback.</p>
                 </div>
                 
-                {/* Search Bar & Indemnity Forms */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-                  <div className="relative w-full md:w-80">
+                {/* Search Bar, Indemnity Forms & Download Roster */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
+                  <div className="relative w-full md:w-72">
                     <input 
                       type="text"
                       value={searchQuery}
@@ -6794,9 +7200,19 @@ export default function App() {
                     />
                     <Search className="w-3.5 h-3.5 text-text-dim/60 absolute left-2.5 top-2.5" />
                   </div>
+                  {activeComp.allowCoachDownloadRoster !== false && (
+                    <button
+                      onClick={handleDownloadCoachRoster}
+                      className="bg-surface-2 hover:bg-line border border-gold/40 text-gold font-bold px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap shadow-sm cursor-pointer"
+                      title="Download Coach Athletes Roster (Excel)"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Roster</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => { setShowIndemnityDashboardModal(true); }}
-                    className="bg-gold text-ink font-bold hover:bg-gold/95 px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap shadow-md cursor-pointer"
+                    className="bg-gold text-ink font-bold hover:bg-gold/95 px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap shadow-md cursor-pointer"
                     title="Manage Athlete Indemnity Forms"
                   >
                     <Shield className="w-3.5 h-3.5" />
@@ -7051,17 +7467,31 @@ export default function App() {
                         <div className="absolute left-0 right-0 top-full mt-2 bg-surface border border-line rounded-xl shadow-2xl z-50 overflow-hidden max-h-60 flex flex-col">
                           <div className="p-2 bg-ink/30 border-b border-line flex justify-between items-center text-[10px] font-bold text-text-dim uppercase tracking-wider">
                             <span>
-                              {masterSearchQuery 
-                                ? `Search Results (${Object.values(masterAthletes).filter((ma: any) => {
-                                    if (role === 'coach' && user) {
-                                      const belongs = ma.coachUsername === user || (ma.club && coaches[user]?.club && ma.club === coaches[user].club);
-                                      if (!belongs) return false;
-                                    }
-                                    const q = masterSearchQuery.toLowerCase();
-                                    return ma.name?.toLowerCase().includes(q) || ma.ic?.toLowerCase().includes(q) || ma.club?.toLowerCase().includes(q);
-                                  }).length})`
-                                : `Recent Saved Profiles (Up to 5)`
-                              }
+                              {(() => {
+                                const userClubNorm = (user && coaches[user]?.club ? coaches[user].club : '').trim().toLowerCase();
+                                const coachUserNorm = (user || '').trim().toLowerCase();
+                                const allAthletes = Object.values(masterAthletes);
+                                
+                                const coachOwned = allAthletes.filter((ma: any) => {
+                                  if (role !== 'coach' || !user) return true;
+                                  const maCoach = (ma.coachUsername || '').trim().toLowerCase();
+                                  const maClub = (ma.club || '').trim().toLowerCase();
+                                  if (maCoach && maCoach === coachUserNorm) return true;
+                                  if (userClubNorm && maClub && (maClub === userClubNorm || maClub.includes(userClubNorm) || userClubNorm.includes(maClub))) return true;
+                                  return false;
+                                });
+
+                                const effectivePool = coachOwned.length > 0 ? coachOwned : allAthletes;
+
+                                if (masterSearchQuery) {
+                                  const q = masterSearchQuery.toLowerCase();
+                                  const count = effectivePool.filter((ma: any) => 
+                                    ma.name?.toLowerCase().includes(q) || ma.ic?.toLowerCase().includes(q) || ma.club?.toLowerCase().includes(q)
+                                  ).length;
+                                  return `Search Results (${count})`;
+                                }
+                                return `Recent Saved Profiles (Up to 5 of ${effectivePool.length})`;
+                              })()}
                             </span>
                             <button 
                               onClick={() => setShowMasterDropdown(false)}
@@ -7073,12 +7503,22 @@ export default function App() {
                           
                           <div className="overflow-y-auto divide-y divide-line/40 flex-1">
                             {(() => {
-                              const coachOwned = Object.values(masterAthletes).filter((ma: any) => {
-                                if (role !== 'coach') return true;
-                                if (!user) return false;
-                                return ma.coachUsername === user || (ma.club && coaches[user]?.club && ma.club === coaches[user].club);
+                              const userClubNorm = (user && coaches[user]?.club ? coaches[user].club : '').trim().toLowerCase();
+                              const coachUserNorm = (user || '').trim().toLowerCase();
+                              const allAthletes = Object.values(masterAthletes);
+
+                              const coachOwned = allAthletes.filter((ma: any) => {
+                                if (role !== 'coach' || !user) return true;
+                                const maCoach = (ma.coachUsername || '').trim().toLowerCase();
+                                const maClub = (ma.club || '').trim().toLowerCase();
+                                if (maCoach && maCoach === coachUserNorm) return true;
+                                if (userClubNorm && maClub && (maClub === userClubNorm || maClub.includes(userClubNorm) || userClubNorm.includes(maClub))) return true;
+                                return false;
                               });
-                              const list = coachOwned.filter((ma: any) => {
+
+                              const pool = coachOwned.length > 0 ? coachOwned : allAthletes;
+
+                              const list = pool.filter((ma: any) => {
                                 if (!masterSearchQuery) return true;
                                 const q = masterSearchQuery.toLowerCase();
                                 return (
@@ -7100,14 +7540,14 @@ export default function App() {
 
                               return displayList.map((ma: any) => (
                                 <div 
-                                  key={ma.id}
+                                  key={ma.id || ma.ic || ma.name}
                                   onClick={() => {
-                                    setSelectedMasterId(ma.id);
+                                    setSelectedMasterId(ma.id || ma.ic || ma.name);
                                     setPName(ma.name || '');
                                     setPIc(ma.ic || '');
                                     setPDob(ma.dob || '');
                                     setPGender(ma.gender || '');
-                                    setPClub(ma.club || '');
+                                    setPClub(ma.club || (user && coaches[user]?.club ? coaches[user].club : ''));
                                     setPSchoolName(ma.schoolName || '');
                                     setPSchoolCode(ma.schoolCode || '');
                                     setPRace(ma.race || 'Malay');
@@ -7127,11 +7567,11 @@ export default function App() {
                                     </div>
                                     <div className="text-left">
                                       <div className="text-sm font-bold text-text">{ma.name}</div>
-                                      <div className="text-xs text-text-dim">IC: {ma.ic} · {ma.club}</div>
+                                      <div className="text-xs text-text-dim">IC: {ma.ic || '—'} · {ma.club || 'Club'}</div>
                                     </div>
                                   </div>
-                                  <span className="text-[10px] text-gold font-bold uppercase tracking-widest border border-gold/20 bg-gold/5 px-2 py-1 rounded-lg">
-                                    Load Profile
+                                  <span className="text-[10px] font-bold text-gold bg-gold/10 border border-gold/20 px-2 py-0.5 rounded uppercase">
+                                    Select
                                   </span>
                                 </div>
                               ));
@@ -7295,13 +7735,15 @@ export default function App() {
                         </div>
 
                         {/* Multi-event selection pills/grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-2.5 bg-ink border border-line rounded-xl max-h-48 overflow-y-auto">
-                          {activeComp.events.map(ev => {
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-2.5 bg-ink border border-line rounded-xl max-h-56 overflow-y-auto">
+                          {Array.from(new Set((activeComp.events || []).map(e => (typeof e === 'string' ? e.trim() : '')).filter(Boolean))).map(ev => {
                             const isSelected = pEvents.includes(ev);
+                            const displayLabel = ev === 'Recognize Poomsae 2' ? 'Recognize Poomsae #2' : ev;
                             return (
                               <button
                                 key={ev}
                                 type="button"
+                                title={ev}
                                 onClick={() => {
                                   let next: string[];
                                   if (isSelected) {
@@ -7331,13 +7773,15 @@ export default function App() {
                                     setPWeightClass(sel);
                                   }
                                 }}
-                                className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium border transition cursor-pointer text-left ${
+                                className={`flex items-center justify-between min-h-[44px] px-3 py-2 rounded-lg text-xs font-medium border transition cursor-pointer text-left ${
                                   isSelected
                                     ? 'bg-gold/15 border-gold text-gold font-bold shadow-sm'
                                     : 'bg-surface/50 border-line text-text-dim hover:text-text hover:border-line/80'
                                 }`}
                               >
-                                <span className="truncate pr-1">{ev}</span>
+                                <span className="text-[11px] leading-tight font-medium pr-1.5 break-words line-clamp-2">
+                                  {displayLabel}
+                                </span>
                                 <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border text-[10px] font-bold ${
                                   isSelected ? 'bg-gold text-ink border-gold' : 'border-line bg-ink text-transparent'
                                 }`}>
@@ -9931,6 +10375,41 @@ export default function App() {
                 </div>
               </div>
 
+              {/* COACH DOWNLOAD ROSTER TOGGLE */}
+              <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-text flex items-center gap-1.5">
+                  <Download className="w-4 h-4 text-gold" />
+                  Coach Athlete Roster Download
+                </h3>
+                <p className="text-xs text-text-dim">Toggle whether coaches are allowed to download their team's registered athlete roster spreadsheet (.xlsx) from the coach dashboard.</p>
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => {
+                      if (!compId) return;
+                      const currentAllowed = activeComp.allowCoachDownloadRoster !== false;
+                      const nextState = !currentAllowed;
+                      const updated = competitions.map(c => 
+                        c.id === compId ? { ...c, allowCoachDownloadRoster: nextState } : c
+                      );
+                      saveCompsToStorage(updated);
+                      triggerMsg(`Coach athlete roster download is now ${nextState ? 'allowed' : 'disabled'}.`, 'ok');
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      activeComp.allowCoachDownloadRoster !== false ? 'bg-gold' : 'bg-line'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        activeComp.allowCoachDownloadRoster !== false ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <span className="text-sm font-semibold text-text">
+                    {activeComp.allowCoachDownloadRoster !== false ? 'Allowed for Coaches' : 'Disabled for Coaches'}
+                  </span>
+                </div>
+              </div>
+
               {/* DEMO DATA LOADER */}
               {activeComp.id === 'tmremaja25' || activeComp.id === 'tmremaja2026' ? (
                 <div className="bg-surface rounded-2xl border border-line p-5 space-y-4">
@@ -11215,13 +11694,35 @@ export default function App() {
                 </h2>
                 <p className="text-sm font-semibold text-gold mt-1">{activeComp.name}</p>
               </div>
-              <button
-                onClick={() => handleOpenCoachPlayerForm()}
-                className="bg-gold text-ink px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:opacity-90 transition"
-              >
-                <Plus className="w-4 h-4" />
-                Register Competitor
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const cloud = await fetchCompetitions();
+                      if (cloud && cloud.length > 0) {
+                        setCompetitions(cloud);
+                        try { localStorage.setItem('app:competitions', JSON.stringify(cloud)); } catch (e) {}
+                        triggerMsg('Tournament events & details synchronized with cloud.', 'ok');
+                      }
+                    } catch (e) {
+                      triggerMsg('Synced with cloud.', 'ok');
+                    }
+                  }}
+                  className="bg-surface-2 border border-line hover:border-gold/50 text-text-dim hover:text-gold font-bold text-xs px-3 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Reload tournament events & divisions from cloud"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-gold" />
+                  <span className="hidden sm:inline">Sync Cloud</span>
+                </button>
+                <button
+                  onClick={() => handleOpenCoachPlayerForm()}
+                  className="bg-gold text-ink px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:opacity-90 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Register Competitor
+                </button>
+              </div>
             </div>
 
             {/* SUB NAV FOR ORGANIZER */}

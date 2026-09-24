@@ -22,7 +22,8 @@ import {
   BASELINE_TERESA_PLAYERS, 
   BASELINE_COACHES, 
   BASELINE_ORGANIZERS, 
-  BASELINE_REFEREE_ACCOUNTS 
+  BASELINE_REFEREE_ACCOUNTS,
+  getBaselineMasterAthletes
 } from './baselineData';
 
 // Suppress non-critical connection retry warnings in dev/sandboxed environments
@@ -166,6 +167,36 @@ export async function saveCompetition(comp: Competition): Promise<void> {
   }
 }
 
+export function subscribeToCompetitions(
+  callback: (comps: Competition[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const colRef = collection(db, 'competitions');
+  const unsubscribe = onSnapshot(colRef, (snap) => {
+    const list: Competition[] = [];
+    snap.forEach((doc) => {
+      const data = doc.data() as Competition;
+      if (data && data.id && !isCompetitionDeleted(data.id)) {
+        if (data.events && Array.isArray(data.events)) {
+          data.events = Array.from(new Set(data.events.map(e => (typeof e === 'string' ? e.trim() : '')).filter(Boolean)));
+        }
+        list.push(data);
+      }
+    });
+    if (list.length > 0) {
+      try { localStorage.setItem('app:competitions', JSON.stringify(list)); } catch (e) {}
+      callback(list);
+    }
+  }, (error) => {
+    const isQuota = String(error).includes('Quota limit exceeded');
+    if (!isQuota) {
+      console.warn('[Firestore Competitions Sync Error]', error);
+      if (onError) onError(error as Error);
+    }
+  });
+  return unsubscribe;
+}
+
 export async function deleteCompetition(compId: string): Promise<void> {
   try {
     if (!KNOWN_DELETED_COMP_IDS.includes(compId)) {
@@ -289,21 +320,40 @@ export async function deleteOrganizer(username: string): Promise<void> {
 }
 
 export async function fetchMasterAthletes(): Promise<Record<string, Partial<Player>>> {
+  let master: Record<string, Partial<Player>> = {};
   try {
     const colRef = collection(db, 'masterAthletes');
     const snap = await getDocs(colRef);
-    const master: Record<string, Partial<Player>> = {};
     snap.forEach((doc) => {
       const data = doc.data() as Partial<Player>;
       if (data.id) {
         master[data.id] = data;
       }
     });
-    return master;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, 'masterAthletes');
-    return {};
   }
+
+  // Fallback / merge with local storage
+  try {
+    const cached = localStorage.getItem('app:masterAthletes');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && typeof parsed === 'object') {
+        master = { ...parsed, ...master };
+      }
+    }
+  } catch (e) {}
+
+  // Merge with baseline athletes so athlete database is never unexpectedly empty
+  const baseline = getBaselineMasterAthletes();
+  master = { ...baseline, ...master };
+
+  try {
+    localStorage.setItem('app:masterAthletes', JSON.stringify(master));
+  } catch (e) {}
+
+  return master;
 }
 
 export async function saveMasterAthlete(athlete: Partial<Player>): Promise<void> {
