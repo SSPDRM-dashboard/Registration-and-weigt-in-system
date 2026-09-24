@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee } from './types';
+import { cachePlayersLocally, cacheRefereesLocally, safeSetLocalStorage } from './utils/storage';
 import { 
   BASELINE_GLOBAL_CLUBS, 
   BASELINE_COMPETITIONS, 
@@ -385,7 +386,7 @@ export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
       players.push(doc.data() as Player);
     });
     if (players.length > 0) {
-      try { localStorage.setItem(`app:players:${compId}`, JSON.stringify(players)); } catch (e) {}
+      cachePlayersLocally(compId, players);
       return players;
     }
   } catch (error) {
@@ -418,7 +419,7 @@ export async function savePlayerToFirestore(player: Player): Promise<void> {
         } else {
           list.push(player);
         }
-        localStorage.setItem(key, JSON.stringify(list));
+        cachePlayersLocally(player.compId, list);
       }
     }
   } catch {}
@@ -551,7 +552,7 @@ export function subscribeToPlayersForComp(compId: string, callback: (players: Pl
       players.push(doc.data() as Player);
     });
     if (players.length > 0) {
-      try { localStorage.setItem(`app:players:${compId}`, JSON.stringify(players)); } catch (e) {}
+      cachePlayersLocally(compId, players);
       callback(players);
     } else {
       const cached = localStorage.getItem(`app:players:${compId}`);
@@ -735,7 +736,7 @@ export function subscribeToRefereesForComp(compId: string, callback: (referees: 
     
     const uniqueRefs = deduplicateReferees(rawList.map(r => r.data));
     if (uniqueRefs.length > 0) {
-      try { localStorage.setItem(`app:referees:${compId}`, JSON.stringify(uniqueRefs)); } catch (e) {}
+      cacheRefereesLocally(compId, uniqueRefs);
     }
     callback(uniqueRefs);
   }, (error) => {

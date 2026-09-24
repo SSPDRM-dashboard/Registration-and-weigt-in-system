@@ -42,7 +42,6 @@ export const STANDARD_EVENTS = [
   'Kyorugi',
   'Para Kyorugi',
   'Recognize Poomsae',
-  'Recognize Poomsae 2',
   'Free Style Poomsae',
   'Para Poomsae',
   'Virtual Taekwondo',

@@ -87,6 +87,7 @@ import {
   fetchAdminPassword, fetchCoachByUsername, fetchOrganizerByUsername, fetchRefereeAccountByNric,
   saveAdminPasswordToFirestore
 } from './firebase';
+import { cachePlayersLocally, cacheRefereesLocally, safeSetLocalStorage } from './utils/storage';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import SignatureCanvas from 'react-signature-canvas';
@@ -1659,7 +1660,7 @@ export default function App() {
         let loadedPlayers = cloudPlayers;
         if (loadedPlayers && loadedPlayers.length > 0) {
           setPlayers(loadedPlayers);
-          localStorage.setItem(`app:players:${compId}`, JSON.stringify(loadedPlayers));
+          cachePlayersLocally(compId, loadedPlayers);
         } else {
           // If cloud returns empty, preserve cached or baseline players
           const stored = localStorage.getItem(`app:players:${compId}`);
@@ -1969,13 +1970,13 @@ export default function App() {
 
   const saveStaffPassesToStorage = (id: string, list: Player[]) => {
     setStaffPasses(list);
-    localStorage.setItem(`app:staffPasses:${id}`, JSON.stringify(list));
+    safeSetLocalStorage(`app:staffPasses:${id}`, JSON.stringify(list));
   };
 
   const savePlayersToStorage = async (id: string, list: Player[]) => {
     const prevPlayers = [...players];
     setPlayers(list);
-    localStorage.setItem(`app:players:${id}`, JSON.stringify(list));
+    cachePlayersLocally(id, list);
     
     // Cloud sync
     try {
@@ -2012,7 +2013,7 @@ export default function App() {
   const saveMasterAthletesToStorage = async (obj: Record<string, Partial<Player>>) => {
     const prevMaster = { ...masterAthletes };
     setMasterAthletes(obj);
-    localStorage.setItem('app:masterAthletes', JSON.stringify(obj));
+    safeSetLocalStorage('app:masterAthletes', JSON.stringify(obj));
     
     // Cloud sync
     try {
@@ -2392,7 +2393,7 @@ export default function App() {
       const updatedRefList = referees.map(r => r.id === refereeId ? updatedRef : r);
       setReferees(updatedRefList);
       if (activeComp?.id) {
-        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefList));
+        cacheRefereesLocally(activeComp.id, updatedRefList);
       }
 
       // Also update global referee account if it exists
@@ -2406,7 +2407,7 @@ export default function App() {
         await saveRefereeAccount(updatedAcc);
         const updatedAccounts = refereeAccounts.map(a => a.id === globalAcc.id ? updatedAcc : a);
         setRefereeAccounts(updatedAccounts);
-        localStorage.setItem('app:refereeAccounts', JSON.stringify(updatedAccounts));
+        safeSetLocalStorage('app:refereeAccounts', JSON.stringify(updatedAccounts));
       }
 
       if (inlineSelectedReferee && inlineSelectedReferee.id === refereeId) {
@@ -2462,7 +2463,7 @@ export default function App() {
       setReferees(updated);
       const updatedMy = myRefereeRegistrations.filter(r => r.id !== existingRef.id);
       setMyRefereeRegistrations(updatedMy);
-      localStorage.setItem(`app:referees:${comp.id}`, JSON.stringify(updated));
+      cacheRefereesLocally(comp.id, updated);
       if (compId === comp.id) {
         setCompId(null);
       }
@@ -4693,7 +4694,7 @@ export default function App() {
     }
     const updated = players.filter(p => p.id !== playerId);
     setPlayers(updated);
-    localStorage.setItem(`app:players:${compId}`, JSON.stringify(updated));
+    cachePlayersLocally(compId, updated);
     setConfirmDeleteId(null);
     
     try {

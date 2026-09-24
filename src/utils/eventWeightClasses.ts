@@ -196,3 +196,14 @@ export function getWeightClassesForEvent(
   // 5. Ultimate fallback
   return ['OPEN WEIGHT'];
 }
+
+/**
+ * Cleanly format division or weight class options for coach display.
+ * Strips technical CSV prefix like "POOMSAE," or "KYORUGI," while preserving exact values.
+ */
+export function formatDivisionOption(raw: string): string {
+  if (!raw) return '';
+  let cleaned = raw.replace(/^(POOMSAE|KYORUGI)\s*,\s*/i, '');
+  cleaned = cleaned.replace(/Taeguek/gi, 'Taegeuk');
+  return cleaned;
+}

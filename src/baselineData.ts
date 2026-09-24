@@ -39,8 +39,7 @@ export const BASELINE_COMPETITIONS: Competition[] = [
       "Virtual Taekwondo",
       "Kyukpa",
       "Speed Kicking",
-      "Skipping Rope",
-      "Recognize Poomsae 2"
+      "Skipping Rope"
     ],
     "isActive": false,
     "genders": [
@@ -100,17 +99,6 @@ export const BASELINE_COMPETITIONS: Competition[] = [
       ],
       "Para Poomsae": [],
       "Para Kyorugi": [],
-      "Recognize Poomsae 2": [
-        "POOMSAE,Yellow 8 Taeguek 1",
-        "POOMSAE,Yellow 7 Taeguek 2",
-        "POOMSAE,Green 6 Taeguek 3",
-        "POOMSAE,Green 5 Taeguek 4",
-        "POOMSAE,Blue 4 Taeguek 5",
-        "POOMSAE,Red 2 Taeguek 7",
-        "POOMSAE,Red 1 Taeguek 8",
-        "POOMSAE,Poom ,Koryo, Keumgang, Taebaek, Pyongwon,Sipjin",
-        "POOMSAE,Dan, Koryo, Keumgang, Taebaek, Pyongwon,Sipjin"
-      ],
       "Recognize Poomsae": [
         "POOMSAE,Yellow 8 Taeguek 1",
         "POOMSAE,Yellow 7 Taeguek 2",
@@ -498,8 +486,7 @@ export const BASELINE_COMPETITIONS: Competition[] = [
       "Virtual Taekwondo",
       "Kyukpa",
       "Speed Kicking",
-      "Skipping Rope",
-      "Recognize Poomsae 2"
+      "Skipping Rope"
     ]
   },
   {
@@ -604,7 +591,6 @@ export const BASELINE_COMPETITIONS: Competition[] = [
       "Kyorugi",
       "Para Kyorugi",
       "Recognize Poomsae",
-      "Recognize Poomsae 2",
       "Free Style Poomsae",
       "Para Poomsae",
       "Virtual Taekwondo",
@@ -629,8 +615,7 @@ export const BASELINE_COMPETITIONS: Competition[] = [
       "Virtual Taekwondo",
       "Kyukpa",
       "Speed Kicking",
-      "Skipping Rope",
-      "Recognize Poomsae 2"
+      "Skipping Rope"
     ],
     "virtualFee": "80",
     "kyorugiFee": "",
@@ -752,8 +737,7 @@ export const BASELINE_COMPETITIONS: Competition[] = [
       "Virtual Taekwondo",
       "Kyukpa",
       "Speed Kicking",
-      "Skipping Rope",
-      "Recognize Poomsae 2"
+      "Skipping Rope"
     ],
     "venue": "JB",
     "endDate": "2026-07-19"
@@ -922,7 +906,7 @@ export const BASELINE_TERESA_PLAYERS: Player[] = [
     "race": "Chinese",
     "gender": "Male",
     "club": "VERITAS TAEKWONDO INTERNATIONAL",
-    "event": "Recognize Poomsae 2",
+    "event": "Recognize Poomsae",
     "ageGroup": "U10-9 years old to 10 years old",
     "indemnityStatus": "Completed",
     "indemnityRelationship": "Mother",
