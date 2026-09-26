@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, X, Search, CheckCircle, Clock, Eye, Copy, Share2, ExternalLink } from 'lucide-react';
+import { Shield, X, Search, CheckCircle, Clock, Eye, Copy, Share2, ExternalLink, ShieldCheck, UserCheck, Layers } from 'lucide-react';
 import { Player } from '../../types';
 
 interface IndemnityDashboardModalProps {
@@ -14,6 +14,9 @@ interface IndemnityDashboardModalProps {
   onViewIndemnity: (player: Player) => void;
   onOpenIndemnityForm?: (player: Player) => void;
   triggerMsg: (text: string, type: 'error' | 'ok') => void;
+  currentIndemnityScope?: 'PER_PERSON' | 'PER_EVENT';
+  onUpdateIndemnityScope?: (scope: 'PER_PERSON' | 'PER_EVENT') => void;
+  isAdmin?: boolean;
 }
 
 export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = ({
@@ -28,17 +31,22 @@ export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = (
   onViewIndemnity,
   onOpenIndemnityForm,
   triggerMsg,
+  currentIndemnityScope = 'PER_PERSON',
+  onUpdateIndemnityScope,
+  isAdmin = false,
 }) => {
   if (!isOpen) return null;
 
-  const coachAthletesForIndemnity = players.filter((p) => p.coachUsername === user);
-  const totalCount = coachAthletesForIndemnity.length;
-  const completedCount = coachAthletesForIndemnity.filter((p) => p.indemnityStatus === 'Completed').length;
+  // Filter list: coaches see their own athletes; admins see all athletes
+  const targetAthletes = isAdmin ? players : players.filter((p) => p.coachUsername === user);
+  const totalCount = targetAthletes.length;
+  const completedCount = targetAthletes.filter((p) => p.indemnityStatus === 'Completed').length;
   const pendingCount = totalCount - completedCount;
-  const filteredIndemnityAthletes = coachAthletesForIndemnity.filter((p) => {
+  const filteredIndemnityAthletes = targetAthletes.filter((p) => {
     const matchesSearch =
       p.name.toLowerCase().includes(indemnitySearchQuery.toLowerCase()) ||
-      (p.id && p.id.toLowerCase().includes(indemnitySearchQuery.toLowerCase()));
+      (p.id && p.id.toLowerCase().includes(indemnitySearchQuery.toLowerCase())) ||
+      (p.ic && p.ic.toLowerCase().includes(indemnitySearchQuery.toLowerCase()));
     const matchesStatus =
       indemnityFilterStatus === 'All' ||
       (indemnityFilterStatus === 'Completed' && p.indemnityStatus === 'Completed') ||
@@ -74,6 +82,70 @@ export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = (
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto flex-grow space-y-6">
+          {/* Admin Policy Selection Banner */}
+          <div className="bg-gradient-to-r from-surface-2 via-surface-2/90 to-surface border border-gold/30 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-md">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gold/10 border border-gold/30 flex items-center justify-center text-gold shrink-0 mt-0.5">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-text flex items-center gap-2">
+                  <span>Indemnity Waiver Policy:</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold/20 text-gold border border-gold/40 font-mono font-bold">
+                    {currentIndemnityScope === 'PER_PERSON' ? 'FILL ONCE BY PERSON' : 'FILL PER TOURNAMENT EVENT'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-text-dim mt-1 leading-relaxed">
+                  {currentIndemnityScope === 'PER_PERSON' ? (
+                    <span>
+                      <strong className="text-text">Fill Once by Person Mode Active:</strong> Parents/guardians fill out the parental waiver once per athlete (by NRIC/IC). That signed waiver automatically applies to all event entries for that person.
+                    </span>
+                  ) : (
+                    <span>
+                      <strong className="text-text">Fill per Event Mode Active:</strong> A separate parental waiver form must be submitted for each individual tournament event entry.
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {isAdmin && onUpdateIndemnityScope && (
+              <div className="flex items-center gap-1.5 bg-ink p-1 rounded-xl border border-line shrink-0 self-stretch md:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUpdateIndemnityScope('PER_PERSON');
+                    triggerMsg('Indemnity policy set to: Fill Once by Person', 'ok');
+                  }}
+                  className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1 ${
+                    currentIndemnityScope === 'PER_PERSON'
+                      ? 'bg-gold text-ink shadow-sm'
+                      : 'text-text-dim hover:text-text'
+                  }`}
+                  title="Only fill once by person / athlete IC"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Once by Person</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUpdateIndemnityScope('PER_EVENT');
+                    triggerMsg('Indemnity policy set to: Fill per Tournament Event', 'ok');
+                  }}
+                  className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1 ${
+                    currentIndemnityScope === 'PER_EVENT'
+                      ? 'bg-gold text-ink shadow-sm'
+                      : 'text-text-dim hover:text-text'
+                  }`}
+                  title="Fill separately per event"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Per Event</span>
+                </button>
+              </div>
+            )}
+          </div>
           {/* Status Metrics Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-surface-2 p-4 rounded-2xl border border-line flex items-center justify-between">

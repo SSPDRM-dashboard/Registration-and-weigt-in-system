@@ -16,6 +16,8 @@ interface AdminCompFormScreenProps {
   setNcCode: (val: string) => void;
   ncCurrency: string;
   setNcCurrency: (val: string) => void;
+  ncIndemnityScope?: 'PER_PERSON' | 'PER_EVENT';
+  setNcIndemnityScope?: (val: 'PER_PERSON' | 'PER_EVENT') => void;
   handleCreateComp: () => void | Promise<void>;
   setScreen: (screen: any) => void;
 }
@@ -35,6 +37,8 @@ export const AdminCompFormScreen: React.FC<AdminCompFormScreenProps> = ({
   setNcCode,
   ncCurrency,
   setNcCurrency,
+  ncIndemnityScope = 'PER_PERSON',
+  setNcIndemnityScope,
   handleCreateComp,
   setScreen,
 }) => {
@@ -150,6 +154,63 @@ export const AdminCompFormScreen: React.FC<AdminCompFormScreenProps> = ({
             <p className="text-[10px] text-text-dim/60 mt-1">
               Used for scale station terminal access.
             </p>
+          </div>
+        </div>
+
+        {/* Indemnity Policy Choice */}
+        <div className="bg-ink/40 border border-line rounded-2xl p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-text uppercase tracking-wider mb-1">
+              Athlete Indemnity Form Policy
+            </label>
+            <p className="text-[11px] text-text-dim">
+              Choose whether parents/guardians sign the liability waiver once per athlete or separately for each tournament event.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setNcIndemnityScope && setNcIndemnityScope('PER_PERSON')}
+              className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
+                ncIndemnityScope === 'PER_PERSON'
+                  ? 'bg-gold/10 border-gold text-gold font-bold shadow-sm'
+                  : 'bg-surface border-line text-text-dim hover:text-text hover:border-line-hover'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase font-extrabold tracking-wide">👤 Fill Once by Person</span>
+                <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                  ncIndemnityScope === 'PER_PERSON' ? 'border-gold bg-gold text-ink font-black' : 'border-line'
+                }`}>
+                  {ncIndemnityScope === 'PER_PERSON' ? '✓' : ''}
+                </span>
+              </div>
+              <p className="text-[10px] text-text-dim font-normal leading-normal mt-1">
+                Signing once per athlete (by NRIC/IC) covers all registered events across the tournament.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setNcIndemnityScope && setNcIndemnityScope('PER_EVENT')}
+              className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
+                ncIndemnityScope === 'PER_EVENT'
+                  ? 'bg-gold/10 border-gold text-gold font-bold shadow-sm'
+                  : 'bg-surface border-line text-text-dim hover:text-text hover:border-line-hover'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase font-extrabold tracking-wide">🏆 Fill per Tournament Event</span>
+                <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                  ncIndemnityScope === 'PER_EVENT' ? 'border-gold bg-gold text-ink font-black' : 'border-line'
+                }`}>
+                  {ncIndemnityScope === 'PER_EVENT' ? '✓' : ''}
+                </span>
+              </div>
+              <p className="text-[10px] text-text-dim font-normal leading-normal mt-1">
+                A separate parental consent & indemnity waiver must be signed for each registered event.
+              </p>
+            </button>
           </div>
         </div>
 

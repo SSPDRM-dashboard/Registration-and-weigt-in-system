@@ -812,6 +812,7 @@ export default function App() {
   const [editCompPkgSecond, setEditCompPkgSecond] = useState<string>('40');
   const [editCompPkgSub, setEditCompPkgSub] = useState<string>('20');
   const [editCompPkgFive, setEditCompPkgFive] = useState<string>('150');
+  const [editCompIndemnityScope, setEditCompIndemnityScope] = useState<'PER_PERSON' | 'PER_EVENT'>('PER_PERSON');
   const [showAgeGroupDetailsModal, setShowAgeGroupDetailsModal] = useState<boolean>(false);
   const [showVirtualChartModal, setShowVirtualChartModal] = useState<boolean>(false);
   const [showPoomsaeChartModal, setShowPoomsaeChartModal] = useState<boolean>(false);
@@ -969,6 +970,7 @@ export default function App() {
   const [ncRegistrationCloseDate, setNcRegistrationCloseDate] = useState('');
   const [ncCode, setNcCode] = useState('weighin123');
   const [ncCurrency, setNcCurrency] = useState('RM');
+  const [ncIndemnityScope, setNcIndemnityScope] = useState<'PER_PERSON' | 'PER_EVENT'>('PER_PERSON');
   
   // Category additions
   const [newEvent, setNewEvent] = useState('');
@@ -3782,6 +3784,13 @@ export default function App() {
   };
 
   // --- ADMIN ACTIONS ---
+  const handleUpdateIndemnityScope = async (scope: 'PER_PERSON' | 'PER_EVENT') => {
+    if (!activeComp) return;
+    const updated = competitions.map(c => c.id === activeComp.id ? { ...c, indemnityScope: scope } : c);
+    await saveCompsToStorage(updated);
+    triggerMsg(`Indemnity requirement updated to: ${scope === 'PER_PERSON' ? 'Fill Once by Person' : 'Fill per Event'}`, 'ok');
+  };
+
   const handleCreateComp = () => {
     const name = ncName.trim();
     if (!name) {
@@ -3802,7 +3811,8 @@ export default function App() {
       ageGroups: [],
       weightClasses: [],
       isActive: false,
-      currency: ncCurrency.trim() || 'RM'
+      currency: ncCurrency.trim() || 'RM',
+      indemnityScope: ncIndemnityScope,
     };
     const updated = [...competitions, newComp];
     saveCompsToStorage(updated);
@@ -3810,7 +3820,7 @@ export default function App() {
     setScreen('adminCompDetail');
     triggerMsg('Tournament configured successfully.', 'ok');
     // Clear form
-    setNcName(''); setNcVenue(''); setNcDate(''); setNcEndDate(''); setNcRegistrationCloseDate(''); setNcCode('weighin123'); setNcCurrency('RM');
+    setNcName(''); setNcVenue(''); setNcDate(''); setNcEndDate(''); setNcRegistrationCloseDate(''); setNcCode('weighin123'); setNcCurrency('RM'); setNcIndemnityScope('PER_PERSON');
   };
 
   const handleToggleCompActive = (id: string) => {
@@ -10238,6 +10248,8 @@ export default function App() {
             setNcCode={setNcCode}
             ncCurrency={ncCurrency}
             setNcCurrency={setNcCurrency}
+            ncIndemnityScope={ncIndemnityScope}
+            setNcIndemnityScope={setNcIndemnityScope}
             handleCreateComp={handleCreateComp}
             setScreen={setScreen}
           />
@@ -10265,6 +10277,7 @@ export default function App() {
                       setEditCompPkgSecond(activeComp.packageSecondEventFee || '40');
                       setEditCompPkgSub(activeComp.packageSubsequentEventFee || '20');
                       setEditCompPkgFive(activeComp.packageFiveEventFee || '150');
+                      setEditCompIndemnityScope(activeComp.indemnityScope || 'PER_PERSON');
                       setShowEditCompModal(true);
                     }}
                     className="text-text-dim hover:text-gold transition p-1 hover:bg-gold/10 rounded-lg"
@@ -14368,6 +14381,9 @@ export default function App() {
         }}
         onOpenIndemnityForm={handleOpenIndemnityForm}
         triggerMsg={triggerMsg}
+        currentIndemnityScope={activeComp?.indemnityScope || 'PER_PERSON'}
+        onUpdateIndemnityScope={handleUpdateIndemnityScope}
+        isAdmin={role === 'admin'}
       />
       
       <AthleteDatabaseModal
@@ -14416,6 +14432,8 @@ export default function App() {
         setEditCompPkgSub={setEditCompPkgSub}
         editCompPkgFive={editCompPkgFive}
         setEditCompPkgFive={setEditCompPkgFive}
+        editCompIndemnityScope={editCompIndemnityScope}
+        setEditCompIndemnityScope={setEditCompIndemnityScope}
         saveCompsToStorage={saveCompsToStorage}
         triggerMsg={triggerMsg}
       />

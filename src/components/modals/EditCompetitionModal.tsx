@@ -34,6 +34,8 @@ interface EditCompetitionModalProps {
   setEditCompPkgSub?: (fee: string) => void;
   editCompPkgFive?: string;
   setEditCompPkgFive?: (fee: string) => void;
+  editCompIndemnityScope?: 'PER_PERSON' | 'PER_EVENT';
+  setEditCompIndemnityScope?: (scope: 'PER_PERSON' | 'PER_EVENT') => void;
   saveCompsToStorage: (comps: Competition[]) => Promise<void>;
   triggerMsg: (text: string, type: 'error' | 'ok') => void;
 }
@@ -81,6 +83,8 @@ export const EditCompetitionModal: React.FC<EditCompetitionModalProps> = ({
   setEditCompPkgSub,
   editCompPkgFive = '150',
   setEditCompPkgFive,
+  editCompIndemnityScope = 'PER_PERSON',
+  setEditCompIndemnityScope,
   saveCompsToStorage,
   triggerMsg,
 }) => {
@@ -142,6 +146,7 @@ export const EditCompetitionModal: React.FC<EditCompetitionModalProps> = ({
             packageSecondEventFee: editCompPkgSecond ? String(editCompPkgSecond).trim() : c.packageSecondEventFee,
             packageSubsequentEventFee: editCompPkgSub ? String(editCompPkgSub).trim() : c.packageSubsequentEventFee,
             packageFiveEventFee: editCompPkgFive ? String(editCompPkgFive).trim() : c.packageFiveEventFee,
+            indemnityScope: editCompIndemnityScope,
           }
         : c
     );
@@ -242,6 +247,63 @@ export const EditCompetitionModal: React.FC<EditCompetitionModalProps> = ({
                 onChange={(e) => setEditCompPasscode(e.target.value)}
                 className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold font-mono"
               />
+            </div>
+          </div>
+
+          {/* Athlete Indemnity Form Requirement Policy */}
+          <div className="bg-ink/40 border border-line rounded-2xl p-4 space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-text uppercase tracking-wider">
+                Athlete Indemnity Form Policy
+              </label>
+              <p className="text-[11px] text-text-dim">
+                Configure whether parents/guardians sign the liability waiver once per person or per tournament event entry.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setEditCompIndemnityScope && setEditCompIndemnityScope('PER_PERSON')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
+                  editCompIndemnityScope === 'PER_PERSON'
+                    ? 'bg-gold/10 border-gold text-gold font-bold shadow-sm'
+                    : 'bg-surface border-line text-text-dim hover:text-text hover:border-line-hover'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase font-extrabold tracking-wide">👤 Fill Once by Person</span>
+                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                    editCompIndemnityScope === 'PER_PERSON' ? 'border-gold bg-gold text-ink font-black' : 'border-line'
+                  }`}>
+                    {editCompIndemnityScope === 'PER_PERSON' ? '✓' : ''}
+                  </span>
+                </div>
+                <p className="text-[10px] text-text-dim font-normal leading-normal mt-1">
+                  Signing once per athlete (by NRIC/IC) covers all registered events across the tournament.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEditCompIndemnityScope && setEditCompIndemnityScope('PER_EVENT')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1 cursor-pointer ${
+                  editCompIndemnityScope === 'PER_EVENT'
+                    ? 'bg-gold/10 border-gold text-gold font-bold shadow-sm'
+                    : 'bg-surface border-line text-text-dim hover:text-text hover:border-line-hover'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase font-extrabold tracking-wide">🏆 Fill per Tournament Event</span>
+                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                    editCompIndemnityScope === 'PER_EVENT' ? 'border-gold bg-gold text-ink font-black' : 'border-line'
+                  }`}>
+                    {editCompIndemnityScope === 'PER_EVENT' ? '✓' : ''}
+                  </span>
+                </div>
+                <p className="text-[10px] text-text-dim font-normal leading-normal mt-1">
+                  A separate parental consent waiver must be signed for each registered tournament event.
+                </p>
+              </button>
             </div>
           </div>
 

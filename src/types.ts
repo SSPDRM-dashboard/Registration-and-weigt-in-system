@@ -95,6 +95,7 @@ export interface Competition {
   ageGroupDetailsPhotoUrl?: string;
   virtualChartPhotoUrl?: string;
   poomsaeChartPhotoUrl?: string;
+  indemnityScope?: 'PER_PERSON' | 'PER_EVENT';
 }
 
 export interface Coach {

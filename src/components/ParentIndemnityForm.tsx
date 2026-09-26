@@ -60,12 +60,41 @@ export default function ParentIndemnityForm({
 
   const sigCanvasRef = useRef<SignatureCanvas>(null);
 
-  // Reset uploaded files when player selection changes
+  // Reset uploaded files and auto-prefill parent details when player selection changes
   useEffect(() => {
     setPendingIcCopy(null);
     setPendingPhoto(null);
     setValidationErrors([]);
-  }, [selectedPlayer]);
+
+    if (selectedPlayer) {
+      const currentScope = indemnityComp?.indemnityScope || 'PER_PERSON';
+      let sourcePlayer = selectedPlayer;
+
+      // If scope is PER_PERSON and selectedPlayer has no parent details, check if a peer record with same IC has details
+      if (currentScope === 'PER_PERSON' && !selectedPlayer.indemnityParentName && selectedPlayer.ic && playersList.length > 0) {
+        const completedPeer = playersList.find(
+          (p) => p.ic && p.ic.trim().toLowerCase() === selectedPlayer.ic.trim().toLowerCase() && p.indemnityParentName
+        );
+        if (completedPeer) {
+          sourcePlayer = completedPeer;
+        }
+      }
+
+      if (sourcePlayer.indemnityParentName) setParentName(sourcePlayer.indemnityParentName);
+      if (sourcePlayer.indemnityParentIc) setParentIc(sourcePlayer.indemnityParentIc);
+      if (sourcePlayer.indemnityParentPhone) setParentPhone(sourcePlayer.indemnityParentPhone);
+      if (sourcePlayer.indemnityParentEmail) setParentEmail(sourcePlayer.indemnityParentEmail);
+      if (sourcePlayer.indemnityRelationship) {
+        const rel = sourcePlayer.indemnityRelationship;
+        if (['Father', 'Mother', 'Legal Guardian', 'Self (18+ Years Old)'].includes(rel)) {
+          setRelationship(rel);
+        } else {
+          setRelationship('Others');
+          setRelationshipOther(rel);
+        }
+      }
+    }
+  }, [selectedPlayer, playersList, indemnityComp]);
 
   const processImageFile = (file: File, maxWidth: number, maxHeight: number, callback: (base64: string) => void) => {
     if (file.size > 5 * 1024 * 1024) {
@@ -252,32 +281,54 @@ export default function ParentIndemnityForm({
         }
       }
 
-      const updatedPlayer: Player = {
-        ...selectedPlayer!,
-        indemnityStatus: 'Completed',
-        indemnityParentName: parentName.trim(),
-        indemnityParentIc: parentIc.trim(),
-        indemnityParentPhone: parentPhone.trim(),
-        indemnityParentEmail: parentEmail.trim(),
-        indemnityRelationship: relationship === 'Others' ? relationshipOther.trim() : relationship,
-        indemnitySignedDate: new Date().toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' }),
-        indemnitySignedIp: 'Client-device',
-        indemnitySignature: signatureDataUrl
-      };
+      const currentScope = indemnityComp?.indemnityScope || 'PER_PERSON';
 
-      if (pendingIcCopy) {
-        updatedPlayer.icCopy = pendingIcCopy;
-      }
-      if (pendingPhoto) {
-        updatedPlayer.photo = pendingPhoto;
+      // If scope is PER_PERSON, find all entries for the same athlete IC
+      let targetPlayersToUpdate: Player[] = [selectedPlayer!];
+      if (currentScope === 'PER_PERSON' && selectedPlayer?.ic) {
+        const matches = playersList.filter(p => p.ic && p.ic.trim().toLowerCase() === selectedPlayer.ic.trim().toLowerCase());
+        if (matches.length > 0) {
+          targetPlayersToUpdate = matches;
+        }
       }
 
-      await savePlayerToFirestore(updatedPlayer);
-      if (onPlayerUpdated) {
-        onPlayerUpdated(updatedPlayer);
+      for (const targetP of targetPlayersToUpdate) {
+        const updatedPlayer: Player = {
+          ...targetP,
+          indemnityStatus: 'Completed',
+          indemnityParentName: parentName.trim(),
+          indemnityParentIc: parentIc.trim(),
+          indemnityParentPhone: parentPhone.trim(),
+          indemnityParentEmail: parentEmail.trim(),
+          indemnityRelationship: relationship === 'Others' ? relationshipOther.trim() : relationship,
+          indemnitySignedDate: new Date().toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' }),
+          indemnitySignedIp: 'Client-device',
+          indemnitySignature: signatureDataUrl
+        };
+
+        if (pendingIcCopy) {
+          updatedPlayer.icCopy = pendingIcCopy;
+        } else if (selectedPlayer?.icCopy && !updatedPlayer.icCopy) {
+          updatedPlayer.icCopy = selectedPlayer.icCopy;
+        }
+
+        if (pendingPhoto) {
+          updatedPlayer.photo = pendingPhoto;
+        } else if (selectedPlayer?.photo && !updatedPlayer.photo) {
+          updatedPlayer.photo = selectedPlayer.photo;
+        }
+
+        await savePlayerToFirestore(updatedPlayer);
+        if (onPlayerUpdated) {
+          onPlayerUpdated(updatedPlayer);
+        }
       }
+
       setSubmitted(true);
-      triggerMsg('Parental Indemnity Form submitted successfully!', 'ok');
+      const successNotice = targetPlayersToUpdate.length > 1
+        ? `Parental Indemnity Form submitted! Updated ${targetPlayersToUpdate.length} tournament entries for this athlete.`
+        : 'Parental Indemnity Form submitted successfully!';
+      triggerMsg(successNotice, 'ok');
     } catch (err) {
       console.error('Error submitting indemnity waiver:', err);
       let errMsg = 'An error occurred while saving parental consent.';
@@ -368,7 +419,12 @@ export default function ParentIndemnityForm({
         <div className="p-6 space-y-6">
           {/* Tournament details */}
           <div className="bg-ink/40 p-4 rounded-xl border border-line/50 space-y-2 text-xs">
-            <span className="text-gold font-bold uppercase tracking-wider block">Championship Venue & Schedule</span>
+            <div className="flex justify-between items-center">
+              <span className="text-gold font-bold uppercase tracking-wider block">Championship Venue & Schedule</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold/15 text-gold border border-gold/30 font-semibold uppercase">
+                {indemnityComp.indemnityScope === 'PER_EVENT' ? 'Requirement: Per Event' : 'Requirement: 1-Time per Person'}
+              </span>
+            </div>
             <div className="flex flex-col sm:flex-row gap-3 justify-between font-medium text-text-dim">
               <span className="flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-gold shrink-0" />
