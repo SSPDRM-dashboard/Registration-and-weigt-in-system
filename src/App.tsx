@@ -12199,16 +12199,28 @@ export default function App() {
                         );
                       }
                       
-                      return entries.map(([club, counts]: [string, any]) => {
+                      const kPrice = parseFeeToNumber(activeComp?.kyorugiFee);
+                      const pPrice = parseFeeToNumber(activeComp?.poomsaeFee);
+                      const paPrice = parseFeeToNumber(activeComp?.paraFee);
+                      const vPrice = parseFeeToNumber(activeComp?.virtualFee);
+                      const kyPrice = parseFeeToNumber(activeComp?.kyukpaFee);
+                      const skPrice = parseFeeToNumber(activeComp?.speedKickingFee);
+                      const srPrice = parseFeeToNumber(activeComp?.skippingRopeFee);
+                      const isSpecialPackage = activeComp?.feeModel === 'SPECIAL_PACKAGE';
+                      const sampleFee = activeComp?.kyorugiFee || activeComp?.poomsaeFee || activeComp?.paraFee || activeComp?.virtualFee || activeComp?.kyukpaFee || activeComp?.speedKickingFee || activeComp?.skippingRopeFee || (isSpecialPackage ? (activeComp?.packageFirstEventFee || '80') : '');
+
+                      let grandKyorugi = 0;
+                      let grandPoomsae = 0;
+                      let grandPara = 0;
+                      let grandVirtual = 0;
+                      let grandKyukpa = 0;
+                      let grandSpeedKicking = 0;
+                      let grandSkippingRope = 0;
+                      let grandTotalEntries = 0;
+                      let grandTotalAmount = 0;
+
+                      const rows = entries.map(([club, counts]: [string, any]) => {
                         const receipt = activeComp?.receipts?.[club];
-                        
-                        const kPrice = parseFeeToNumber(activeComp?.kyorugiFee);
-                        const pPrice = parseFeeToNumber(activeComp?.poomsaeFee);
-                        const paPrice = parseFeeToNumber(activeComp?.paraFee);
-                        const vPrice = parseFeeToNumber(activeComp?.virtualFee);
-                        const kyPrice = parseFeeToNumber(activeComp?.kyukpaFee);
-                        const skPrice = parseFeeToNumber(activeComp?.speedKickingFee);
-                        const srPrice = parseFeeToNumber(activeComp?.skippingRopeFee);
 
                         const clubKTotal = counts.kyorugi * kPrice;
                         const clubPTotal = counts.poomsae * pPrice;
@@ -12219,8 +12231,6 @@ export default function App() {
                         const clubSrTotal = counts.skippingRope * srPrice;
 
                         let clubTotalAmount = 0;
-                        const isSpecialPackage = activeComp?.feeModel === 'SPECIAL_PACKAGE';
-                        
                         if (isSpecialPackage) {
                           const pkgFirst = parseFeeToNumber(activeComp?.packageFirstEventFee || '80');
                           const pkgSecond = parseFeeToNumber(activeComp?.packageSecondEventFee || '40');
@@ -12251,8 +12261,17 @@ export default function App() {
                         } else {
                           clubTotalAmount = clubKTotal + clubPTotal + clubPaTotal + clubVTotal + clubKyTotal + clubSkTotal + clubSrTotal;
                         }
+
+                        grandKyorugi += counts.kyorugi;
+                        grandPoomsae += counts.poomsae;
+                        grandPara += counts.para;
+                        grandVirtual += counts.virtual;
+                        grandKyukpa += counts.kyukpa;
+                        grandSpeedKicking += counts.speedKicking;
+                        grandSkippingRope += counts.skippingRope;
+                        grandTotalEntries += counts.total;
+                        grandTotalAmount += clubTotalAmount;
                         
-                        const sampleFee = activeComp?.kyorugiFee || activeComp?.poomsaeFee || activeComp?.paraFee || activeComp?.virtualFee || activeComp?.kyukpaFee || activeComp?.speedKickingFee || activeComp?.skippingRopeFee || (isSpecialPackage ? (activeComp?.packageFirstEventFee || '80') : '');
                         const totalAmountFormatted = formatCurrency(clubTotalAmount, sampleFee, activeComp?.currency);
                         const clubCoaches = Object.values(coaches).filter(c => c.club && c.club.toUpperCase() === club.toUpperCase());
 
@@ -12310,6 +12329,36 @@ export default function App() {
                           </tr>
                         );
                       });
+
+                      const formattedGrandTotalAmount = formatCurrency(grandTotalAmount, sampleFee, activeComp?.currency);
+
+                      return (
+                        <>
+                          {rows}
+                          <tr className="bg-gradient-to-r from-gold/20 via-gold/10 to-gold/20 border-t-2 border-gold/60 text-text font-bold text-sm shadow-md">
+                            <td className="p-4 text-left">
+                              <div className="flex items-center gap-2">
+                                <span className="bg-gold text-ink px-2.5 py-1 font-black uppercase tracking-wider text-xs rounded-md shadow-sm">
+                                  TOTAL SUMMARY
+                                </span>
+                                <span className="text-xs text-text-dim font-bold">({entries.length} Clubs)</span>
+                              </div>
+                            </td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandKyorugi > 0 ? grandKyorugi : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandPoomsae > 0 ? grandPoomsae : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandPara > 0 ? grandPara : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandVirtual > 0 ? grandVirtual : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandKyukpa > 0 ? grandKyukpa : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandSpeedKicking > 0 ? grandSpeedKicking : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandSkippingRope > 0 ? grandSkippingRope : '-'}</td>
+                            <td className="p-4 text-center font-mono text-gold font-black text-sm">{grandTotalEntries}</td>
+                            <td className="p-4 text-center font-mono font-black text-gold text-base drop-shadow-sm">{formattedGrandTotalAmount}</td>
+                            <td className="p-4 text-center text-[10px] text-gold font-extrabold uppercase tracking-wider">
+                              Grand Total
+                            </td>
+                          </tr>
+                        </>
+                      );
                     })()}
                   </tbody>
                 </table>
