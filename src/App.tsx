@@ -839,6 +839,9 @@ export default function App() {
     title: string;
     subtitle?: string;
     details?: { label: string; value: string }[];
+    isQrCode?: boolean;
+    bankName?: string;
+    bankAccount?: string;
   } | null>(null);
 
   // Ring Match Numbers entered by RIC
@@ -6826,16 +6829,43 @@ export default function App() {
                     </div>
 
                     {activeComp.bankQrCode ? (
-                      <div className="flex items-center gap-3 bg-gold/5 p-2 rounded-lg border border-gold/20 min-h-[76px]">
-                        <img 
-                          src={activeComp.bankQrCode} 
-                          alt="Scan QR to Pay" 
-                          className="w-14 h-14 object-contain rounded bg-white p-0.5 shrink-0"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div>
-                          <p className="text-[13px] font-bold text-text uppercase tracking-wider">Scan to Pay QR</p>
-                          <p className="text-[11px] text-text-dim">Scan with your banking app to transfer fees</p>
+                      <div 
+                        onClick={() => setEnlargedPhoto({
+                          url: activeComp.bankQrCode || '',
+                          title: 'Scan to Pay QR Code',
+                          subtitle: activeComp.name,
+                          isQrCode: true,
+                          bankName: activeComp.bankName,
+                          bankAccount: activeComp.bankAccount,
+                          details: [
+                            { label: 'Bank Name', value: activeComp.bankName || 'OCBC' },
+                            { label: 'Bank Account', value: activeComp.bankAccount || 'N/A' },
+                            { label: 'Tournament', value: activeComp.name },
+                            { label: 'Club Registration', value: coachClub || 'N/A' }
+                          ]
+                        })}
+                        className="group flex items-center gap-3 bg-gold/10 hover:bg-gold/15 p-2.5 rounded-xl border border-gold/30 hover:border-gold/60 transition cursor-pointer shadow-sm hover:shadow-md min-h-[76px] relative overflow-hidden"
+                        title="Click to enlarge QR Code for scanning"
+                      >
+                        <div className="relative shrink-0">
+                          <img 
+                            src={activeComp.bankQrCode} 
+                            alt="Scan QR to Pay" 
+                            className="w-14 h-14 object-contain rounded-lg bg-white p-1 shrink-0 border border-gold/40 shadow-sm group-hover:scale-105 transition-transform"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Maximize2 className="w-5 h-5 text-white drop-shadow" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[13px] font-bold text-text uppercase tracking-wider group-hover:text-gold transition">Scan to Pay QR</p>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-gold/20 text-gold font-bold rounded flex items-center gap-0.5 shrink-0">
+                              <Maximize2 className="w-2.5 h-2.5" /> Enlarge
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-text-dim truncate mt-0.5">Click image to enlarge for banking app scan</p>
                         </div>
                       </div>
                     ) : (
@@ -11847,15 +11877,35 @@ export default function App() {
                       {/* Thumbnail / QR preview */}
                       <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-lg p-2 bg-ink/10 h-32">
                         {activeComp.bankQrCode ? (
-                          <div className="relative group w-24 h-24">
+                          <div 
+                            className="relative group w-24 h-24 cursor-pointer"
+                            onClick={() => setEnlargedPhoto({
+                              url: activeComp.bankQrCode || '',
+                              title: 'Tournament Payment QR Code',
+                              subtitle: activeComp.name,
+                              isQrCode: true,
+                              bankName: activeComp.bankName,
+                              bankAccount: activeComp.bankAccount,
+                              details: [
+                                { label: 'Bank Name', value: activeComp.bankName || 'N/A' },
+                                { label: 'Bank Account', value: activeComp.bankAccount || 'N/A' },
+                                { label: 'Tournament', value: activeComp.name }
+                              ]
+                            })}
+                            title="Click to enlarge QR Code"
+                          >
                             <img 
                               src={activeComp.bankQrCode} 
                               alt="Bank QR" 
-                              className="w-full h-full object-contain rounded"
+                              className="w-full h-full object-contain rounded bg-white p-1 border border-gold/30 shadow-sm group-hover:scale-105 transition-transform"
                               referrerPolicy="no-referrer"
                             />
+                            <div className="absolute inset-0 bg-black/40 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Maximize2 className="w-5 h-5 text-white drop-shadow" />
+                            </div>
                             <button
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 const updated = competitions.map(c => {
                                   if (c.id === compId) {
                                     return { ...c, bankQrCode: '' };
@@ -11865,7 +11915,7 @@ export default function App() {
                                 saveCompsToStorage(updated);
                                 triggerMsg('QR code deleted.', 'ok');
                               }}
-                              className="absolute -top-1.5 -right-1.5 bg-red-500/90 text-white p-1 rounded-full hover:bg-red-600 transition"
+                              className="absolute -top-1.5 -right-1.5 bg-red-500/90 text-white p-1 rounded-full hover:bg-red-600 transition z-10"
                               title="Remove QR"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -14570,7 +14620,11 @@ export default function App() {
             <div className="flex items-center justify-between p-4 border-b border-line bg-ink/70">
               <div>
                 <h3 className="font-bold text-text text-sm uppercase tracking-wide flex items-center gap-2">
-                  <User className="w-4 h-4 text-gold" />
+                  {enlargedPhoto.isQrCode ? (
+                    <QrCode className="w-4 h-4 text-gold" />
+                  ) : (
+                    <User className="w-4 h-4 text-gold" />
+                  )}
                   {enlargedPhoto.title}
                 </h3>
                 {enlargedPhoto.subtitle && (
@@ -14588,13 +14642,28 @@ export default function App() {
 
             {/* Photo Preview Content */}
             <div className="p-6 flex flex-col items-center justify-center bg-black/40">
-              <div className="relative max-h-[60vh] max-w-full overflow-hidden rounded-xl border-2 border-gold/30 shadow-2xl bg-ink">
-                <img 
-                  src={enlargedPhoto.url} 
-                  alt={enlargedPhoto.title} 
-                  className="w-auto h-auto max-h-[55vh] max-w-full object-contain rounded-xl"
-                />
-              </div>
+              {enlargedPhoto.isQrCode ? (
+                <div className="flex flex-col items-center">
+                  <div className="relative p-5 bg-white rounded-2xl border-4 border-gold/40 shadow-2xl flex items-center justify-center">
+                    <img 
+                      src={enlargedPhoto.url} 
+                      alt={enlargedPhoto.title} 
+                      className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gold/90 font-medium mt-3 text-center">
+                    📱 Ready to scan with any banking app (OCBC, PayNow, DuitNow, TnG, etc.)
+                  </p>
+                </div>
+              ) : (
+                <div className="relative max-h-[60vh] max-w-full overflow-hidden rounded-xl border-2 border-gold/30 shadow-2xl bg-ink">
+                  <img 
+                    src={enlargedPhoto.url} 
+                    alt={enlargedPhoto.title} 
+                    className="w-auto h-auto max-h-[55vh] max-w-full object-contain rounded-xl"
+                  />
+                </div>
+              )}
 
               {enlargedPhoto.details && enlargedPhoto.details.length > 0 && (
                 <div className="grid grid-cols-2 gap-2.5 w-full mt-4 bg-ink/80 border border-line rounded-xl p-3 text-xs">
@@ -14609,14 +14678,40 @@ export default function App() {
             </div>
 
             {/* Footer */}
-            <div className="p-3 border-t border-line bg-ink/70 flex justify-between items-center">
-              <span className="text-[10px] text-text-dim">Click outside or press Close to dismiss</span>
-              <button
-                onClick={() => setEnlargedPhoto(null)}
-                className="bg-ink border border-line hover:border-gold px-4 py-1.5 rounded-lg text-xs font-bold text-text hover:text-gold transition cursor-pointer"
-              >
-                Close
-              </button>
+            <div className="p-3 border-t border-line bg-ink/70 flex justify-between items-center gap-2">
+              <span className="text-[10px] text-text-dim hidden sm:inline">Click outside or press Close to dismiss</span>
+              <div className="flex items-center gap-2 ml-auto">
+                {enlargedPhoto.isQrCode && (
+                  <>
+                    {enlargedPhoto.bankAccount && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(enlargedPhoto.bankAccount || '');
+                          triggerMsg('Bank account number copied!', 'ok');
+                        }}
+                        className="bg-ink border border-line hover:border-gold px-3 py-1.5 rounded-lg text-xs font-bold text-text hover:text-gold transition cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-gold" />
+                        <span>Copy Acc</span>
+                      </button>
+                    )}
+                    <a
+                      href={enlargedPhoto.url}
+                      download="payment-qr.png"
+                      className="bg-gold/10 border border-gold/40 hover:bg-gold/20 px-3 py-1.5 rounded-lg text-xs font-bold text-gold transition cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download QR</span>
+                    </a>
+                  </>
+                )}
+                <button
+                  onClick={() => setEnlargedPhoto(null)}
+                  className="bg-ink border border-line hover:border-gold px-4 py-1.5 rounded-lg text-xs font-bold text-text hover:text-gold transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
