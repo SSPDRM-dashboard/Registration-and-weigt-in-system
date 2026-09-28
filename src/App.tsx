@@ -593,6 +593,7 @@ export default function App() {
   const [confirmDeleteOrganizerUsername, setConfirmDeleteOrganizerUsername] = useState<string | null>(null);
   const [confirmDeleteAthleteId, setConfirmDeleteAthleteId] = useState<string | null>(null);
   const [confirmDeleteRefereeId, setConfirmDeleteRefereeId] = useState<string | null>(null);
+  const [confirmClearWcEv, setConfirmClearWcEv] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
 
   // Admin Coach Management state
@@ -1639,17 +1640,31 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
     
     if (compId) {
+      const isTeresaComp = compId === 'stteresacup2026udkr' || compId.toLowerCase().includes('teresa');
       // 1. Immediately hydrate from localStorage or baseline so UI displays instantly without lag or quota failure
       const cached = localStorage.getItem(`app:players:${compId}`);
       if (cached) {
         try {
-          const parsed = JSON.parse(cached);
+          let parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
+              const existingIds = new Set(parsed.map(p => p.id));
+              const merged = [...parsed];
+              for (const bp of BASELINE_TERESA_PLAYERS) {
+                if (!existingIds.has(bp.id)) {
+                  merged.push(bp);
+                  existingIds.add(bp.id);
+                }
+              }
+              parsed = merged;
+              cachePlayersLocally(compId, parsed);
+            }
             setPlayers(parsed);
           }
         } catch (e) {}
-      } else if (compId === 'stteresacup2026udkr' || compId.toLowerCase().includes('teresa')) {
+      } else if (isTeresaComp) {
         setPlayers(BASELINE_TERESA_PLAYERS);
+        cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
       }
 
       const storedStaff = localStorage.getItem(`app:staffPasses:${compId}`);
@@ -1661,9 +1676,40 @@ export default function App() {
         setStaffPasses([]);
       }
 
+      // 2. Active direct cloud fetch to guarantee latest entrant count even if onSnapshot is delayed or hits quota fallback
+      fetchPlayersForComp(compId).then((cloudPlayers) => {
+        if (cloudPlayers && cloudPlayers.length > 0) {
+          let loaded = cloudPlayers;
+          if (isTeresaComp && loaded.length < BASELINE_TERESA_PLAYERS.length) {
+            const existingIds = new Set(loaded.map(p => p.id));
+            const merged = [...loaded];
+            for (const bp of BASELINE_TERESA_PLAYERS) {
+              if (!existingIds.has(bp.id)) {
+                merged.push(bp);
+                existingIds.add(bp.id);
+              }
+            }
+            loaded = merged;
+          }
+          setPlayers(loaded);
+          cachePlayersLocally(compId, loaded);
+        }
+      }).catch((err) => console.warn('Direct fetchPlayersForComp warning:', err));
+
       unsubscribe = subscribeToPlayersForComp(compId, (cloudPlayers) => {
         let loadedPlayers = cloudPlayers;
         if (loadedPlayers && loadedPlayers.length > 0) {
+          if (isTeresaComp && loadedPlayers.length < BASELINE_TERESA_PLAYERS.length) {
+            const existingIds = new Set(loadedPlayers.map(p => p.id));
+            const merged = [...loadedPlayers];
+            for (const bp of BASELINE_TERESA_PLAYERS) {
+              if (!existingIds.has(bp.id)) {
+                merged.push(bp);
+                existingIds.add(bp.id);
+              }
+            }
+            loadedPlayers = merged;
+          }
           setPlayers(loadedPlayers);
           cachePlayersLocally(compId, loadedPlayers);
         } else {
@@ -1671,15 +1717,28 @@ export default function App() {
           const stored = localStorage.getItem(`app:players:${compId}`);
           if (stored) {
             try {
-              const parsed = JSON.parse(stored);
+              let parsed = JSON.parse(stored);
               if (Array.isArray(parsed) && parsed.length > 0) {
+                if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
+                  const existingIds = new Set(parsed.map(p => p.id));
+                  const merged = [...parsed];
+                  for (const bp of BASELINE_TERESA_PLAYERS) {
+                    if (!existingIds.has(bp.id)) {
+                      merged.push(bp);
+                      existingIds.add(bp.id);
+                    }
+                  }
+                  parsed = merged;
+                  cachePlayersLocally(compId, parsed);
+                }
                 setPlayers(parsed);
                 return;
               }
             } catch (e) {}
           }
-          if (compId === 'stteresacup2026udkr' || compId.toLowerCase().includes('teresa')) {
+          if (isTeresaComp) {
             setPlayers(BASELINE_TERESA_PLAYERS);
+            cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
           } else {
             setPlayers([]);
           }
@@ -4154,26 +4213,48 @@ export default function App() {
 
   const handleRemoveEventWeightClass = (eventName: string, index: number) => {
     if (!compId) return;
+    let removedName = '';
     const updated = competitions.map(c => {
       if (c.id === compId) {
         const curMap = c.eventWeightClasses || {};
         const currentList = [...(curMap[eventName] || getWeightClassesForEvent(c, eventName))];
-        const removed = currentList[index];
+        removedName = currentList[index] || '';
         currentList.splice(index, 1);
         const nextMap = { ...curMap, [eventName]: currentList };
+        const existingWc = Array.isArray(c.weightClasses) ? c.weightClasses : [];
         return {
           ...c,
           eventWeightClasses: nextMap,
           weightClasses: (eventName.toLowerCase().includes('kyorugi') || eventName === 'All / Default')
-            ? c.weightClasses.filter(w => w !== removed)
-            : c.weightClasses
+            ? existingWc.filter(w => w !== removedName)
+            : existingWc
         };
       }
       return c;
     });
     setCompetitions(updated);
     saveCompsToStorage(updated);
-    triggerMsg(`Removed division from ${eventName}.`, 'ok');
+    triggerMsg(removedName ? `Removed division "${removedName}" from ${eventName}.` : `Removed division from ${eventName}.`, 'ok');
+  };
+
+  const handleClearEventWeightClasses = (eventName: string) => {
+    if (!compId) return;
+    const updated = competitions.map(c => {
+      if (c.id === compId) {
+        const curMap = c.eventWeightClasses || {};
+        const nextMap = { ...curMap, [eventName]: [] };
+        const existingWc = Array.isArray(c.weightClasses) ? c.weightClasses : [];
+        return {
+          ...c,
+          eventWeightClasses: nextMap,
+          weightClasses: (eventName.toLowerCase().includes('kyorugi') || eventName === 'All / Default') ? [] : existingWc
+        };
+      }
+      return c;
+    });
+    setCompetitions(updated);
+    saveCompsToStorage(updated);
+    triggerMsg(`Cleared all weight classes and divisions for ${eventName}.`, 'ok');
   };
 
   const handleLoadEventPreset = (eventName: string) => {
@@ -4638,7 +4719,10 @@ export default function App() {
       triggerMsg(`Athlete record updated successfully${additionalEvents.length > 0 ? ` with ${additionalEvents.length} extra event(s)` : ''}.`, 'ok');
     } else {
       if (eventsToCreateOrUpdate.length === 0) {
-        triggerMsg(`Athlete (${pName.trim()}) is already registered for all selected event(s): ${duplicateEvents.join(', ')}.`, 'error');
+        setSearchQuery(pName.trim());
+        setSelectedEventFilter('all');
+        setSelectedCategoryFilter('all');
+        triggerMsg(`Athlete (${pName.trim()}) is ALREADY REGISTERED for: ${duplicateEvents.join(', ')}. Dashboard filters reset to display "${pName.trim()}" in All Registered Entrants below!`, 'error');
         return;
       }
 
@@ -5655,6 +5739,7 @@ export default function App() {
     const combinedString = `
       ${p.name || ''} 
       ${p.id || ''} 
+      ${p.ic || ''} 
       ${p.club || ''} 
       ${p.schoolName || ''} 
       ${p.schoolCode || ''} 
@@ -5679,6 +5764,7 @@ export default function App() {
     const combinedString = `
       ${p.name || ''} 
       ${p.id || ''} 
+      ${p.ic || ''} 
       ${p.club || ''} 
       ${p.schoolName || ''} 
       ${p.schoolCode || ''} 
@@ -6668,12 +6754,19 @@ export default function App() {
                   type="button"
                   onClick={async () => {
                     try {
-                      const cloud = await fetchCompetitions();
+                      const [cloud, cloudPlayers] = await Promise.all([
+                        fetchCompetitions(),
+                        compId ? fetchPlayersForComp(compId) : Promise.resolve([])
+                      ]);
                       if (cloud && cloud.length > 0) {
                         setCompetitions(cloud);
                         try { localStorage.setItem('app:competitions', JSON.stringify(cloud)); } catch (e) {}
-                        triggerMsg('Tournament events & details synchronized with cloud.', 'ok');
                       }
+                      if (cloudPlayers && cloudPlayers.length > 0) {
+                        setPlayers(cloudPlayers);
+                        cachePlayersLocally(compId, cloudPlayers);
+                      }
+                      triggerMsg('Tournament events & roster synchronized with cloud.', 'ok');
                     } catch (e) {
                       triggerMsg('Synced with cloud.', 'ok');
                     }
@@ -8780,7 +8873,18 @@ export default function App() {
                   <span>Download Total Summary</span>
                 </button>
                 <button 
-                  onClick={() => {
+                  onClick={async () => {
+                    if (compId) {
+                      try {
+                        const cloud = await fetchPlayersForComp(compId);
+                        if (cloud && cloud.length > 0) {
+                          setPlayers(cloud);
+                          cachePlayersLocally(compId, cloud);
+                          triggerMsg(`Audit log synchronized. ${cloud.length} entrants loaded from cloud.`, 'ok');
+                          return;
+                        }
+                      } catch (e) {}
+                    }
                     const stored = localStorage.getItem(`app:players:${compId}`);
                     if (stored) setPlayers(JSON.parse(stored));
                     triggerMsg('Audit log synchronized.', 'ok');
@@ -11212,13 +11316,62 @@ export default function App() {
 
                     return (
                       <div className="bg-ink/60 border border-line rounded-xl p-3.5 space-y-3">
-                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-1">
-                          <span className="text-xs font-bold text-gold flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-gold"></span>
-                            Configuring: {currentEv} ({label})
-                          </span>
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-gold flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-gold"></span>
+                              Configuring: {currentEv} ({label})
+                            </span>
+                            
+                            {/* Delete All Weight Classes button */}
+                            {currentWcList.length > 0 ? (
+                              confirmClearWcEv === currentEv ? (
+                                <div className="flex items-center gap-1.5 animate-fade-in ml-1 bg-red-950/90 border border-red-800/80 px-2 py-1 rounded-lg">
+                                  <span className="text-[10px] text-red-200 font-bold">Delete all {currentWcList.length} divisions?</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleClearEventWeightClasses(currentEv);
+                                      setConfirmClearWcEv(null);
+                                    }}
+                                    className="bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded cursor-pointer transition shadow"
+                                  >
+                                    Yes, Clear All
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmClearWcEv(null)}
+                                    className="bg-surface-2 hover:bg-line text-text-dim hover:text-text text-[10px] font-bold px-2 py-0.5 rounded cursor-pointer transition"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmClearWcEv(currentEv)}
+                                  className="bg-red-950/80 hover:bg-red-900 text-red-300 hover:text-white border border-red-800/60 hover:border-red-600 px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer shadow-sm ml-1"
+                                  title={`Delete all weight classes / divisions for ${currentEv}`}
+                                >
+                                  <Trash2 className="w-3 h-3 text-red-400" />
+                                  <span>Delete Weight Classes</span>
+                                </button>
+                              )
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleLoadEventPreset(currentEv)}
+                                className="bg-gold/10 hover:bg-gold/20 text-gold border border-gold/40 px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer shadow-sm ml-1"
+                                title={`Load standard divisions for ${currentEv}`}
+                              >
+                                <RefreshCw className="w-3 h-3 text-gold" />
+                                <span>Load Standard Presets</span>
+                              </button>
+                            )}
+                          </div>
+
                           <span className="text-[11px] text-text-dim">
-                            {currentWcList.length} division{currentWcList.length === 1 ? '' : 's'} assigned to athletes in {currentEv}
+                            {currentWcList.length} division{currentWcList.length === 1 ? '' : 's'} assigned to {currentEv}
                           </span>
                         </div>
 
@@ -11242,8 +11395,9 @@ export default function App() {
                             className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
                           />
                           <button 
+                            type="button"
                             onClick={() => handleAddEventWeightClass(currentEv, newWc, setNewWc)}
-                            className="bg-gold hover:bg-yellow-400 text-ink px-3 py-2 rounded-xl text-xs font-bold transition shrink-0"
+                            className="bg-gold hover:bg-yellow-400 text-ink px-3 py-2 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer"
                           >
                             Add to {currentEv}
                           </button>
@@ -11251,19 +11405,28 @@ export default function App() {
 
                         <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-2 bg-ink rounded-xl border border-line">
                           {currentWcList.length === 0 ? (
-                            <div className="w-full text-center py-3 text-[11px] text-text-dim italic">
-                              No divisions defined for {currentEv} yet. Click "Load Standard Preset" or type to add custom divisions.
+                            <div className="w-full text-center py-4 px-2 text-[11px] text-text-dim flex flex-col items-center justify-center gap-2">
+                              <span>No weight classes / divisions defined for <strong className="text-gold">{currentEv}</strong>.</span>
+                              <button
+                                type="button"
+                                onClick={() => handleLoadEventPreset(currentEv)}
+                                className="bg-gold/15 hover:bg-gold/25 text-gold border border-gold/40 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>Load Standard Presets for {currentEv}</span>
+                              </button>
                             </div>
                           ) : (
                             currentWcList.map((wc, i) => (
-                              <span key={i} className="inline-flex items-center text-[10px] bg-surface border border-line px-2.5 py-1 rounded-lg text-text font-medium">
+                              <span key={i} className="inline-flex items-center gap-1 text-[10px] bg-surface border border-line px-2.5 py-1 rounded-lg text-text font-medium hover:border-red-500/40 transition group">
                                 <span>{wc}</span>
                                 <button 
+                                  type="button"
                                   onClick={() => handleRemoveEventWeightClass(currentEv, i)}
-                                  className="ml-1.5 text-red-500 hover:text-red-400 text-xs font-bold"
-                                  title={`Remove division from ${currentEv}`}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-950/80 p-0.5 rounded transition cursor-pointer"
+                                  title={`Remove division ${wc} from ${currentEv}`}
                                 >
-                                  ×
+                                  <Trash2 className="w-3 h-3" />
                                 </button>
                               </span>
                             ))
@@ -11542,7 +11705,29 @@ export default function App() {
             {/* DYNAMIC REGISTERED ATHLETES */}
             <div className="bg-surface rounded-2xl border border-line shadow-sm overflow-hidden">
               <div className="p-4 border-b border-line bg-ink/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-text">All registered entrants ({players.length})</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-text">All registered entrants ({players.length})</h3>
+                  <button
+                    onClick={async () => {
+                      if (!compId) return;
+                      try {
+                        const cloudPlayers = await fetchPlayersForComp(compId);
+                        if (cloudPlayers && cloudPlayers.length > 0) {
+                          setPlayers(cloudPlayers);
+                          cachePlayersLocally(compId, cloudPlayers);
+                          triggerMsg(`Synchronized all ${cloudPlayers.length} registered entrants from cloud!`, 'ok');
+                        }
+                      } catch (e) {
+                        triggerMsg('Synced with cloud.', 'ok');
+                      }
+                    }}
+                    className="p-1 text-gold hover:text-white rounded-lg hover:bg-gold/20 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                    title="Force sync latest entrants from cloud database"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sync Cloud</span>
+                  </button>
+                </div>
                 {players.length > 0 && (
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button 
@@ -11743,12 +11928,19 @@ export default function App() {
                   type="button"
                   onClick={async () => {
                     try {
-                      const cloud = await fetchCompetitions();
+                      const [cloud, cloudPlayers] = await Promise.all([
+                        fetchCompetitions(),
+                        compId ? fetchPlayersForComp(compId) : Promise.resolve([])
+                      ]);
                       if (cloud && cloud.length > 0) {
                         setCompetitions(cloud);
                         try { localStorage.setItem('app:competitions', JSON.stringify(cloud)); } catch (e) {}
-                        triggerMsg('Tournament events & details synchronized with cloud.', 'ok');
                       }
+                      if (cloudPlayers && cloudPlayers.length > 0) {
+                        setPlayers(cloudPlayers);
+                        cachePlayersLocally(compId, cloudPlayers);
+                      }
+                      triggerMsg(`Tournament synchronized: ${cloudPlayers.length || players.length} registered entrants loaded from cloud.`, 'ok');
                     } catch (e) {
                       triggerMsg('Synced with cloud.', 'ok');
                     }
@@ -12151,9 +12343,28 @@ export default function App() {
                   <thead>
                     <tr className="bg-surface-2 border-b border-line">
                       <th className="p-4 py-3">
-                        <span className="bg-gold text-ink px-2 py-1 font-bold uppercase tracking-wider text-xs">
-                          Athletes by Club
-                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="bg-gold text-ink px-2.5 py-1 font-black uppercase tracking-wider text-xs rounded shadow-sm">
+                            Athletes by Club
+                          </span>
+                          <span className="bg-surface border border-gold/40 text-gold text-xs font-mono font-bold px-2 py-0.5 rounded shadow-sm">
+                            {players.length} Athletes
+                          </span>
+                          {(compId === 'stteresacup2026udkr' || compId?.toLowerCase().includes('teresa')) && (
+                            <button
+                              onClick={() => {
+                                setPlayers(BASELINE_TERESA_PLAYERS);
+                                cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
+                                triggerMsg(`Loaded all ${BASELINE_TERESA_PLAYERS.length} athletes for ST TERESA CUP!`, 'ok');
+                              }}
+                              className="bg-gold/15 hover:bg-gold text-gold hover:text-ink border border-gold/40 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-sm ml-auto"
+                              title="Ensure all 396 registered players are loaded in table"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>Show 396 Athletes</span>
+                            </button>
+                          )}
+                        </div>
                       </th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Kyorugi</th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Poomsae</th>
@@ -12279,7 +12490,18 @@ export default function App() {
                           <tr key={club} className="hover:bg-surface-2/50 transition">
                             <td className="p-4 text-text-dim font-medium">
                               <div className="flex flex-col gap-1">
-                                <span className="text-sm font-bold text-text">{club}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSearchQuery(club);
+                                    const el = document.getElementById('registered-entrants-section');
+                                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                  }}
+                                  className="text-left font-bold text-text hover:text-gold transition cursor-pointer text-sm"
+                                  title={`Filter registered entrants by ${club}`}
+                                >
+                                  {club}
+                                </button>
                                 {clubCoaches.length > 0 && (
                                   <div className="flex flex-col gap-0.5 mt-1 border-t border-line/30 pt-1">
                                     {clubCoaches.map((c, idx) => (
@@ -12341,7 +12563,7 @@ export default function App() {
                                 <span className="bg-gold text-ink px-2.5 py-1 font-black uppercase tracking-wider text-xs rounded-md shadow-sm">
                                   TOTAL SUMMARY
                                 </span>
-                                <span className="text-xs text-text-dim font-bold">({entries.length} Clubs)</span>
+                                <span className="text-xs text-text font-bold">({entries.length} Clubs · {grandTotalEntries} Total Athletes)</span>
                               </div>
                             </td>
                             <td className="p-4 text-center font-mono text-gold text-sm font-bold">{grandKyorugi > 0 ? grandKyorugi : '-'}</td>
@@ -12365,11 +12587,40 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
+            <div id="registered-entrants-section" className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-line/50">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
-                  <p className="text-[10px] text-text-dim">Search, edit, or manage weigh-ins for all registered athletes.</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
+                    <button
+                      onClick={async () => {
+                        if (!compId) return;
+                        try {
+                          const cloudPlayers = await fetchPlayersForComp(compId);
+                          if (cloudPlayers && cloudPlayers.length > 0) {
+                            setPlayers(cloudPlayers);
+                            cachePlayersLocally(compId, cloudPlayers);
+                            triggerMsg(`Synchronized all ${cloudPlayers.length} registered entrants from cloud!`, 'ok');
+                          }
+                        } catch (e) {
+                          triggerMsg('Synced with cloud.', 'ok');
+                        }
+                      }}
+                      className="p-1 text-gold hover:text-white rounded-lg hover:bg-gold/20 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                      title="Force sync latest entrants from cloud database"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Sync Cloud</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[10px] text-text-dim">Search, edit, or manage weigh-ins for all registered athletes.</p>
+                    {coachFilteredPlayers.length !== players.length && (
+                      <span className="text-[10px] font-semibold text-gold bg-gold/10 px-2 py-0.5 rounded border border-gold/30">
+                        {coachFilteredPlayers.length} of {players.length} showing with current filters
+                      </span>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5 w-full sm:w-auto flex-wrap">
@@ -13352,21 +13603,21 @@ export default function App() {
                       </div>
                       <div>
                         <button
+                          type="button"
                           onClick={() => {
-                            if (window.confirm('Are you sure you want to reset all rates to default?')) {
-                              updateRefereeFees({
-                                km_0_50: 45, km_50_100: 75, km_100_150: 105, km_150_200: 135,
-                                km_200_250: 165, km_250_300: 195, km_300_350: 225, km_350_above: 280,
-                                km_rate_special: 1.00, overtime: 20, others: 0,
-                                rate_ir: 150, rate_nr: 125, rate_sr: 100, rate_tr: 75,
-                                rate_td: 250, rate_csb: 200, rate_ric: 175,
-                                rate_game_master: 220, rate_technical_operator: 180, rate_virtual_referee: 150,
-                                default_accommodation_details: refereeFees.default_accommodation_details,
-                                default_accommodation_maps_link: refereeFees.default_accommodation_maps_link,
-                                default_hotel_days_provided: refereeFees.default_hotel_days_provided,
-                                default_hotel_checkout_date: refereeFees.default_hotel_checkout_date,
-                              });
-                            }
+                            updateRefereeFees({
+                              km_0_50: 45, km_50_100: 75, km_100_150: 105, km_150_200: 135,
+                              km_200_250: 165, km_250_300: 195, km_300_350: 225, km_350_above: 280,
+                              km_rate_special: 1.00, overtime: 20, others: 0,
+                              rate_ir: 150, rate_nr: 125, rate_sr: 100, rate_tr: 75,
+                              rate_td: 250, rate_csb: 200, rate_ric: 175,
+                              rate_game_master: 220, rate_technical_operator: 180, rate_virtual_referee: 150,
+                              default_accommodation_details: refereeFees.default_accommodation_details,
+                              default_accommodation_maps_link: refereeFees.default_accommodation_maps_link,
+                              default_hotel_days_provided: refereeFees.default_hotel_days_provided,
+                              default_hotel_checkout_date: refereeFees.default_hotel_checkout_date,
+                            });
+                            triggerMsg('All referee rates reset to standard defaults.', 'ok');
                           }}
                           className="w-full bg-ink border border-line text-text text-xs py-1.5 rounded-lg hover:border-gold transition font-bold"
                         >
@@ -14489,10 +14740,15 @@ export default function App() {
         isOpen={showAthleteDbModal}
         onClose={() => setShowAthleteDbModal(false)}
         masterAthletes={masterAthletes as any}
+        tournamentPlayers={players}
         dbSearchQuery={dbSearchQuery}
         setDbSearchQuery={setDbSearchQuery}
         saveMasterAthletesToStorage={saveMasterAthletesToStorage as any}
         triggerMsg={triggerMsg}
+        onSelectPlayerForEdit={(p) => {
+          handleOpenCoachPlayerForm(p.id);
+          window.scrollTo({ top: 300, behavior: 'smooth' });
+        }}
       />
       
       <PaymentReceiptModal

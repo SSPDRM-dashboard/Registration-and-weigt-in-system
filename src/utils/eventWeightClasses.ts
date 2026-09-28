@@ -159,8 +159,8 @@ export function getWeightClassesForEvent(
 
   const cleanEv = eventName.trim();
 
-  // 1. Direct match in comp.eventWeightClasses
-  if (comp?.eventWeightClasses && comp.eventWeightClasses[cleanEv] && comp.eventWeightClasses[cleanEv].length > 0) {
+  // 1. Direct match in comp.eventWeightClasses (use configured array even if empty)
+  if (comp?.eventWeightClasses && cleanEv in comp.eventWeightClasses && Array.isArray(comp.eventWeightClasses[cleanEv])) {
     return comp.eventWeightClasses[cleanEv];
   }
 
@@ -169,7 +169,7 @@ export function getWeightClassesForEvent(
     const foundKey = Object.keys(comp.eventWeightClasses).find(
       (k) => k.trim().toLowerCase() === cleanEv.toLowerCase()
     );
-    if (foundKey && comp.eventWeightClasses[foundKey]?.length > 0) {
+    if (foundKey && Array.isArray(comp.eventWeightClasses[foundKey])) {
       return comp.eventWeightClasses[foundKey];
     }
   }

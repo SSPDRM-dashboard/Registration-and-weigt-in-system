@@ -377,6 +377,7 @@ export async function deleteMasterAthlete(id: string): Promise<void> {
 }
 
 export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
+  const isTeresaComp = compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'));
   try {
     const colRef = collection(db, 'players');
     const q = query(colRef, where('compId', '==', compId));
@@ -386,6 +387,15 @@ export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
       players.push(doc.data() as Player);
     });
     if (players.length > 0) {
+      if (isTeresaComp && players.length < BASELINE_TERESA_PLAYERS.length) {
+        const ids = new Set(players.map(p => p.id));
+        for (const bp of BASELINE_TERESA_PLAYERS) {
+          if (!ids.has(bp.id)) {
+            players.push(bp);
+            ids.add(bp.id);
+          }
+        }
+      }
       cachePlayersLocally(compId, players);
       return players;
     }
@@ -395,11 +405,26 @@ export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
   try {
     const cached = localStorage.getItem(`app:players:${compId}`);
     if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      let parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
+          const ids = new Set(parsed.map((p: Player) => p.id));
+          const merged = [...parsed];
+          for (const bp of BASELINE_TERESA_PLAYERS) {
+            if (!ids.has(bp.id)) {
+              merged.push(bp);
+              ids.add(bp.id);
+            }
+          }
+          parsed = merged;
+          cachePlayersLocally(compId, parsed);
+        }
+        return parsed;
+      }
     }
   } catch (e) {}
-  if (compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'))) {
+  if (isTeresaComp) {
+    cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
     return BASELINE_TERESA_PLAYERS;
   }
   return [];
@@ -543,6 +568,7 @@ export async function fetchCompetitionById(compId: string): Promise<Competition 
 }
 
 export function subscribeToPlayersForComp(compId: string, callback: (players: Player[]) => void, onError: (error: Error) => void): () => void {
+  const isTeresaComp = compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'));
   const colRef = collection(db, 'players');
   const q = query(colRef, where('compId', '==', compId));
   
@@ -552,20 +578,42 @@ export function subscribeToPlayersForComp(compId: string, callback: (players: Pl
       players.push(doc.data() as Player);
     });
     if (players.length > 0) {
+      if (isTeresaComp && players.length < BASELINE_TERESA_PLAYERS.length) {
+        const ids = new Set(players.map(p => p.id));
+        for (const bp of BASELINE_TERESA_PLAYERS) {
+          if (!ids.has(bp.id)) {
+            players.push(bp);
+            ids.add(bp.id);
+          }
+        }
+      }
       cachePlayersLocally(compId, players);
       callback(players);
     } else {
       const cached = localStorage.getItem(`app:players:${compId}`);
       if (cached) {
         try {
-          const parsed = JSON.parse(cached);
+          let parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
+              const ids = new Set(parsed.map((p: Player) => p.id));
+              const merged = [...parsed];
+              for (const bp of BASELINE_TERESA_PLAYERS) {
+                if (!ids.has(bp.id)) {
+                  merged.push(bp);
+                  ids.add(bp.id);
+                }
+              }
+              parsed = merged;
+              cachePlayersLocally(compId, parsed);
+            }
             callback(parsed);
             return;
           }
         } catch(e) {}
       }
-      if (compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'))) {
+      if (isTeresaComp) {
+        cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
         callback(BASELINE_TERESA_PLAYERS);
       } else {
         callback([]);
@@ -577,14 +625,27 @@ export function subscribeToPlayersForComp(compId: string, callback: (players: Pl
     const cached = localStorage.getItem(`app:players:${compId}`);
     if (cached) {
       try {
-        const parsed = JSON.parse(cached);
+        let parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
+            const ids = new Set(parsed.map((p: Player) => p.id));
+            const merged = [...parsed];
+            for (const bp of BASELINE_TERESA_PLAYERS) {
+              if (!ids.has(bp.id)) {
+                merged.push(bp);
+                ids.add(bp.id);
+              }
+            }
+            parsed = merged;
+            cachePlayersLocally(compId, parsed);
+          }
           callback(parsed);
           return;
         }
       } catch(e) {}
     }
-    if (compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'))) {
+    if (isTeresaComp) {
+      cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
       callback(BASELINE_TERESA_PLAYERS);
       return;
     }
