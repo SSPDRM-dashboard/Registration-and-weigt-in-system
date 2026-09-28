@@ -4556,26 +4556,40 @@ export default function App() {
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      triggerMsg('Please select a valid image file (JPG, PNG, WEBP).', 'error');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const size = 240;
+        const size = 300;
         const scale = Math.max(size / img.width, size / img.height);
-        canvas.width = 192; // 4:5 portrait ratio
-        canvas.height = 240;
+        canvas.width = 240; // High-resolution 4:5 portrait ratio for ID cards
+        canvas.height = 300;
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           const w = img.width * scale;
           const h = img.height * scale;
-          ctx.drawImage(img, (192 - w) / 2, (240 - h) / 2, w, h);
-          setPendingPhoto(canvas.toDataURL('image/jpeg', 0.8));
+          ctx.drawImage(img, (240 - w) / 2, (300 - h) / 2, w, h);
+          setPendingPhoto(canvas.toDataURL('image/jpeg', 0.85));
+          triggerMsg('Athlete portrait photograph loaded.', 'ok');
         }
+      };
+      img.onerror = () => {
+        triggerMsg('Failed to process image file.', 'error');
       };
       img.src = event.target?.result as string;
     };
+    reader.onerror = () => {
+      triggerMsg('Failed to read image file.', 'error');
+    };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleSavePlayer = () => {
@@ -4685,7 +4699,15 @@ export default function App() {
         return;
       }
 
-      updatedList = players.map(p => p.id === selectedPlayerId ? { ...p, ...data, event: eventsToRegister[0] } as Player : p);
+      updatedList = players.map(p => {
+        if (p.id === selectedPlayerId) {
+          return { ...p, ...data, event: eventsToRegister[0] } as Player;
+        }
+        if (p.ic && pIc.trim() && p.ic.trim().toLowerCase() === pIc.trim().toLowerCase()) {
+          return { ...p, photo: pendingPhoto || undefined };
+        }
+        return p;
+      });
 
       // If coach checked additional new events in the same edit session
       const additionalEvents = eventsToCreateOrUpdate.filter(ev => ev !== eventsToRegister[0]);
@@ -4716,6 +4738,27 @@ export default function App() {
       });
 
       savePlayersToStorage(compId, updatedList);
+
+      const masterKey = selectedMasterId || pIc.trim() || pName.trim();
+      if (masterKey) {
+        saveMasterAthletesToStorage({
+          ...masterAthletes,
+          [masterKey]: {
+            ...(masterAthletes[masterKey] || {}),
+            id: masterKey,
+            name: pName.trim(),
+            ic: pIc.trim(),
+            dob: pDob,
+            gender: pGender,
+            club: pClub.trim(),
+            photo: pendingPhoto || undefined,
+            schoolName: pSchoolName.trim(),
+            schoolCode: pSchoolCode.trim(),
+            race: pRace,
+          }
+        });
+      }
+
       triggerMsg(`Athlete record updated successfully${additionalEvents.length > 0 ? ` with ${additionalEvents.length} extra event(s)` : ''}.`, 'ok');
     } else {
       if (eventsToCreateOrUpdate.length === 0) {
@@ -8149,29 +8192,95 @@ export default function App() {
                 );
               })()}
 
-              <div>
-                <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1.5">Athlete Portrait Photograph</label>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                    Athlete Portrait Photograph
+                  </label>
+                  {(role === 'organizer' || role === 'admin' || selectedPlayerId) && (
+                    <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-gold" />
+                      <span>Photo Management</span>
+                    </span>
+                  )}
+                </div>
+
                 {pendingPhoto ? (
-                  <div className="flex items-center space-x-4 bg-ink/30 p-3.5 rounded-xl border border-line">
-                    <img 
-                      src={pendingPhoto} 
-                      alt="Athlete portrait" 
-                      className="w-16 h-20 object-cover rounded-lg border border-line shrink-0" 
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-text block">Portrait Photo Loaded</span>
-                      <span className="text-[11px] text-text-dim block mt-0.5">
-                        This photograph will be printed on the ID Card / Badge.
-                      </span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-ink/40 p-4 rounded-2xl border border-line hover:border-gold/30 transition">
+                    <div className="flex items-center space-x-4">
+                      <div className="relative group shrink-0">
+                        <img 
+                          src={pendingPhoto} 
+                          alt="Athlete portrait" 
+                          className="w-20 h-24 object-cover rounded-xl border-2 border-gold/40 shadow-md bg-ink" 
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-text">Portrait Photo Attached</span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-md">
+                            <CheckCircle className="w-3 h-3" /> Ready
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-text-dim max-w-sm leading-relaxed">
+                          This official photo is formatted (4:5 ratio) for the athlete's ID card badge and weigh-in verification profile.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 sm:self-center shrink-0">
+                      <label className="bg-gold hover:bg-yellow-400 text-ink border border-gold px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm">
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Change Photo</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handlePhotoSelect} 
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingPhoto(null);
+                          triggerMsg('Athlete portrait photo removed.', 'ok');
+                        }}
+                        className="bg-red-950/60 hover:bg-red-900 text-red-300 hover:text-white border border-red-800/50 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        title="Remove photo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove</span>
+                      </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-ink/30 border border-dashed border-line p-4 rounded-xl text-center space-y-1">
-                    <User className="w-5 h-5 text-gold/60 mx-auto" />
-                    <span className="text-xs font-bold text-text block">No Photograph Uploaded Yet</span>
-                    <span className="text-[11px] text-text-dim block max-w-sm mx-auto">
-                      Coaches no longer upload photos. The athlete's parent or guardian will upload the portrait photograph directly when submitting the Parental Indemnity Form.
-                    </span>
+                  <div className="bg-ink/30 border-2 border-dashed border-line hover:border-gold/50 rounded-2xl p-6 text-center transition space-y-2">
+                    <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center mx-auto text-gold">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-text block mb-1">
+                        No Portrait Photograph Uploaded
+                      </span>
+                      <p className="text-xs text-text-dim max-w-md mx-auto leading-relaxed">
+                        Upload a passport-style portrait photo for official ID card badge printing, accreditation, and weigh-in verification.
+                      </p>
+                    </div>
+                    <div className="pt-2">
+                      <label className="inline-flex items-center gap-2 bg-gold hover:bg-yellow-400 text-ink text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md transition">
+                        <Upload className="w-4 h-4" />
+                        <span>Upload Athlete Photo</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handlePhotoSelect} 
+                        />
+                      </label>
+                    </div>
+                    <p className="text-[10px] text-text-dim/70">
+                      Accepted formats: JPG, PNG, WEBP. Automatically cropped & optimized to 4:5 badge ratio.
+                    </p>
                   </div>
                 )}
               </div>
@@ -8179,13 +8288,13 @@ export default function App() {
               <div className="pt-4 flex items-center space-x-3 border-t border-line/40">
                 <button 
                   onClick={handleSavePlayer}
-                  className="bg-gold hover:opacity-90 text-ink font-bold px-5 py-2.5 rounded-xl text-xs transition"
+                  className="bg-gold hover:opacity-90 text-ink font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
                 >
                   {selectedPlayerId ? 'Save Record Changes' : 'Confirm Registration'}
                 </button>
                 <button 
-                  onClick={() => setScreen('coachRoster')}
-                  className="bg-ink text-text-dim border border-line hover:text-text px-5 py-2.5 rounded-xl text-xs transition"
+                  onClick={() => setScreen(role === 'admin' ? 'adminCompDetail' : role === 'organizer' ? 'organizerDashboard' : 'coachRoster')}
+                  className="bg-ink text-text-dim border border-line hover:text-text px-5 py-2.5 rounded-xl text-xs transition cursor-pointer"
                 >
                   Cancel
                 </button>
