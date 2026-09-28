@@ -4554,6 +4554,11 @@ export default function App() {
   };
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (role !== 'admin' && role !== 'organizer') {
+      triggerMsg('Only administrators and organizers are permitted to edit or upload athlete photographs.', 'error');
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
@@ -8192,98 +8197,127 @@ export default function App() {
                 );
               })()}
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
-                    Athlete Portrait Photograph
-                  </label>
-                  {(role === 'organizer' || role === 'admin' || selectedPlayerId) && (
-                    <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <Sparkles className="w-3 h-3 text-gold" />
-                      <span>Photo Management</span>
-                    </span>
-                  )}
-                </div>
+              {(() => {
+                const canEditPhoto = role === 'admin' || role === 'organizer';
 
-                {pendingPhoto ? (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-ink/40 p-4 rounded-2xl border border-line hover:border-gold/30 transition">
-                    <div className="flex items-center space-x-4">
-                      <div className="relative group shrink-0">
-                        <img 
-                          src={pendingPhoto} 
-                          alt="Athlete portrait" 
-                          className="w-20 h-24 object-cover rounded-xl border-2 border-gold/40 shadow-md bg-ink" 
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-text">Portrait Photo Attached</span>
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-md">
-                            <CheckCircle className="w-3 h-3" /> Ready
-                          </span>
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                        Athlete Portrait Photograph
+                      </label>
+                      {canEditPhoto ? (
+                        <span className="text-[10px] text-gold font-bold bg-gold/10 border border-gold/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-gold" />
+                          <span>{role === 'admin' ? 'Admin' : 'Organizer'} Photo Control</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-text-dim font-bold bg-surface-2 border border-line px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Lock className="w-3 h-3 text-text-dim" />
+                          <span>Admin / Organizer Only</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {pendingPhoto ? (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-ink/40 p-4 rounded-2xl border border-line hover:border-gold/30 transition">
+                        <div className="flex items-center space-x-4">
+                          <div className="relative group shrink-0">
+                            <img 
+                              src={pendingPhoto} 
+                              alt="Athlete portrait" 
+                              className="w-20 h-24 object-cover rounded-xl border-2 border-gold/40 shadow-md bg-ink" 
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-text">Portrait Photo Attached</span>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-md">
+                                <CheckCircle className="w-3 h-3" /> Ready
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-text-dim max-w-sm leading-relaxed">
+                              This official photo is formatted (4:5 ratio) for the athlete's ID card badge and weigh-in verification profile.
+                            </p>
+                            {!canEditPhoto && (
+                              <p className="text-[10px] text-text-dim/80 italic flex items-center gap-1 mt-1">
+                                <Lock className="w-3 h-3 text-gold shrink-0" />
+                                <span>Only organizers and admins are authorized to change or remove this photograph.</span>
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-[11px] text-text-dim max-w-sm leading-relaxed">
-                          This official photo is formatted (4:5 ratio) for the athlete's ID card badge and weigh-in verification profile.
+
+                        {canEditPhoto && (
+                          <div className="flex flex-wrap items-center gap-2 sm:self-center shrink-0">
+                            <label className="bg-gold hover:bg-yellow-400 text-ink border border-gold px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm">
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Change Photo</span>
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={handlePhotoSelect} 
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPendingPhoto(null);
+                                triggerMsg('Athlete portrait photo removed.', 'ok');
+                              }}
+                              className="bg-red-950/60 hover:bg-red-900 text-red-300 hover:text-white border border-red-800/50 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                              title="Remove photo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : canEditPhoto ? (
+                      <div className="bg-ink/30 border-2 border-dashed border-line hover:border-gold/50 rounded-2xl p-6 text-center transition space-y-2">
+                        <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center mx-auto text-gold">
+                          <Camera className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-bold text-text block mb-1">
+                            No Portrait Photograph Uploaded
+                          </span>
+                          <p className="text-xs text-text-dim max-w-md mx-auto leading-relaxed">
+                            Upload a passport-style portrait photo for official ID card badge printing, accreditation, and weigh-in verification.
+                          </p>
+                        </div>
+                        <div className="pt-2">
+                          <label className="inline-flex items-center gap-2 bg-gold hover:bg-yellow-400 text-ink text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md transition">
+                            <Upload className="w-4 h-4" />
+                            <span>Upload Athlete Photo</span>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={handlePhotoSelect} 
+                            />
+                          </label>
+                        </div>
+                        <p className="text-[10px] text-text-dim/70">
+                          Accepted formats: JPG, PNG, WEBP. Automatically cropped & optimized to 4:5 badge ratio.
                         </p>
                       </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 sm:self-center shrink-0">
-                      <label className="bg-gold hover:bg-yellow-400 text-ink border border-gold px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm">
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>Change Photo</span>
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={handlePhotoSelect} 
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPendingPhoto(null);
-                          triggerMsg('Athlete portrait photo removed.', 'ok');
-                        }}
-                        className="bg-red-950/60 hover:bg-red-900 text-red-300 hover:text-white border border-red-800/50 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        title="Remove photo"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Remove</span>
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="bg-ink/30 border border-dashed border-line p-5 rounded-2xl text-center space-y-2">
+                        <div className="w-10 h-10 rounded-full bg-surface-2 border border-line flex items-center justify-center mx-auto text-text-dim">
+                          <User className="w-5 h-5 text-text-dim/60" />
+                        </div>
+                        <span className="text-xs font-bold text-text block">No Photograph Uploaded Yet</span>
+                        <p className="text-[11px] text-text-dim max-w-md mx-auto leading-relaxed">
+                          Coaches do not upload athlete photos directly. The athlete's parent or guardian will upload the portrait photograph when submitting the Parental Indemnity Form, or the tournament organizer can upload it directly.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="bg-ink/30 border-2 border-dashed border-line hover:border-gold/50 rounded-2xl p-6 text-center transition space-y-2">
-                    <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center mx-auto text-gold">
-                      <Camera className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <span className="text-sm font-bold text-text block mb-1">
-                        No Portrait Photograph Uploaded
-                      </span>
-                      <p className="text-xs text-text-dim max-w-md mx-auto leading-relaxed">
-                        Upload a passport-style portrait photo for official ID card badge printing, accreditation, and weigh-in verification.
-                      </p>
-                    </div>
-                    <div className="pt-2">
-                      <label className="inline-flex items-center gap-2 bg-gold hover:bg-yellow-400 text-ink text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-md transition">
-                        <Upload className="w-4 h-4" />
-                        <span>Upload Athlete Photo</span>
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={handlePhotoSelect} 
-                        />
-                      </label>
-                    </div>
-                    <p className="text-[10px] text-text-dim/70">
-                      Accepted formats: JPG, PNG, WEBP. Automatically cropped & optimized to 4:5 badge ratio.
-                    </p>
-                  </div>
-                )}
-              </div>
+                );
+              })()}
 
               <div className="pt-4 flex items-center space-x-3 border-t border-line/40">
                 <button 
