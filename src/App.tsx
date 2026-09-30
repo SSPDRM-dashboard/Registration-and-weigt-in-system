@@ -19,6 +19,7 @@ import { AssignSpecialRolesModal } from './components/modals/AssignSpecialRolesM
 import { RefereeAccommodationModal } from './components/modals/RefereeAccommodationModal';
 import { CoachExcelImportModal } from './components/modals/CoachExcelImportModal';
 import { RefereeJoinCompModal } from './components/modals/RefereeJoinCompModal';
+import { PrintIdCardsModal } from './components/modals/PrintIdCardsModal';
 import { CurrencySelector } from './components/CurrencySelector';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
@@ -33,7 +34,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import jsQR from 'jsqr';
 import ExcelJS from 'exceljs';
-import { Competition, Player, Coach, WeighIn, Organizer, Referee, MatchAssignment } from './types';
+import { Competition, Player, Coach, WeighIn, Organizer, Referee, MatchAssignment, ClubReceipt } from './types';
 import { 
   BASELINE_GLOBAL_CLUBS, 
   BASELINE_COMPETITIONS, 
@@ -51,6 +52,7 @@ import {
   isExemptFromStrictWeightScale
 } from './utils/eventWeightClasses';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
+import { compressReceiptImage, normalizeClubName, findReceiptForClub } from './utils';
 import { 
   fetchCompetitions, 
   subscribeToCompetitions,
@@ -85,7 +87,11 @@ import {
   fetchGlobalClubs,
   saveGlobalClubs,
   fetchAdminPassword, fetchCoachByUsername, fetchOrganizerByUsername, fetchRefereeAccountByNric,
-  saveAdminPasswordToFirestore
+  saveAdminPasswordToFirestore,
+  saveCompetitionReceipt,
+  deleteCompetitionReceipt,
+  subscribeToCompetitionReceipts,
+  fetchCompetitionReceipts
 } from './firebase';
 import { cachePlayersLocally, cacheRefereesLocally, safeSetLocalStorage } from './utils/storage';
 import * as XLSX from 'xlsx';
@@ -595,6 +601,8 @@ export default function App() {
   const [confirmDeleteRefereeId, setConfirmDeleteRefereeId] = useState<string | null>(null);
   const [confirmClearWcEv, setConfirmClearWcEv] = useState<string | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [showPrintIdCardsModal, setShowPrintIdCardsModal] = useState<boolean>(false);
+  const [printIdCardsInitialClub, setPrintIdCardsInitialClub] = useState<string>('all');
 
   // Admin Coach Management state
   const [adminCoachSearch, setAdminCoachSearch] = useState<string>('');
@@ -930,6 +938,7 @@ export default function App() {
   const [packageFiveEventFeeInput, setPackageFiveEventFeeInput] = useState('');
   const [feeUpdateSuccess, setFeeUpdateSuccess] = useState(false);
   const [selectedClubReceipt, setSelectedClubReceipt] = useState<{ clubName: string; receiptUrl: string; uploadedAt: string } | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
 
   useEffect(() => {
     const active = competitions.find(c => c.id === compId);
@@ -965,6 +974,35 @@ export default function App() {
       setPackageFiveEventFeeInput('');
     }
   }, [compId, competitions]);
+
+  // Real-time synchronization of competition receipts from dedicated subcollection
+  useEffect(() => {
+    if (!compId) return;
+
+    // Load locally cached receipts first for instant 0ms rendering
+    try {
+      const cached = localStorage.getItem(`app:receipts_${compId}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object') {
+          setCompetitions(prev => prev.map(c => c.id === compId ? { ...c, receipts: { ...(c.receipts || {}), ...parsed } } : c));
+        }
+      }
+    } catch (e) {}
+
+    const unsubscribe = subscribeToCompetitionReceipts(compId, (cloudReceipts) => {
+      if (cloudReceipts && typeof cloudReceipts === 'object') {
+        try {
+          localStorage.setItem(`app:receipts_${compId}`, JSON.stringify(cloudReceipts));
+        } catch (e) {}
+        setCompetitions(prev => prev.map(c => c.id === compId ? { ...c, receipts: cloudReceipts } : c));
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [compId]);
   
   // Admin form inputs
   const [ncName, setNcName] = useState('');
@@ -1379,7 +1417,12 @@ export default function App() {
           ? c.events
           : ['Kyorugi', 'Para Kyorugi', 'Recognize Poomsae', 'Free Style Poomsae', 'Para Poomsae', 'Virtual Taekwondo', 'Kyukpa', 'Speed Kicking', 'Skipping Rope'];
         const deduplicated = Array.from(new Set(eventsList.map(ev => (typeof ev === 'string' ? ev.trim() : '')).filter(Boolean)));
-        return { ...c, events: deduplicated };
+        const baselineComp = BASELINE_COMPETITIONS.find(bc => bc.id === c.id);
+        const baselineClubs = baselineComp?.affiliatedClubs || [];
+        const existingClubs = (c.affiliatedClubs && c.affiliatedClubs.length > 0)
+          ? c.affiliatedClubs
+          : (baselineClubs.length > 0 ? baselineClubs : BASELINE_GLOBAL_CLUBS);
+        return { ...c, events: deduplicated, affiliatedClubs: existingClubs };
       });
       try {
         localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
@@ -1551,7 +1594,14 @@ export default function App() {
     const unsubscribe = subscribeToCompetitions(
       (cloudComps) => {
         if (cloudComps && cloudComps.length > 0) {
-          const valid = cloudComps.filter(c => c && c.id && !isCompetitionDeleted(c.id));
+          const valid = cloudComps.filter(c => c && c.id && !isCompetitionDeleted(c.id)).map(c => {
+            const baselineComp = BASELINE_COMPETITIONS.find(bc => bc.id === c.id);
+            const baselineClubs = baselineComp?.affiliatedClubs || [];
+            const existingClubs = (c.affiliatedClubs && c.affiliatedClubs.length > 0)
+              ? c.affiliatedClubs
+              : (baselineClubs.length > 0 ? baselineClubs : BASELINE_GLOBAL_CLUBS);
+            return { ...c, affiliatedClubs: existingClubs };
+          });
           if (valid.length > 0) {
             setCompetitions(valid);
             try { localStorage.setItem('app:competitions', JSON.stringify(valid)); } catch (e) {}
@@ -1933,33 +1983,69 @@ export default function App() {
     triggerMsg('Loaded Special SGD Package ($80 / $40 / $20 / $150). Click "Save Participant Fees" to apply.', 'ok');
   };
 
-  const handleUploadReceipt = async (clubName: string, receiptBase64: string) => {
+  const handleUploadReceipt = async (clubName: string, receiptBase64: string, extraClubNames?: string[]) => {
     if (!compId) return;
-    const clubKey = clubName.toUpperCase();
-    const updatedComps = competitions.map(c => {
+    const cleanClub = (clubName || '').trim();
+
+    // Canonical club name: prefer actual athlete club name over generic "Singapore" or "My Club"
+    const candidateClub = (extraClubNames && extraClubNames.length > 0 && extraClubNames[0])
+      ? extraClubNames[0].trim()
+      : (cleanClub && cleanClub.toLowerCase() !== 'singapore' && cleanClub.toLowerCase() !== 'my club')
+        ? cleanClub
+        : (user && coaches[user]?.club && coaches[user].club.toLowerCase() !== 'singapore')
+          ? coaches[user].club.trim()
+          : cleanClub || user || 'Club';
+
+    const safeDocKey = candidateClub.toUpperCase();
+
+    const receiptObj: ClubReceipt = {
+      receiptUrl: receiptBase64,
+      uploadedAt: new Date().toLocaleDateString('en-MY', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }),
+      coachUsername: user || undefined,
+      coachName: coaches[user || '']?.name || user || undefined,
+      clubName: candidateClub
+    };
+
+    // 1. Immediately update local React state so UI updates to "Submitted" with zero latency
+    setCompetitions(prev => prev.map(c => {
       if (c.id === compId) {
-        const existingReceipts = c.receipts || {};
-        return {
-          ...c,
-          receipts: {
-            ...existingReceipts,
-            [clubKey]: {
-              receiptUrl: receiptBase64,
-              uploadedAt: new Date().toLocaleDateString('en-MY', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })
-            }
-          }
-        };
+        const existingReceipts = { ...(c.receipts || {}) };
+        existingReceipts[safeDocKey] = receiptObj;
+        if (cleanClub && cleanClub.toUpperCase() !== safeDocKey) {
+          existingReceipts[cleanClub.toUpperCase()] = receiptObj;
+        }
+        if (user) {
+          existingReceipts[`coach_${user.toUpperCase()}`] = receiptObj;
+        }
+        return { ...c, receipts: existingReceipts };
       }
       return c;
-    });
-    await saveCompsToStorage(updatedComps);
-    triggerMsg('Payment receipt uploaded successfully!', 'ok');
+    }));
+
+    // Cache to localStorage
+    try {
+      const cached = localStorage.getItem(`app:receipts_${compId}`);
+      const curr = cached ? JSON.parse(cached) : {};
+      curr[safeDocKey] = receiptObj;
+      if (cleanClub) curr[cleanClub.toUpperCase()] = receiptObj;
+      if (user) curr[`coach_${user.toUpperCase()}`] = receiptObj;
+      localStorage.setItem(`app:receipts_${compId}`, JSON.stringify(curr));
+    } catch (e) {}
+
+    // 2. Persist to dedicated Firestore receipts subcollection (individual doc, no size limit issues)
+    try {
+      await saveCompetitionReceipt(compId, safeDocKey, receiptObj);
+      triggerMsg('Payment receipt uploaded successfully!', 'ok');
+    } catch (err) {
+      console.error('Failed to save receipt to cloud:', err);
+      triggerMsg('Receipt saved locally.', 'ok');
+    }
   };
 
   const saveCoachesToStorage = async (obj: Record<string, Coach>) => {
@@ -5549,6 +5635,14 @@ export default function App() {
       triggerMsg('No ID cards selected for download.', 'error');
       return;
     }
+
+    // If large batch (e.g. 50+ cards), open the Print & Download Center modal for better control and stability
+    if (selectedPlayers.length > 50) {
+      setPrintIdCardsInitialClub('all');
+      setShowPrintIdCardsModal(true);
+      return;
+    }
+
     setIsDownloadingAll(true);
     setDownloadProgress(0);
     setDownloadTotal(selectedPlayers.length);
@@ -5558,37 +5652,60 @@ export default function App() {
       ? `${activeComp.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_ID_Cards` 
       : 'ID_Cards';
     const imgFolder = zip.folder(folderName);
+    let successCount = 0;
 
     for (let i = 0; i < selectedPlayers.length; i++) {
       const p = selectedPlayers[i];
       setDownloadProgress(i + 1);
       
-      const el = document.getElementById(`batch-card-${p.id}`);
+      const el = document.getElementById(`batch-card-${p.id}`) || document.getElementById(`print-preview-card-${p.id}`);
       if (el) {
         try {
-          await new Promise(resolve => setTimeout(resolve, 150));
-          const dataUrl = await htmlToImage.toPng(el, { backgroundColor: '#12211C', pixelRatio: 3.125 });
+          if (i % 3 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+          const dataUrl = await htmlToImage.toPng(el, { 
+            backgroundColor: '#12211C', 
+            pixelRatio: 2,
+            skipFonts: true,
+            cacheBust: true 
+          });
           const base64Data = dataUrl.split(',')[1];
           const fileName = `DOJANG_ID_${p.id}_${p.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
-          if (imgFolder) {
+          if (imgFolder && base64Data) {
             imgFolder.file(fileName, base64Data, { base64: true });
+            successCount++;
           }
         } catch (err) {
-          console.error(`Failed to generate ID card for ${p.name}:`, err);
+          console.warn(`Failed to generate ID card for ${p.name}:`, err);
         }
       }
     }
+
+    if (successCount === 0) {
+      triggerMsg('Could not render ID cards directly. Opening Print & Download Center...', 'error');
+      setPrintIdCardsInitialClub('all');
+      setShowPrintIdCardsModal(true);
+      setIsDownloadingAll(false);
+      return;
+    }
     
     try {
-      const content = await zip.generateAsync({ type: 'blob' });
+      const content = await zip.generateAsync({ 
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 }
+      });
       const link = document.createElement('a');
       link.download = `${folderName}.zip`;
       link.href = URL.createObjectURL(content);
       link.click();
-      triggerMsg(`Successfully exported ${selectedPlayers.length} ID cards inside the "${folderName}" folder!`, 'ok');
+      triggerMsg(`Successfully exported ${successCount} ID cards inside the "${folderName}" folder!`, 'ok');
     } catch (err) {
       console.error('Failed to create ZIP package:', err);
-      triggerMsg('Failed to package ID cards into a ZIP file.', 'error');
+      triggerMsg('Failed to package all ID cards into a single ZIP. Opening Print & Download Center...', 'error');
+      setPrintIdCardsInitialClub('all');
+      setShowPrintIdCardsModal(true);
     } finally {
       setIsDownloadingAll(false);
     }
@@ -7016,92 +7133,144 @@ export default function App() {
 
                   {/* Box 2: Coach Receipt Upload */}
                   <div className="flex flex-col justify-between h-full space-y-4">
-                    <div>
-                      <h3 className="text-[15px] font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
-                        <FileText className="w-4 h-4 text-gold shrink-0" />
-                        2. Coach to upload the payment receipt
-                      </h3>
-                      <p className="text-[13px] text-text-dim uppercase tracking-wider mb-3">Upload bank transaction receipt for your club registration ({coachClub})</p>
-                    </div>
-
                     {(() => {
-                      const clubKey = coachClub.toUpperCase();
-                      const receipt = activeComp.receipts?.[clubKey];
-                      return (
-                        <div className="flex-1 flex flex-col justify-center bg-ink/25 p-4 rounded-xl border border-line/50">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch h-full">
-                            {/* Receipt Status and Thumbnail */}
-                            <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-xl p-3 bg-ink/10 h-full min-h-[140px]">
-                              {receipt ? (
-                                <div className="relative group w-28 h-28 flex flex-col justify-center items-center">
-                                  <img 
-                                    src={receipt.receiptUrl} 
-                                    alt="Receipt preview" 
-                                    className="w-full h-16 object-cover rounded-lg cursor-pointer border border-line shadow-sm hover:opacity-90 transition"
-                                    onClick={() => setSelectedClubReceipt({ clubName: coachClub, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  <div className="text-[11px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-1">
-                                    <CheckCircle className="w-3 h-3 text-green-400" />
-                                    <span>Submitted</span>
-                                  </div>
-                                  <div className="text-[10px] text-text-dim text-center truncate w-full">
-                                    {receipt.uploadedAt}
-                                  </div>
-                                  <button
-                                    onClick={() => {
-                                      const updated = competitions.map(c => {
-                                        if (c.id === compId) {
-                                          const nextRecs = { ...(c.receipts || {}) };
-                                          delete nextRecs[clubKey];
-                                          return { ...c, receipts: nextRecs };
-                                        }
-                                        return c;
-                                      });
-                                      saveCompsToStorage(updated);
-                                      triggerMsg('Receipt deleted.', 'ok');
-                                    }}
-                                    className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition shadow-md cursor-pointer"
-                                    title="Delete Receipt"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="text-center p-2">
-                                  <FileText className="w-8 h-8 text-text-dim/50 mx-auto mb-1.5" />
-                                  <span className="text-[13px] text-text-dim font-bold uppercase tracking-wider block">Pending</span>
-                                </div>
-                              )}
-                            </div>
+                      const coachAthletes = players.filter(p => p.coachUsername === user && (!p.compId || p.compId === compId));
+                      const athleteClubs = Array.from(new Set(coachAthletes.map(p => p.club).filter(Boolean)));
+                      const displayClub = athleteClubs[0] || (coachClub && coachClub.toLowerCase() !== 'singapore' ? coachClub : (user && coaches[user]?.club ? coaches[user].club : ''));
+                      const receipt = findReceiptForClub(activeComp, displayClub, user, coaches, players) ||
+                                      (coachClub ? findReceiptForClub(activeComp, coachClub, user, coaches, players) : null);
+                      const receiptClubLabel = receipt?.clubName || displayClub || coachClub;
 
-                            {/* Upload action */}
-                            <label className="flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-xl p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-full min-h-[140px] group">
-                              <Upload className="w-6 h-6 text-gold mb-1.5 group-hover:scale-110 transition-transform" />
-                              <span className="text-[13px] font-bold text-text-dim group-hover:text-gold uppercase transition-colors">Upload Receipt</span>
-                              <span className="text-[11px] text-text-dim">PNG/JPG up to 3MB</span>
-                              <input 
-                                type="file" 
-                                accept="image/*" 
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (!file) return;
-                                  if (file.size > 3 * 1024 * 1024) {
-                                    triggerMsg('Receipt file must be less than 3MB', 'error');
-                                    return;
-                                  }
-                                  const reader = new FileReader();
-                                  reader.onload = (evt) => {
-                                    const base64 = evt.target?.result as string;
-                                    handleUploadReceipt(coachClub, base64);
-                                  };
-                                  reader.readAsDataURL(file);
-                                }}
-                                className="hidden" 
-                              />
-                            </label>
+                      return (
+                        <>
+                          <div>
+                            <h3 className="text-[15px] font-bold text-gold uppercase tracking-wider flex items-center gap-2 mb-2">
+                              <FileText className="w-4 h-4 text-gold shrink-0" />
+                              2. Coach to upload the payment receipt
+                            </h3>
+                            <p className="text-[13px] text-text-dim uppercase tracking-wider mb-3">
+                              Upload bank transaction receipt for your club registration ({receiptClubLabel})
+                            </p>
                           </div>
-                        </div>
+
+                          <div className="flex-1 flex flex-col justify-center bg-ink/25 p-4 rounded-xl border border-line/50">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch h-full">
+                              {/* Receipt Status and Thumbnail */}
+                              <div className="flex flex-col items-center justify-center border border-dashed border-line/40 rounded-xl p-3 bg-ink/10 h-full min-h-[140px]">
+                                {receipt ? (
+                                  <div className="relative group w-28 h-28 flex flex-col justify-center items-center">
+                                    <img 
+                                      src={receipt.receiptUrl} 
+                                      alt="Receipt preview" 
+                                      className="w-full h-16 object-cover rounded-lg cursor-pointer border border-line shadow-sm hover:opacity-90 transition"
+                                      onClick={() => setSelectedClubReceipt({ clubName: receiptClubLabel, receiptUrl: receipt.receiptUrl, uploadedAt: receipt.uploadedAt })}
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    <div className="text-[11px] text-green-400 font-bold mt-1 text-center truncate w-full flex items-center justify-center gap-1">
+                                      <CheckCircle className="w-3 h-3 text-green-400" />
+                                      <span>Submitted</span>
+                                    </div>
+                                    <div className="text-[10px] text-text-dim text-center truncate w-full">
+                                      {receipt.uploadedAt}
+                                    </div>
+                                    <button
+                                      onClick={async () => {
+                                        const cleanTarget = normalizeClubName(displayClub);
+                                        const cleanCoachClub = normalizeClubName(coachClub);
+                                        setCompetitions(prev => prev.map(c => {
+                                          if (c.id === compId) {
+                                            const nextRecs = { ...(c.receipts || {}) };
+                                            const keysToDelete = Object.keys(nextRecs).filter(k => {
+                                              const r = nextRecs[k];
+                                              if (r.coachUsername && r.coachUsername.trim().toLowerCase() === (user || '').trim().toLowerCase()) return true;
+                                              const normK = normalizeClubName(k);
+                                              if (normK && (normK === cleanTarget || normK === cleanCoachClub)) return true;
+                                              if (k.trim().toUpperCase() === displayClub.trim().toUpperCase()) return true;
+                                              if (k.trim().toUpperCase() === coachClub.trim().toUpperCase()) return true;
+                                              return false;
+                                            });
+                                            keysToDelete.forEach(k => delete nextRecs[k]);
+                                            return { ...c, receipts: nextRecs };
+                                          }
+                                          return c;
+                                        }));
+
+                                        try {
+                                          localStorage.removeItem(`app:receipts_${compId}`);
+                                        } catch (e) {}
+
+                                        if (compId) {
+                                          try {
+                                            if (displayClub) await deleteCompetitionReceipt(compId, displayClub.toUpperCase());
+                                            if (coachClub && coachClub.toUpperCase() !== displayClub.toUpperCase()) {
+                                              await deleteCompetitionReceipt(compId, coachClub.toUpperCase());
+                                            }
+                                          } catch (e) {
+                                            console.error('Error deleting receipt from cloud:', e);
+                                          }
+                                        }
+                                        triggerMsg('Receipt deleted.', 'ok');
+                                      }}
+                                      className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition shadow-md cursor-pointer"
+                                      title="Delete Receipt"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-center p-2">
+                                    <FileText className="w-8 h-8 text-text-dim/50 mx-auto mb-1.5" />
+                                    <span className="text-[13px] text-text-dim font-bold uppercase tracking-wider block">Pending</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Upload action */}
+                              <label className={`flex flex-col items-center justify-center border border-dashed border-line/40 hover:border-gold/50 rounded-xl p-3 cursor-pointer bg-ink/20 hover:bg-ink/30 transition text-center h-full min-h-[140px] group ${isUploadingReceipt ? 'opacity-50 pointer-events-none' : ''}`}>
+                                {isUploadingReceipt ? (
+                                  <>
+                                    <RefreshCw className="w-6 h-6 text-gold mb-1.5 animate-spin" />
+                                    <span className="text-[13px] font-bold text-gold uppercase">Uploading...</span>
+                                    <span className="text-[11px] text-text-dim">Optimizing receipt</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="w-6 h-6 text-gold mb-1.5 group-hover:scale-110 transition-transform" />
+                                    <span className="text-[13px] font-bold text-text-dim group-hover:text-gold uppercase transition-colors">
+                                      {receipt ? 'Replace Receipt' : 'Upload Receipt'}
+                                    </span>
+                                    <span className="text-[11px] text-text-dim">PNG/JPG (Auto-compressed)</span>
+                                  </>
+                                )}
+                                <input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  disabled={isUploadingReceipt}
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    if (file.size > 20 * 1024 * 1024) {
+                                      triggerMsg('Receipt file must be less than 20MB', 'error');
+                                      return;
+                                    }
+                                    setIsUploadingReceipt(true);
+                                    try {
+                                      const compressedBase64 = await compressReceiptImage(file);
+                                      await handleUploadReceipt(displayClub || coachClub, compressedBase64, athleteClubs);
+                                    } catch (err) {
+                                      console.error('Error compressing/uploading receipt:', err);
+                                      triggerMsg('Failed to process receipt image. Please try again.', 'error');
+                                    } finally {
+                                      setIsUploadingReceipt(false);
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                  className="hidden" 
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </>
                       );
                     })()}
 
@@ -11359,6 +11528,93 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* AFFILIATED CLUBS / STATES */}
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest">
+                        Affiliated Clubs / States ({(activeComp.affiliatedClubs && activeComp.affiliatedClubs.length > 0 ? activeComp.affiliatedClubs : globalClubs).length})
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!compId) return;
+                          const clubsToSync = globalClubs.length > 0 ? globalClubs : BASELINE_GLOBAL_CLUBS;
+                          const updated = competitions.map(c => {
+                            if (c.id === compId) {
+                              const existing = c.affiliatedClubs || [];
+                              const merged = Array.from(new Set([...existing, ...clubsToSync]));
+                              return { ...c, affiliatedClubs: merged };
+                            }
+                            return c;
+                          });
+                          setCompetitions(updated);
+                          saveCompsToStorage(updated);
+                          triggerMsg(`Loaded all ${clubsToSync.length} global clubs into tournament.`, 'ok');
+                        }}
+                        className="cursor-pointer text-[10px] bg-gold/10 hover:bg-gold/20 text-gold border border-gold/30 px-2 py-1 rounded transition flex items-center gap-1 font-semibold"
+                        title="Copy all global clubs into this tournament"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Load Global Clubs</span>
+                      </button>
+                      <label className="cursor-pointer text-[10px] bg-ink border border-line hover:border-gold text-gold px-2 py-1 rounded transition flex items-center gap-1 font-medium">
+                        <Upload className="w-3 h-3" />
+                        <span>Upload CSV/Excel</span>
+                        <input 
+                          type="file" 
+                          accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                          className="hidden"
+                          onChange={(e) => handleUploadCategories(e, 'affiliatedClubs')}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="flex space-x-2">
+                    <input 
+                      type="text" 
+                      value={newClubOption}
+                      onChange={(e) => setNewClubOption(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddCat('affiliatedClubs', newClubOption, setNewClubOption); }}
+                      placeholder="e.g. SMART MA TAEKWONDO CLUB" 
+                      className="flex-1 bg-ink border border-line text-xs rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => handleAddCat('affiliatedClubs', newClubOption, setNewClubOption)}
+                      className="bg-surface-2 hover:bg-line text-text border border-line px-3 py-2 rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      Add Club
+                    </button>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-2 bg-ink rounded-xl border border-line">
+                    {(() => {
+                      const displayList = (activeComp.affiliatedClubs && activeComp.affiliatedClubs.length > 0)
+                        ? activeComp.affiliatedClubs
+                        : globalClubs;
+                      if (!displayList || displayList.length === 0) {
+                        return <span className="text-[10px] text-text-dim/60 italic p-1">No custom clubs defined. Global fallback is in use.</span>;
+                      }
+                      return displayList.map((cl, i) => (
+                        <span key={i} className="inline-flex items-center text-[10px] bg-surface border border-line px-2 py-1 rounded text-text font-medium">
+                          <span>{cl}</span>
+                          <button 
+                            type="button"
+                            onClick={() => handleRemoveCat('affiliatedClubs', i)}
+                            className="ml-1.5 text-red-500 hover:text-red-400 text-xs font-bold cursor-pointer"
+                            title={`Remove ${cl}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
                 {/* EVENT-SPECIFIC WEIGHT CLASSES & TARGET DIVISIONS */}
                 <div className="space-y-3 bg-surface/50 border border-line rounded-2xl p-4 lg:col-span-2">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-line/40 pb-3">
@@ -11881,12 +12137,16 @@ export default function App() {
                       <span>Download Total Summary (Excel)</span>
                     </button>
                     <button 
-                      onClick={() => downloadAllSelectedCards(players)}
-                      disabled={isDownloadingAll}
-                      className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      type="button"
+                      onClick={() => {
+                        setPrintIdCardsInitialClub('all');
+                        setShowPrintIdCardsModal(true);
+                      }}
+                      className="bg-gold hover:bg-yellow-400 text-ink font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                      title="Open Print & Download ID Cards Center"
                     >
                       <Printer className="w-4 h-4" />
-                      <span>{isDownloadingAll ? 'Generating ZIP...' : 'Print & Download ID Cards'}</span>
+                      <span>Print & Download ID Cards</span>
                     </button>
                   </div>
                 )}
@@ -12574,7 +12834,7 @@ export default function App() {
                       let grandTotalAmount = 0;
 
                       const rows = entries.map(([club, counts]: [string, any]) => {
-                        const receipt = activeComp?.receipts?.[club];
+                        const receipt = findReceiptForClub(activeComp, club, undefined, coaches, counts.athletes);
 
                         const clubKTotal = counts.kyorugi * kPrice;
                         const clubPTotal = counts.poomsae * pPrice;
@@ -12844,12 +13104,17 @@ export default function App() {
                         <Download className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => downloadAllSelectedCards(players)}
-                        disabled={isDownloadingAll}
-                        className="bg-gold hover:opacity-90 text-ink font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                        type="button"
+                        onClick={() => {
+                          const coachClub = coaches[user || '']?.club || 'all';
+                          setPrintIdCardsInitialClub(coachClub);
+                          setShowPrintIdCardsModal(true);
+                        }}
+                        className="bg-gold hover:bg-yellow-400 text-ink font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer whitespace-nowrap"
+                        title="Print or download ID cards for your club"
                       >
                         <Printer className="w-4 h-4" />
-                        <span>{isDownloadingAll ? 'Wait...' : 'Print All'}</span>
+                        <span>Print & Download</span>
                       </button>
                     </div>
                   )}
@@ -15052,6 +15317,17 @@ export default function App() {
         handleDownloadExcelTemplate={handleDownloadExcelTemplate}
         handleCoachExcelUpload={handleCoachExcelUpload}
         handleConfirmCoachExcelImport={handleConfirmCoachExcelImport}
+      />
+
+      <PrintIdCardsModal
+        isOpen={showPrintIdCardsModal}
+        onClose={() => setShowPrintIdCardsModal(false)}
+        activeComp={activeComp}
+        players={players}
+        staffPasses={staffPasses}
+        initialClubFilter={printIdCardsInitialClub}
+        triggerMsg={triggerMsg}
+        getIdCardFields={getIdCardFields}
       />
 
       {/* ENLARGED PHOTO PREVIEW LIGHTBOX */}

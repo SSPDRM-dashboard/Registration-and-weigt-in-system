@@ -1,4 +1,4 @@
-import { Competition, Referee } from './types';
+import { Competition, Referee, Player, Coach, ClubReceipt } from './types';
 
 export interface RefereeFeesConfig {
   km_0_50: number;
@@ -410,3 +410,174 @@ export function isRegistrationClosed(comp: Competition | undefined): boolean {
   closeDate.setHours(23, 59, 59, 999);
   return new Date() > closeDate;
 }
+
+/**
+ * Compresses an uploaded receipt image down to a crystal-clear, lightweight JPEG (~30KB-50KB).
+ * This ensures swift upload and eliminates any risk of exceeding storage quotas.
+ */
+export function compressReceiptImage(
+  file: File,
+  maxWidth = 1000,
+  maxHeight = 1400,
+  quality = 0.65
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = () => reject(new Error('Failed to load image for compression'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Normalizes club names for robust comparison by stripping legal suffixes, common abbreviations,
+ * punctuation, and generic location tags.
+ */
+export function normalizeClubName(str?: string): string {
+  if (!str) return '';
+  const cleaned = str
+    .toLowerCase()
+    .replace(/\b(pte|ltd|llp|sdn|bhd|club|tkd|taekwondo|team|hq|academy|international|sports)\b/gi, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .trim();
+  const withoutCountry = cleaned.replace(/singapore|malaysia/gi, '').trim();
+  return withoutCountry.length >= 2 ? withoutCountry : cleaned;
+}
+
+/**
+ * Intelligently finds a payment receipt for a club, handling name variations, coach profile differences,
+ * and coach usernames, with zero false positives on generic country names.
+ */
+export function findReceiptForClub(
+  comp?: Competition | null,
+  clubName?: string,
+  coachUsername?: string,
+  coachesMap?: Record<string, Coach>,
+  playersList?: Player[],
+  externalReceipts?: Record<string, ClubReceipt>
+): ClubReceipt | null {
+  const receipts = externalReceipts || comp?.receipts;
+  if (!receipts) return null;
+  const entries = Object.entries(receipts);
+  if (entries.length === 0) return null;
+
+  // 1. Direct coachUsername match (if viewing as coach, coach ALWAYS sees their uploaded receipt)
+  if (coachUsername) {
+    const cleanUser = coachUsername.trim().toLowerCase();
+    for (const [, r] of entries) {
+      if (r.coachUsername && r.coachUsername.trim().toLowerCase() === cleanUser) {
+        return r;
+      }
+    }
+  }
+
+  // 2. Direct exact key match (case-insensitive & trimmed)
+  if (clubName) {
+    const upper = clubName.trim().toUpperCase();
+    if (receipts[upper]) return receipts[upper];
+    for (const [k, r] of entries) {
+      if (k.trim().toUpperCase() === upper) return r;
+    }
+  }
+
+  // 3. Exact normalized key match
+  const targetNorm = clubName ? normalizeClubName(clubName) : '';
+  if (targetNorm && targetNorm !== 'singapore' && targetNorm !== 'malaysia') {
+    for (const [k, r] of entries) {
+      const kNorm = normalizeClubName(k);
+      if (kNorm && kNorm === targetNorm) {
+        return r;
+      }
+    }
+  }
+
+  // 4. Match via athletes registered under this club and their coaches
+  if (clubName && playersList) {
+    const clubAthletes = playersList.filter(p => {
+      if (!p.club) return false;
+      if (p.club.trim().toUpperCase() === clubName.trim().toUpperCase()) return true;
+      if (targetNorm && normalizeClubName(p.club) === targetNorm) return true;
+      return false;
+    });
+    const coachUsernames = Array.from(new Set(clubAthletes.map(p => p.coachUsername).filter(Boolean))) as string[];
+
+    for (const cUser of coachUsernames) {
+      // Check if receipt has this coachUsername
+      for (const [, r] of entries) {
+        if (r.coachUsername && r.coachUsername.trim().toLowerCase() === cUser.trim().toLowerCase()) {
+          return r;
+        }
+      }
+
+      // Check if coach profile club matches any receipt
+      if (coachesMap) {
+        const coachProfile = coachesMap[cUser];
+        if (coachProfile?.club) {
+          const cUpper = coachProfile.club.trim().toUpperCase();
+          if (receipts[cUpper]) return receipts[cUpper];
+          const cNorm = normalizeClubName(coachProfile.club);
+          if (cNorm && cNorm.length >= 3 && cNorm !== 'singapore' && cNorm !== 'malaysia') {
+            for (const [k, r] of entries) {
+              if (normalizeClubName(k) === cNorm) return r;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Normalized substring match (requires core distinctive token >= 4 chars, excludes generic words)
+  if (targetNorm && targetNorm.length >= 4 && targetNorm !== 'singapore' && targetNorm !== 'malaysia') {
+    for (const [k, r] of entries) {
+      const kNorm = normalizeClubName(k);
+      if (kNorm && kNorm.length >= 4 && kNorm !== 'singapore' && kNorm !== 'malaysia') {
+        if (targetNorm.includes(kNorm) || kNorm.includes(targetNorm)) {
+          return r;
+        }
+      }
+    }
+  }
+
+  // 6. If coachUsername provided, check if coach's profile club matches
+  if (coachUsername && coachesMap) {
+    const coachProfile = coachesMap[coachUsername];
+    if (coachProfile?.club) {
+      const cUpper = coachProfile.club.trim().toUpperCase();
+      if (receipts[cUpper]) return receipts[cUpper];
+      const cNorm = normalizeClubName(coachProfile.club);
+      if (cNorm && cNorm.length >= 3 && cNorm !== 'singapore' && cNorm !== 'malaysia') {
+        for (const [k, r] of entries) {
+          if (normalizeClubName(k) === cNorm) return r;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+

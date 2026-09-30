@@ -15,7 +15,7 @@ import {
   deleteField
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Competition, Player, Coach, Organizer, Referee } from './types';
+import { Competition, Player, Coach, Organizer, Referee, ClubReceipt } from './types';
 import { cachePlayersLocally, cacheRefereesLocally, safeSetLocalStorage } from './utils/storage';
 import { 
   BASELINE_GLOBAL_CLUBS, 
@@ -162,10 +162,119 @@ export async function fetchCompetitions(): Promise<Competition[]> {
 export async function saveCompetition(comp: Competition): Promise<void> {
   try {
     const docRef = doc(db, 'competitions', comp.id);
-    await setDoc(docRef, comp);
+    // Exclude heavy base64 receipts from the main competition doc to ensure document size never approaches the 1MB limit.
+    // Receipts are stored and synchronized via the dedicated competitions/{compId}/receipts subcollection.
+    const { receipts, ...compWithoutReceipts } = comp;
+    await setDoc(docRef, compWithoutReceipts);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `competitions/${comp.id}`);
   }
+}
+
+// --- COMPETITION RECEIPTS HELPERS (DEDICATED SUBCOLLECTION TO OVERCOME FIRESTORE 1MB LIMIT) ---
+
+export async function saveCompetitionReceipt(compId: string, receiptKey: string, receipt: ClubReceipt): Promise<void> {
+  if (!compId) return;
+  const safeKey = (receiptKey || 'receipt').replace(/[\/\.#$\[\]]/g, '_').trim().toUpperCase() || 'DEFAULT';
+  try {
+    const docRef = doc(db, 'competitions', compId, 'receipts', safeKey);
+    const payload = {
+      compId,
+      receiptKey: safeKey,
+      receiptUrl: receipt.receiptUrl,
+      uploadedAt: receipt.uploadedAt || new Date().toLocaleString('en-MY'),
+      coachUsername: receipt.coachUsername || '',
+      coachName: receipt.coachName || '',
+      clubName: receipt.clubName || receiptKey || ''
+    };
+    await setDoc(docRef, payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `competitions/${compId}/receipts/${safeKey}`);
+    throw error;
+  }
+}
+
+export async function deleteCompetitionReceipt(compId: string, receiptKey: string): Promise<void> {
+  if (!compId || !receiptKey) return;
+  const safeKey = receiptKey.replace(/[\/\.#$\[\]]/g, '_').trim().toUpperCase();
+  try {
+    await deleteDoc(doc(db, 'competitions', compId, 'receipts', safeKey));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `competitions/${compId}/receipts/${safeKey}`);
+  }
+}
+
+export async function fetchCompetitionReceipts(compId: string): Promise<Record<string, ClubReceipt>> {
+  if (!compId) return {};
+  try {
+    const snap = await getDocs(collection(db, 'competitions', compId, 'receipts'));
+    const receipts: Record<string, ClubReceipt> = {};
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data && data.receiptUrl) {
+        const key = (data.receiptKey || d.id).toUpperCase();
+        receipts[key] = {
+          receiptUrl: data.receiptUrl,
+          uploadedAt: data.uploadedAt || '',
+          coachUsername: data.coachUsername || undefined,
+          coachName: data.coachName || undefined,
+          clubName: data.clubName || undefined
+        };
+        if (data.coachUsername) {
+          receipts[`coach_${data.coachUsername.toUpperCase()}`] = receipts[key];
+        }
+        if (data.clubName) {
+          receipts[data.clubName.toUpperCase()] = receipts[key];
+        }
+      }
+    });
+    return receipts;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, `competitions/${compId}/receipts`);
+    return {};
+  }
+}
+
+export function subscribeToCompetitionReceipts(
+  compId: string,
+  callback: (receipts: Record<string, ClubReceipt>) => void,
+  onError?: (error: Error) => void
+): () => void {
+  if (!compId) {
+    callback({});
+    return () => {};
+  }
+  const colRef = collection(db, 'competitions', compId, 'receipts');
+  const unsubscribe = onSnapshot(colRef, (snap) => {
+    const receipts: Record<string, ClubReceipt> = {};
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data && data.receiptUrl) {
+        const key = (data.receiptKey || d.id).toUpperCase();
+        receipts[key] = {
+          receiptUrl: data.receiptUrl,
+          uploadedAt: data.uploadedAt || '',
+          coachUsername: data.coachUsername || undefined,
+          coachName: data.coachName || undefined,
+          clubName: data.clubName || undefined
+        };
+        if (data.coachUsername) {
+          receipts[`coach_${data.coachUsername.toUpperCase()}`] = receipts[key];
+        }
+        if (data.clubName) {
+          receipts[data.clubName.toUpperCase()] = receipts[key];
+        }
+      }
+    });
+    callback(receipts);
+  }, (error) => {
+    const isQuota = String(error).includes('Quota limit exceeded');
+    if (!isQuota) {
+      console.warn('[Firestore Competition Receipts Sync Error]', error);
+      if (onError) onError(error as Error);
+    }
+  });
+  return unsubscribe;
 }
 
 export function subscribeToCompetitions(

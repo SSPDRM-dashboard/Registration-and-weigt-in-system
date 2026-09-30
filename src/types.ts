@@ -52,6 +52,8 @@ export interface ClubReceipt {
   clubName?: string;
   receiptUrl: string;
   uploadedAt: string;
+  coachUsername?: string;
+  coachName?: string;
 }
 
 export interface Competition {
