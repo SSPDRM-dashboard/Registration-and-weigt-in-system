@@ -603,6 +603,7 @@ export default function App() {
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
   const [showPrintIdCardsModal, setShowPrintIdCardsModal] = useState<boolean>(false);
   const [printIdCardsInitialClub, setPrintIdCardsInitialClub] = useState<string>('all');
+  const [printIdCardsInitialEvent, setPrintIdCardsInitialEvent] = useState<string>('all');
 
   // Admin Coach Management state
   const [adminCoachSearch, setAdminCoachSearch] = useState<string>('');
@@ -5711,7 +5712,7 @@ export default function App() {
     }
   };
 
-  const downloadWeighInExcel = () => {
+  const downloadWeighInExcel = (customPlayers?: Player[] | React.MouseEvent | unknown, filterLabel?: string) => {
     if (!activeComp) {
       triggerMsg('No active competition selected.', 'error');
       return;
@@ -5719,6 +5720,34 @@ export default function App() {
 
     try {
       const wb = XLSX.utils.book_new();
+
+      // Determine the target players to export:
+      // If customPlayers is explicitly passed as Player array, use it.
+      // Otherwise, if any filter (event, category, or search) is active, use coachFilteredPlayers.
+      // Otherwise, use all players.
+      const explicitPlayers = Array.isArray(customPlayers) ? (customPlayers as Player[]) : undefined;
+      const isFiltered = explicitPlayers !== undefined
+        ? true
+        : (selectedEventFilter !== 'all' || selectedCategoryFilter !== 'all' || Boolean(searchQuery));
+      
+      const targetPlayers = explicitPlayers ?? (isFiltered ? coachFilteredPlayers : players);
+
+      // Determine descriptive label for filename & sheet title
+      const eventLabel = filterLabel ?? (selectedEventFilter !== 'all' ? selectedEventFilter : '');
+      const categoryLabel = selectedCategoryFilter !== 'all' ? selectedCategoryFilter : '';
+      
+      let descriptor = '';
+      if (eventLabel && categoryLabel) {
+        descriptor = `${eventLabel}_${categoryLabel}`;
+      } else if (eventLabel) {
+        descriptor = eventLabel;
+      } else if (categoryLabel) {
+        descriptor = categoryLabel;
+      } else if (isFiltered && searchQuery) {
+        descriptor = 'Filtered';
+      }
+
+      const cleanDescriptor = descriptor ? descriptor.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
 
       const mapPlayerToRow = (p: Player) => {
         return {
@@ -5756,8 +5785,8 @@ export default function App() {
         });
       };
 
-      // 1. All Registered Competitors (Every entrant in the competition)
-      const allPlayerRows = players.map(mapPlayerToRow);
+      // 1. All Registered Competitors (Filtered by selected event/filter or all entrants)
+      const allPlayerRows = targetPlayers.map(mapPlayerToRow);
       if (allPlayerRows.length === 0) {
         allPlayerRows.push({
           'Competitor ID': 'No registered competitors found',
@@ -5779,10 +5808,13 @@ export default function App() {
       }
       const wsAll = XLSX.utils.json_to_sheet(allPlayerRows);
       setColWidths(wsAll, allPlayerRows);
-      XLSX.utils.book_append_sheet(wb, wsAll, "All Registered Players");
+      const sheet1Title = eventLabel 
+        ? `${eventLabel.slice(0, 25)} Players` 
+        : (cleanDescriptor ? `${cleanDescriptor.slice(0, 25)} Players` : "All Registered Players");
+      XLSX.utils.book_append_sheet(wb, wsAll, sheet1Title);
 
       // 2. Pass and Fail Result (Anyone who has undergone weigh-in)
-      const passAndFailPlayers = players.filter(p => p.weighIn !== null);
+      const passAndFailPlayers = targetPlayers.filter(p => p.weighIn !== null);
       const passAndFailRows = passAndFailPlayers.map(mapPlayerToRow);
       if (passAndFailRows.length === 0) {
         passAndFailRows.push({
@@ -5807,8 +5839,8 @@ export default function App() {
       setColWidths(wsPassAndFail, passAndFailRows);
       XLSX.utils.book_append_sheet(wb, wsPassAndFail, "Pass & Fail Results");
 
-      // 2. Pass Result (Anyone who has passed)
-      const passPlayers = players.filter(p => p.weighIn !== null && p.weighIn.result.includes('PASS'));
+      // 3. Pass Result (Anyone who has passed)
+      const passPlayers = targetPlayers.filter(p => p.weighIn !== null && p.weighIn.result.includes('PASS'));
       const passRows = passPlayers.map(mapPlayerToRow);
       if (passRows.length === 0) {
         passRows.push({
@@ -5833,8 +5865,8 @@ export default function App() {
       setColWidths(wsPass, passRows);
       XLSX.utils.book_append_sheet(wb, wsPass, "Pass Results");
 
-      // 3. Fail Result (Anyone who has failed)
-      const failPlayers = players.filter(p => p.weighIn !== null && !p.weighIn.result.includes('PASS'));
+      // 4. Fail Result (Anyone who has failed)
+      const failPlayers = targetPlayers.filter(p => p.weighIn !== null && !p.weighIn.result.includes('PASS'));
       const failRows = failPlayers.map(mapPlayerToRow);
       if (failRows.length === 0) {
         failRows.push({
@@ -5859,10 +5891,19 @@ export default function App() {
       setColWidths(wsFail, failRows);
       XLSX.utils.book_append_sheet(wb, wsFail, "Fail Results");
 
-      const cleanCompName = activeComp.name.replace(/[^a-zA-Z0-9]/g, '_');
-      const filename = `${cleanCompName}_WeighIn_Summary.xlsx`;
+      const cleanCompName = activeComp.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = cleanDescriptor 
+        ? `${cleanCompName}_${cleanDescriptor}_WeighIn_Summary.xlsx` 
+        : `${cleanCompName}_WeighIn_Summary.xlsx`;
       XLSX.writeFile(wb, filename);
-      triggerMsg('Weigh-In Total Summary Excel downloaded.', 'ok');
+
+      if (eventLabel) {
+        triggerMsg(`Downloaded ${targetPlayers.length} entrants for "${eventLabel}" to Excel.`, 'ok');
+      } else if (cleanDescriptor) {
+        triggerMsg(`Downloaded ${targetPlayers.length} filtered entrants to Excel.`, 'ok');
+      } else {
+        triggerMsg(`Weigh-In Total Summary (${targetPlayers.length} entrants) downloaded.`, 'ok');
+      }
     } catch (err) {
       console.error('Failed to generate Excel sheet', err);
       triggerMsg('Failed to export Excel report.', 'error');
@@ -9178,7 +9219,7 @@ export default function App() {
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 <button 
-                  onClick={downloadWeighInExcel}
+                  onClick={() => downloadWeighInExcel()}
                   className="bg-gold hover:opacity-90 text-ink font-bold px-3.5 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -12130,7 +12171,7 @@ export default function App() {
                 {players.length > 0 && (
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button 
-                      onClick={downloadWeighInExcel}
+                      onClick={() => downloadWeighInExcel()}
                       className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3.5 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
@@ -13097,17 +13138,31 @@ export default function App() {
                         <span className="hidden sm:inline">{showSignatures ? 'Hide Signatures' : 'Show Signatures'}</span>
                       </button>
                       <button 
-                        onClick={downloadWeighInExcel}
-                        className="bg-surface-2 border border-line hover:bg-line text-text font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
-                        title="Download Total Summary (Excel)"
+                        onClick={() => downloadWeighInExcel(selectedEventFilter !== 'all' || selectedCategoryFilter !== 'all' || searchQuery ? coachFilteredPlayers : players, selectedEventFilter !== 'all' ? selectedEventFilter : undefined)}
+                        className={`border font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer ${
+                          selectedEventFilter !== 'all'
+                            ? 'bg-gold/15 text-gold border-gold/50 hover:bg-gold/25'
+                            : 'bg-surface-2 border-line hover:bg-line text-text'
+                        }`}
+                        title={
+                          selectedEventFilter !== 'all'
+                            ? `Download ${selectedEventFilter} (${coachFilteredPlayers.length} athletes) to Excel`
+                            : "Download Total Summary (Excel)"
+                        }
                       >
                         <Download className="w-4 h-4" />
+                        {selectedEventFilter !== 'all' && (
+                          <span className="font-semibold text-[11px] hidden sm:inline">
+                            {selectedEventFilter} ({coachFilteredPlayers.length})
+                          </span>
+                        )}
                       </button>
                       <button 
                         type="button"
                         onClick={() => {
                           const coachClub = coaches[user || '']?.club || 'all';
                           setPrintIdCardsInitialClub(coachClub);
+                          setPrintIdCardsInitialEvent(selectedEventFilter !== 'all' ? selectedEventFilter : 'all');
                           setShowPrintIdCardsModal(true);
                         }}
                         className="bg-gold hover:bg-yellow-400 text-ink font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow transition cursor-pointer whitespace-nowrap"
@@ -15326,6 +15381,7 @@ export default function App() {
         players={players}
         staffPasses={staffPasses}
         initialClubFilter={printIdCardsInitialClub}
+        initialEventFilter={printIdCardsInitialEvent}
         triggerMsg={triggerMsg}
         getIdCardFields={getIdCardFields}
       />

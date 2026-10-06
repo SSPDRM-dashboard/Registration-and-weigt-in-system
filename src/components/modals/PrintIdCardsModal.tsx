@@ -16,6 +16,7 @@ interface PrintIdCardsModalProps {
   players: Player[];
   staffPasses?: Player[];
   initialClubFilter?: string;
+  initialEventFilter?: string;
   triggerMsg: (text: string, type: 'error' | 'ok') => void;
   getIdCardFields: (comp: Competition) => IdCardField[];
 }
@@ -27,6 +28,7 @@ export const PrintIdCardsModal: React.FC<PrintIdCardsModalProps> = ({
   players,
   staffPasses = [],
   initialClubFilter,
+  initialEventFilter,
   triggerMsg,
   getIdCardFields
 }) => {
@@ -34,10 +36,17 @@ export const PrintIdCardsModal: React.FC<PrintIdCardsModalProps> = ({
 
   // Filter state
   const [selectedClub, setSelectedClub] = useState<string>(initialClubFilter || 'all');
-  const [selectedEvent, setSelectedEvent] = useState<string>('all');
+  const [selectedEvent, setSelectedEvent] = useState<string>(initialEventFilter || 'all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [includeStaff, setIncludeStaff] = useState<boolean>(false);
   const [printLayout, setPrintLayout] = useState<'a4-grid' | 'single' | 'badges-8'>('a4-grid');
+
+  React.useEffect(() => {
+    if (isOpen) {
+      if (initialClubFilter) setSelectedClub(initialClubFilter);
+      if (initialEventFilter) setSelectedEvent(initialEventFilter);
+    }
+  }, [isOpen, initialClubFilter, initialEventFilter]);
 
   // Download & Progress state
   const [isGeneratingZip, setIsGeneratingZip] = useState<boolean>(false);
