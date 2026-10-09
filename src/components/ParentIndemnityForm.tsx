@@ -7,6 +7,7 @@ import {
 import SignatureCanvas from 'react-signature-canvas';
 import { Player, Competition, Coach } from '../types';
 import { savePlayerToFirestore, subscribeToPlayersForComp } from '../firebase';
+import { isSameAthleteIdentity } from '../utils';
 
 interface ParentIndemnityFormProps {
   indemnityPlayer: Player | null;
@@ -70,10 +71,10 @@ export default function ParentIndemnityForm({
       const currentScope = indemnityComp?.indemnityScope || 'PER_PERSON';
       let sourcePlayer = selectedPlayer;
 
-      // If scope is PER_PERSON and selectedPlayer has no parent details, check if a peer record with same IC has details
-      if (currentScope === 'PER_PERSON' && !selectedPlayer.indemnityParentName && selectedPlayer.ic && playersList.length > 0) {
+      // If scope is PER_PERSON and selectedPlayer has no parent details, check if a peer record with same identity has details
+      if (currentScope === 'PER_PERSON' && !selectedPlayer.indemnityParentName && playersList.length > 0) {
         const completedPeer = playersList.find(
-          (p) => p.ic && p.ic.trim().toLowerCase() === selectedPlayer.ic.trim().toLowerCase() && p.indemnityParentName
+          (p) => isSameAthleteIdentity(p, selectedPlayer) && p.indemnityParentName
         );
         if (completedPeer) {
           sourcePlayer = completedPeer;
@@ -283,10 +284,10 @@ export default function ParentIndemnityForm({
 
       const currentScope = indemnityComp?.indemnityScope || 'PER_PERSON';
 
-      // If scope is PER_PERSON, find all entries for the same athlete IC
+      // If scope is PER_PERSON, find all entries for the same athlete identity
       let targetPlayersToUpdate: Player[] = [selectedPlayer!];
-      if (currentScope === 'PER_PERSON' && selectedPlayer?.ic) {
-        const matches = playersList.filter(p => p.ic && p.ic.trim().toLowerCase() === selectedPlayer.ic.trim().toLowerCase());
+      if (currentScope === 'PER_PERSON') {
+        const matches = playersList.filter(p => isSameAthleteIdentity(p, selectedPlayer));
         if (matches.length > 0) {
           targetPlayersToUpdate = matches;
         }

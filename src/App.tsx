@@ -52,7 +52,7 @@ import {
   isExemptFromStrictWeightScale
 } from './utils/eventWeightClasses';
 import ParentIndemnityForm from './components/ParentIndemnityForm';
-import { compressReceiptImage, normalizeClubName, findReceiptForClub } from './utils';
+import { compressReceiptImage, normalizeClubName, findReceiptForClub, isSameAthleteIdentity } from './utils';
 import { 
   fetchCompetitions, 
   subscribeToCompetitions,
@@ -4486,10 +4486,7 @@ export default function App() {
     
     // Find what events this athlete already registered for in this competition
     const registeredEvents = players
-      .filter(pl => pl.compId === compId && (
-        (pl.ic && p.ic && pl.ic.trim().toLowerCase() === p.ic.trim().toLowerCase()) ||
-        (pl.name.trim().toLowerCase() === p.name.trim().toLowerCase() && pl.dob === p.dob)
-      ))
+      .filter(pl => pl.compId === compId && isSameAthleteIdentity(pl, p))
       .map(pl => pl.event);
 
     const availableEvents = (activeComp?.events || []).filter(ev => !registeredEvents.includes(ev));
@@ -4751,10 +4748,7 @@ export default function App() {
         if (selectedPlayerId && p.id === selectedPlayerId) {
           return false;
         }
-        const sameIdentity = 
-          (p.ic && pIc.trim() && p.ic.trim().toLowerCase() === pIc.trim().toLowerCase()) ||
-          (p.name.trim().toLowerCase() === pName.trim().toLowerCase() && p.dob === pDob);
-        
+        const sameIdentity = isSameAthleteIdentity(p, { name: pName, ic: pIc, dob: pDob });
         return sameIdentity && p.event === ev;
       });
 
@@ -4795,7 +4789,7 @@ export default function App() {
         if (p.id === selectedPlayerId) {
           return { ...p, ...data, event: eventsToRegister[0] } as Player;
         }
-        if (p.ic && pIc.trim() && p.ic.trim().toLowerCase() === pIc.trim().toLowerCase()) {
+        if (isSameAthleteIdentity(p, { name: pName, ic: pIc, dob: pDob })) {
           return { ...p, photo: pendingPhoto || undefined };
         }
         return p;
@@ -5451,10 +5445,7 @@ export default function App() {
       excelParsedPlayers.forEach((parsedP) => {
         // Check duplicate
         const isDuplicate = newPlayersList.some(p => {
-          const sameIdentity = 
-            (p.ic && parsedP.ic && p.ic.trim().toLowerCase() === parsedP.ic.trim().toLowerCase()) ||
-            (p.name.trim().toLowerCase() === parsedP.name!.trim().toLowerCase() && p.dob === parsedP.dob);
-          
+          const sameIdentity = isSameAthleteIdentity(p, parsedP);
           const sameCategory = p.ageGroup === parsedP.ageGroup && p.weightClass === parsedP.weightClass;
           const sameEvent = p.event === parsedP.event;
           
@@ -8064,12 +8055,16 @@ export default function App() {
                           onChange={(e) => setPClub(e.target.value)}
                           className="w-full bg-ink border border-line text-sm rounded-xl py-2 px-3 text-text focus:outline-none focus:border-gold transition"
                         >
-                          {(globalClubs.length > 0
-                            ? globalClubs
-                            : Object.keys(DEMO_IMPORT.clubs)
-                          ).map(club => (
-                            <option key={club} value={club}>{club}</option>
-                          ))}
+                          {(() => {
+                            const availableClubs = (globalClubs.length > 0
+                              ? globalClubs
+                              : Object.keys(DEMO_IMPORT.clubs));
+                            const clubSet = new Set(availableClubs);
+                            if (pClub && pClub.trim()) clubSet.add(pClub.trim());
+                            return Array.from(clubSet).map(club => (
+                              <option key={club} value={club}>{club}</option>
+                            ));
+                          })()}
                         </select>
                       </div>
                     </div>

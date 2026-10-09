@@ -581,3 +581,56 @@ export function findReceiptForClub(
   return null;
 }
 
+/**
+ * Checks whether two athlete records represent the exact same human competitor.
+ * Guards against false-positive duplicate matches when athletes share placeholder, dummy,
+ * or truncated IC numbers (e.g. 'T123', 'G123', '123', 'N/A', 'NONE', '0', '-', etc.).
+ */
+export function isSameAthleteIdentity(
+  p1: { name?: string; ic?: string; dob?: string } | null | undefined,
+  p2: { name?: string; ic?: string; dob?: string } | null | undefined
+): boolean {
+  if (!p1 || !p2) return false;
+
+  const name1 = (p1.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const name2 = (p2.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const dob1 = (p1.dob || '').trim();
+  const dob2 = (p2.dob || '').trim();
+  const ic1 = (p1.ic || '').trim().toLowerCase().replace(/[^a-z0-9]/gi, '');
+  const ic2 = (p2.ic || '').trim().toLowerCase().replace(/[^a-z0-9]/gi, '');
+
+  if (!name1 || !name2) return false;
+
+  // Helper to identify dummy/placeholder ICs
+  const isPlaceholderIc = (ic: string) => {
+    if (!ic || ic.length < 5) return true;
+    if (['na', 'none', 'null', 'temp', 't123', 'g123', 's123', '123', '0000', 'xxxx'].some(p => ic.startsWith(p) && ic.length <= 6)) return true;
+    return false;
+  };
+
+  // Case 1: Identical full name match (case-insensitive)
+  if (name1 === name2) {
+    if (dob1 && dob2) return dob1 === dob2;
+    if (ic1 && ic2 && !isPlaceholderIc(ic1) && !isPlaceholderIc(ic2)) return ic1 === ic2;
+    return true;
+  }
+
+  // Case 2: Permutation / full token match of all name words with exact same DOB
+  // (e.g. "Cheong Hongji Alexander" vs "Alexander Cheong Hongji")
+  const words1 = name1.split(' ').sort().join(' ');
+  const words2 = name2.split(' ').sort().join(' ');
+  if (words1 === words2 && words1.length > 3) {
+    if (dob1 && dob2) return dob1 === dob2;
+    return true;
+  }
+
+  // Case 3: Genuine official unique IC match (>= 8 alphanumeric characters, e.g. T1317329F or Malaysian IC)
+  // Two different name representations can ONLY match if the IC is genuine (not placeholder) AND DOB matches
+  if (ic1 && ic2 && ic1.length >= 8 && !isPlaceholderIc(ic1) && !isPlaceholderIc(ic2) && ic1 === ic2) {
+    if (dob1 && dob2 && dob1 === dob2) return true;
+    if (name1.includes(name2) || name2.includes(name1)) return true;
+  }
+
+  return false;
+}
+
