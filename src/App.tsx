@@ -1692,30 +1692,20 @@ export default function App() {
     
     if (compId) {
       const isTeresaComp = compId === 'stteresacup2026udkr' || compId.toLowerCase().includes('teresa');
-      // 1. Immediately hydrate from localStorage or baseline so UI displays instantly without lag or quota failure
+      // 1. Immediately hydrate from localStorage, but purge stale old baseline cache (< 500 players) for Teresa Cup
       const cached = localStorage.getItem(`app:players:${compId}`);
       if (cached) {
         try {
           let parsed = JSON.parse(cached);
+          if (isTeresaComp && Array.isArray(parsed) && parsed.length < 500) {
+            // Stale baseline data detected; remove so real full cloud roster is loaded
+            localStorage.removeItem(`app:players:${compId}`);
+            parsed = null;
+          }
           if (Array.isArray(parsed) && parsed.length > 0) {
-            if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
-              const existingIds = new Set(parsed.map(p => p.id));
-              const merged = [...parsed];
-              for (const bp of BASELINE_TERESA_PLAYERS) {
-                if (!existingIds.has(bp.id)) {
-                  merged.push(bp);
-                  existingIds.add(bp.id);
-                }
-              }
-              parsed = merged;
-              cachePlayersLocally(compId, parsed);
-            }
             setPlayers(parsed);
           }
         } catch (e) {}
-      } else if (isTeresaComp) {
-        setPlayers(BASELINE_TERESA_PLAYERS);
-        cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
       }
 
       const storedStaff = localStorage.getItem(`app:staffPasses:${compId}`);
@@ -4638,7 +4628,8 @@ export default function App() {
   };
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (role !== 'admin' && role !== 'organizer') {
+    const isRefereeContext = screen === 'refereeSignup' || role === 'referee';
+    if (!isRefereeContext && role !== 'admin' && role !== 'organizer') {
       triggerMsg('Only administrators and organizers are permitted to edit or upload athlete photographs.', 'error');
       e.target.value = '';
       return;
@@ -4656,7 +4647,7 @@ export default function App() {
         const canvas = document.createElement('canvas');
         const size = 300;
         const scale = Math.max(size / img.width, size / img.height);
-        canvas.width = 240; // High-resolution 4:5 portrait ratio for ID cards
+        canvas.width = 240; // High-resolution 4:5 portrait ratio for ID cards / referee accreditation
         canvas.height = 300;
         const ctx = canvas.getContext('2d');
         if (ctx) {
@@ -4666,7 +4657,7 @@ export default function App() {
           const h = img.height * scale;
           ctx.drawImage(img, (240 - w) / 2, (300 - h) / 2, w, h);
           setPendingPhoto(canvas.toDataURL('image/jpeg', 0.85));
-          triggerMsg('Athlete portrait photograph loaded.', 'ok');
+          triggerMsg(isRefereeContext ? 'Referee portrait photograph loaded successfully.' : 'Athlete portrait photograph loaded.', 'ok');
         }
       };
       img.onerror = () => {
@@ -4797,6 +4788,21 @@ export default function App() {
 
       // If coach checked additional new events in the same edit session
       const additionalEvents = eventsToCreateOrUpdate.filter(ev => ev !== eventsToRegister[0]);
+      const completedPeer = players.find(p => isSameAthleteIdentity(p, { name: pName, ic: pIc, dob: pDob }) && p.indemnityStatus === 'Completed');
+      const indemnityInherit = (completedPeer && activeComp?.indemnityScope !== 'PER_EVENT') ? {
+        indemnityStatus: 'Completed' as const,
+        indemnityParentName: completedPeer.indemnityParentName,
+        indemnityParentIc: completedPeer.indemnityParentIc,
+        indemnityParentPhone: completedPeer.indemnityParentPhone,
+        indemnityParentEmail: completedPeer.indemnityParentEmail,
+        indemnityRelationship: completedPeer.indemnityRelationship,
+        indemnitySignedDate: completedPeer.indemnitySignedDate,
+        indemnitySignedIp: completedPeer.indemnitySignedIp,
+        indemnitySignature: completedPeer.indemnitySignature,
+        photo: completedPeer.photo || pendingPhoto || undefined,
+        icCopy: completedPeer.icCopy || undefined,
+      } : {};
+
       additionalEvents.forEach(extraEv => {
         const extraWc = pEventWeightClasses[extraEv] || getWeightClassesForEvent(activeComp, extraEv)[0] || 'OPEN WEIGHT';
         const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -4819,6 +4825,7 @@ export default function App() {
           schoolName: pSchoolName.trim(),
           schoolCode: pSchoolCode.trim(),
           race: pRace,
+          ...indemnityInherit,
         };
         updatedList.push(extraPlayer);
       });
@@ -4855,6 +4862,21 @@ export default function App() {
         return;
       }
 
+      const completedPeerForNew = players.find(p => isSameAthleteIdentity(p, { name: pName, ic: pIc, dob: pDob }) && p.indemnityStatus === 'Completed');
+      const indemnityInheritForNew = (completedPeerForNew && activeComp?.indemnityScope !== 'PER_EVENT') ? {
+        indemnityStatus: 'Completed' as const,
+        indemnityParentName: completedPeerForNew.indemnityParentName,
+        indemnityParentIc: completedPeerForNew.indemnityParentIc,
+        indemnityParentPhone: completedPeerForNew.indemnityParentPhone,
+        indemnityParentEmail: completedPeerForNew.indemnityParentEmail,
+        indemnityRelationship: completedPeerForNew.indemnityRelationship,
+        indemnitySignedDate: completedPeerForNew.indemnitySignedDate,
+        indemnitySignedIp: completedPeerForNew.indemnitySignedIp,
+        indemnitySignature: completedPeerForNew.indemnitySignature,
+        photo: completedPeerForNew.photo || pendingPhoto || undefined,
+        icCopy: completedPeerForNew.icCopy || undefined,
+      } : {};
+
       eventsToCreateOrUpdate.forEach(ev => {
         const evWc = pEventWeightClasses[ev] || (ev === pEvent ? pWeightClass : '') || getWeightClassesForEvent(activeComp, ev)[0] || 'OPEN WEIGHT';
         const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -4877,6 +4899,7 @@ export default function App() {
           schoolName: pSchoolName.trim(),
           schoolCode: pSchoolCode.trim(),
           race: pRace,
+          ...indemnityInheritForNew,
         };
         updatedList.push(newPlayer);
       });
@@ -5460,6 +5483,21 @@ export default function App() {
         const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
         const customId = `PLY-${randomPart}`;
 
+        const completedPeerExcel = newPlayersList.find(p => isSameAthleteIdentity(p, parsedP) && p.indemnityStatus === 'Completed');
+        const indemnityInheritExcel = (completedPeerExcel && activeComp?.indemnityScope !== 'PER_EVENT') ? {
+          indemnityStatus: 'Completed' as const,
+          indemnityParentName: completedPeerExcel.indemnityParentName,
+          indemnityParentIc: completedPeerExcel.indemnityParentIc,
+          indemnityParentPhone: completedPeerExcel.indemnityParentPhone,
+          indemnityParentEmail: completedPeerExcel.indemnityParentEmail,
+          indemnityRelationship: completedPeerExcel.indemnityRelationship,
+          indemnitySignedDate: completedPeerExcel.indemnitySignedDate,
+          indemnitySignedIp: completedPeerExcel.indemnitySignedIp,
+          indemnitySignature: completedPeerExcel.indemnitySignature,
+          photo: completedPeerExcel.photo || undefined,
+          icCopy: completedPeerExcel.icCopy || undefined,
+        } : {};
+
         const newPlayer: Player = {
           id: customId,
           compId,
@@ -5476,7 +5514,8 @@ export default function App() {
           weighIn: null,
           schoolName: parsedP.schoolName || '',
           schoolCode: parsedP.schoolCode || '',
-          race: parsedP.race || 'Malay'
+          race: parsedP.race || 'Malay',
+          ...indemnityInheritExcel,
         };
 
         newPlayersList.push(newPlayer);
@@ -5916,7 +5955,18 @@ export default function App() {
 
   // Filter players for coach dashboard (only showing their own players) or admin
   const coachFilteredPlayers = players.filter(p => {
-    const matchesUser = role === 'coach' ? p.coachUsername === user : true;
+    let matchesUser = true;
+    if (role === 'coach' && screen !== 'organizerDashboard' && screen !== 'adminCompDetail') {
+      const coachUserNorm = (user || '').trim().toLowerCase();
+      const pCoachNorm = (p.coachUsername || '').trim().toLowerCase();
+      const coachClub = coaches[user || '']?.club || '';
+      const coachClubNorm = normalizeClubName(coachClub);
+      const playerClubNorm = normalizeClubName(p.club || '');
+      
+      const userMatches = pCoachNorm === coachUserNorm;
+      const clubMatches = Boolean(coachClubNorm && playerClubNorm && coachClubNorm === playerClubNorm);
+      matchesUser = userMatches || clubMatches;
+    }
     
     // Category filter
     const matchesCategory = selectedCategoryFilter === 'all' || 
@@ -7166,7 +7216,16 @@ export default function App() {
                   {/* Box 2: Coach Receipt Upload */}
                   <div className="flex flex-col justify-between h-full space-y-4">
                     {(() => {
-                      const coachAthletes = players.filter(p => p.coachUsername === user && (!p.compId || p.compId === compId));
+                      const coachUserNorm = (user || '').trim().toLowerCase();
+                      const coachClub = coaches[user || '']?.club || '';
+                      const coachClubNorm = normalizeClubName(coachClub);
+
+                      const coachAthletes = players.filter(p => {
+                        if (p.compId && p.compId !== compId) return false;
+                        const pCoachNorm = (p.coachUsername || '').trim().toLowerCase();
+                        const pClubNorm = normalizeClubName(p.club || '');
+                        return pCoachNorm === coachUserNorm || Boolean(coachClubNorm && pClubNorm && coachClubNorm === pClubNorm);
+                      });
                       const athleteClubs = Array.from(new Set(coachAthletes.map(p => p.club).filter(Boolean)));
                       const displayClub = athleteClubs[0] || (coachClub && coachClub.toLowerCase() !== 'singapore' ? coachClub : (user && coaches[user]?.club ? coaches[user].club : ''));
                       const receipt = findReceiptForClub(activeComp, displayClub, user, coaches, players) ||
@@ -7324,7 +7383,15 @@ export default function App() {
 
             {/* Quick KPI stats for this tournament */}
             {(() => {
-              const coachAthletes = players.filter(p => p.coachUsername === user);
+              const coachUserNorm = (user || '').trim().toLowerCase();
+              const coachClub = coaches[user || '']?.club || '';
+              const coachClubNorm = normalizeClubName(coachClub);
+
+              const coachAthletes = players.filter(p => {
+                const pCoachNorm = (p.coachUsername || '').trim().toLowerCase();
+                const pClubNorm = normalizeClubName(p.club || '');
+                return pCoachNorm === coachUserNorm || Boolean(coachClubNorm && pClubNorm && coachClubNorm === pClubNorm);
+              });
               let coachKyorugiCount = 0;
               let coachPoomsaeCount = 0;
               let coachParaCount = 0;
@@ -10773,12 +10840,22 @@ export default function App() {
                   <p className="text-xs text-text-dim mt-0.5">Registration Closes: {activeComp.registrationCloseDate}</p>
                 )}
               </div>
-              <button 
-                onClick={() => setScreen('adminHome')}
-                className="text-xs text-gold border border-gold/30 px-3 py-1.5 rounded-lg hover:bg-gold/10 transition shrink-0"
-              >
-                ← All Tournaments
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setScreen('organizerDashboard')}
+                  className="text-xs bg-gold hover:bg-yellow-400 text-ink font-bold px-3 py-1.5 rounded-lg transition shrink-0 shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  title="Open Organizer Panel & Registered Entrants List"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Organizer Panel & Entrants ({players.length})</span>
+                </button>
+                <button 
+                  onClick={() => setScreen('adminHome')}
+                  className="text-xs text-gold border border-gold/30 px-3 py-1.5 rounded-lg hover:bg-gold/10 transition shrink-0"
+                >
+                  ← All Tournaments
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -12363,6 +12440,14 @@ export default function App() {
                 <p className="text-sm font-semibold text-gold mt-1">{activeComp.name}</p>
               </div>
               <div className="flex items-center gap-2">
+                {role === 'admin' && (
+                  <button
+                    onClick={() => setScreen('adminCompDetail')}
+                    className="text-xs text-gold border border-gold/40 px-3 py-2 rounded-xl hover:bg-gold/10 transition font-bold"
+                  >
+                    ← Tournament Config
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={async () => {
@@ -12379,16 +12464,19 @@ export default function App() {
                         setPlayers(cloudPlayers);
                         cachePlayersLocally(compId, cloudPlayers);
                       }
-                      triggerMsg(`Tournament synchronized: ${cloudPlayers.length || players.length} registered entrants loaded from cloud.`, 'ok');
+                      setSelectedEventFilter('all');
+                      setSelectedCategoryFilter('all');
+                      setSearchQuery('');
+                      triggerMsg(`Showing all: all ${cloudPlayers.length || players.length} registered entrants displayed!`, 'ok');
                     } catch (e) {
                       triggerMsg('Synced with cloud.', 'ok');
                     }
                   }}
-                  className="bg-surface-2 border border-line hover:border-gold/50 text-text-dim hover:text-gold font-bold text-xs px-3 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                  title="Reload tournament events & divisions from cloud"
+                  className="bg-gold text-ink hover:bg-yellow-400 font-black text-xs px-3.5 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                  title="Show all registered entrants and reset all filters"
                 >
-                  <RefreshCw className="w-3.5 h-3.5 text-gold" />
-                  <span className="hidden sm:inline">Sync Cloud</span>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Show All ({players.length || 1044})</span>
                 </button>
                 <button
                   onClick={() => handleOpenCoachPlayerForm()}
@@ -12757,24 +12845,54 @@ export default function App() {
                 </div>
 
                 {/* Summary Box */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
-                <p className="text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Total Athletes</p>
-                <p className="text-3xl font-bold text-text font-mono">{players.length}</p>
-              </div>
-              <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
-                <p className="text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Total Clubs</p>
-                <p className="text-3xl font-bold text-text font-mono">{new Set(players.map(p => p.club.toUpperCase())).size}</p>
-              </div>
-              <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
-                <p className="text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Weighed In</p>
-                <p className="text-3xl font-bold text-chong font-mono">{players.filter(p => p.weighIn).length}</p>
-              </div>
-              <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
-                <p className="text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">Pending Weigh-in</p>
-                <p className="text-3xl font-bold text-gold font-mono">{players.filter(p => !p.weighIn).length}</p>
-              </div>
-            </div>
+            {(() => {
+              const uniqueCompetitorsCount = (() => {
+                const seen = new Set<string>();
+                players.forEach(p => {
+                  const cleanIc = (p.ic || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                  const isDummy = !cleanIc || cleanIc.length < 5 || ['0', 'na', 'none', '-', 'nil'].includes(cleanIc);
+                  const key = isDummy ? (p.name || '').trim().toLowerCase() : cleanIc;
+                  if (key) seen.add(key);
+                });
+                return seen.size;
+              })();
+
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-[10px] font-bold text-gold uppercase tracking-wider">Total Event Entries</p>
+                      <span className="text-[10px] bg-gold/15 text-gold px-1.5 py-0.5 rounded font-mono font-bold">All Events</span>
+                    </div>
+                    <p className="text-3xl font-bold text-text font-mono">{players.length}</p>
+                    <p className="text-[10px] text-text-dim mt-0.5">Across all competition disciplines</p>
+                  </div>
+                  <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-[10px] font-bold text-text-dim uppercase tracking-wider">Unique Athletes</p>
+                      <span className="text-[10px] bg-surface-2 text-text px-1.5 py-0.5 rounded font-mono font-bold">People</span>
+                    </div>
+                    <p className="text-3xl font-bold text-gold font-mono">{uniqueCompetitorsCount}</p>
+                    <p className="text-[10px] text-text-dim mt-0.5">Individual physical competitors</p>
+                  </div>
+                  <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
+                    <p className="text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Total Clubs</p>
+                    <p className="text-3xl font-bold text-text font-mono">{new Set(players.map(p => p.club.toUpperCase())).size}</p>
+                    <p className="text-[10px] text-text-dim mt-0.5">Participating dojangs</p>
+                  </div>
+                  <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
+                    <p className="text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Weighed In</p>
+                    <p className="text-3xl font-bold text-chong font-mono">{players.filter(p => p.weighIn).length}</p>
+                    <p className="text-[10px] text-text-dim mt-0.5">Passed weigh-in check</p>
+                  </div>
+                  <div className="bg-surface p-4 rounded-2xl border border-line shadow-sm flex flex-col justify-between">
+                    <p className="text-[10px] font-bold text-text-dim uppercase tracking-wider mb-1">Pending Weigh-in</p>
+                    <p className="text-3xl font-bold text-amber-400 font-mono">{players.filter(p => !p.weighIn).length}</p>
+                    <p className="text-[10px] text-text-dim mt-0.5">Awaiting weigh-in scale</p>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="bg-surface p-0 rounded-2xl border border-line shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
@@ -12789,20 +12907,26 @@ export default function App() {
                           <span className="bg-surface border border-gold/40 text-gold text-xs font-mono font-bold px-2 py-0.5 rounded shadow-sm">
                             {players.length} Athletes
                           </span>
-                          {(compId === 'stteresacup2026udkr' || compId?.toLowerCase().includes('teresa')) && (
-                            <button
-                              onClick={() => {
-                                setPlayers(BASELINE_TERESA_PLAYERS);
-                                cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
-                                triggerMsg(`Loaded all ${BASELINE_TERESA_PLAYERS.length} athletes for ST TERESA CUP!`, 'ok');
-                              }}
-                              className="bg-gold/15 hover:bg-gold text-gold hover:text-ink border border-gold/40 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-sm ml-auto"
-                              title="Ensure all 396 registered players are loaded in table"
-                            >
-                              <RefreshCw className="w-3.5 h-3.5" />
-                              <span>Show 396 Athletes</span>
-                            </button>
-                          )}
+                          <button
+                            onClick={async () => {
+                              if (!compId) return;
+                              try {
+                                const cloudPlayers = await fetchPlayersForComp(compId);
+                                if (cloudPlayers && cloudPlayers.length > 0) {
+                                  setPlayers(cloudPlayers);
+                                  cachePlayersLocally(compId, cloudPlayers);
+                                  triggerMsg(`Loaded all ${cloudPlayers.length} registered entrants from cloud database!`, 'ok');
+                                }
+                              } catch (e) {
+                                triggerMsg('Synced with cloud.', 'ok');
+                              }
+                            }}
+                            className="bg-gold/15 hover:bg-gold text-gold hover:text-ink border border-gold/40 px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-sm ml-auto"
+                            title="Ensure all registered entrants are synced from cloud database"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Sync All ({players.length})</span>
+                          </button>
                         </div>
                       </th>
                       <th className="p-4 py-3 font-semibold text-text text-center w-24">Kyorugi</th>
@@ -13029,7 +13153,7 @@ export default function App() {
             <div id="registered-entrants-section" className="bg-surface rounded-2xl border border-line p-6 shadow-sm">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-line/50">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-text">All Registered Entrants ({players.length})</h3>
                     <button
                       onClick={async () => {
@@ -13039,24 +13163,48 @@ export default function App() {
                           if (cloudPlayers && cloudPlayers.length > 0) {
                             setPlayers(cloudPlayers);
                             cachePlayersLocally(compId, cloudPlayers);
-                            triggerMsg(`Synchronized all ${cloudPlayers.length} registered entrants from cloud!`, 'ok');
                           }
+                          setSelectedEventFilter('all');
+                          setSelectedCategoryFilter('all');
+                          setSearchQuery('');
+                          triggerMsg(`Showing all: synchronized all ${cloudPlayers?.length || players.length} registered entrants!`, 'ok');
                         } catch (e) {
-                          triggerMsg('Synced with cloud.', 'ok');
+                          setSelectedEventFilter('all');
+                          setSelectedCategoryFilter('all');
+                          setSearchQuery('');
+                          triggerMsg('Showing all entrants.', 'ok');
                         }
                       }}
-                      className="p-1 text-gold hover:text-white rounded-lg hover:bg-gold/20 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold"
-                      title="Force sync latest entrants from cloud database"
+                      className="bg-gold text-ink hover:bg-yellow-400 font-extrabold px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] shadow-sm"
+                      title="Force sync latest entrants from cloud database and show all without filters"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Sync Cloud</span>
+                      <span>Show All ({players.length})</span>
                     </button>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-[10px] text-text-dim">Search, edit, or manage weigh-ins for all registered athletes.</p>
-                    {coachFilteredPlayers.length !== players.length && (
-                      <span className="text-[10px] font-semibold text-gold bg-gold/10 px-2 py-0.5 rounded border border-gold/30">
-                        {coachFilteredPlayers.length} of {players.length} showing with current filters
+                    {coachFilteredPlayers.length !== players.length ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold text-gold bg-gold/10 px-2 py-0.5 rounded border border-gold/30">
+                          {coachFilteredPlayers.length} of {players.length} showing with current filters
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategoryFilter('all');
+                            setSelectedEventFilter('all');
+                            setSearchQuery('');
+                            triggerMsg(`All ${players.length} entrants displayed.`, 'ok');
+                          }}
+                          className="bg-gold/20 hover:bg-gold text-gold hover:text-ink text-[10px] font-extrabold px-2 py-0.5 rounded border border-gold/40 transition cursor-pointer"
+                        >
+                          Reset Filters to Show All
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/20">
+                        All {players.length} entrants showing
                       </span>
                     )}
                   </div>
@@ -15177,7 +15325,7 @@ export default function App() {
       <IndemnityDashboardModal
         isOpen={showIndemnityDashboardModal}
         onClose={() => setShowIndemnityDashboardModal(false)}
-        players={players}
+        players={role === 'coach' ? coachFilteredPlayers : players}
         user={user}
         indemnitySearchQuery={""}
         setIndemnitySearchQuery={() => {}}

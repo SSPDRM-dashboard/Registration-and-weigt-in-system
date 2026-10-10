@@ -1,5 +1,5 @@
-import React from 'react';
-import { User, X, Save } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, X, Save, Camera, Upload } from 'lucide-react';
 import { Referee } from '../../types';
 
 interface RefereeEditProfileModalProps {
@@ -79,6 +79,40 @@ export const RefereeEditProfileModal: React.FC<RefereeEditProfileModalProps> = (
 }) => {
   if (!isOpen || !activeReferee) return null;
 
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(activeReferee.photo || null);
+
+  const handleEditPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      triggerMsg('Please select a valid image file (JPG, PNG, WEBP).', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = 300;
+        const scale = Math.max(size / img.width, size / img.height);
+        canvas.width = 240;
+        canvas.height = 300;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          const w = img.width * scale;
+          const h = img.height * scale;
+          ctx.drawImage(img, (240 - w) / 2, (300 - h) / 2, w, h);
+          setProfilePhoto(canvas.toDataURL('image/jpeg', 0.85));
+          triggerMsg('Referee portrait photograph updated successfully.', 'ok');
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = async () => {
     if (
       !refereeFullName ||
@@ -113,6 +147,7 @@ export const RefereeEditProfileModal: React.FC<RefereeEditProfileModalProps> = (
       poomsaeStatus: refereePoomsaeStatus,
       carPlate: refereeCarPlate,
       specialRole: refereeSpecialRole,
+      photo: profilePhoto || activeReferee.photo || undefined,
     };
     const cleanIc = activeReferee.nric.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
@@ -164,6 +199,37 @@ export const RefereeEditProfileModal: React.FC<RefereeEditProfileModalProps> = (
 
         {/* Content */}
         <div className="p-6 overflow-y-auto space-y-6">
+          {/* Referee Portrait Photograph Upload */}
+          <div className="bg-ink/40 p-4 rounded-2xl border border-line flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center space-x-4">
+              {profilePhoto ? (
+                <img
+                  src={profilePhoto}
+                  alt="Referee Portrait"
+                  className="w-16 h-20 object-cover rounded-xl border border-gold/40 shadow-sm"
+                />
+              ) : (
+                <div className="w-16 h-20 rounded-xl bg-surface-2 border border-line flex items-center justify-center text-text-dim">
+                  <User className="w-8 h-8 opacity-40" />
+                </div>
+              )}
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-text">Referee Portrait Photo (4:5 Ratio)</h4>
+                <p className="text-[11px] text-text-dim mt-0.5">Used for referee badge, ID pass, and accreditation.</p>
+              </div>
+            </div>
+            <label className="bg-gold hover:bg-yellow-400 text-ink text-xs font-bold px-3.5 py-2 rounded-xl cursor-pointer shadow-sm transition flex items-center gap-1.5 shrink-0">
+              <Camera className="w-3.5 h-3.5" />
+              <span>{profilePhoto ? 'Change Photo' : 'Upload Photo'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleEditPhotoSelect}
+                className="hidden"
+              />
+            </label>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-text-dim uppercase tracking-widest mb-1">

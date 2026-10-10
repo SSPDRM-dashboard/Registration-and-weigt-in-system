@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Trophy, ShieldAlert, CheckCircle, Calendar, MapPin, User, 
   PenTool, Check, Activity, FileText, AlertCircle, Search, ArrowLeft, ShieldCheck,
@@ -97,7 +97,15 @@ export default function ParentIndemnityForm({
     }
   }, [selectedPlayer, playersList, indemnityComp]);
 
-  const processImageFile = (file: File, maxWidth: number, maxHeight: number, callback: (base64: string) => void) => {
+  const processImageFile = (
+    file: File, 
+    maxWidth: number, 
+    maxHeight: number, 
+    qualityOrCallback: number | ((base64: string) => void), 
+    maybeCallback?: (base64: string) => void
+  ) => {
+    const quality = typeof qualityOrCallback === 'number' ? qualityOrCallback : 0.7;
+    const callback = typeof qualityOrCallback === 'function' ? qualityOrCallback : (maybeCallback || (() => {}));
     if (file.size > 5 * 1024 * 1024) {
       triggerMsg('File is too large. Max size allowed is 5MB.', 'error');
       return;
@@ -127,7 +135,7 @@ export default function ParentIndemnityForm({
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', quality || 0.6);
           callback(compressedBase64);
         } else {
           callback(e.target?.result as string);
@@ -388,13 +396,45 @@ export default function ParentIndemnityForm({
     );
   }
 
+  // Consolidate unique athletes so competitors registered in multiple events appear once
+  const uniqueAthletes = useMemo(() => {
+    const list: Array<{ primary: Player; events: string[]; allCompleted: boolean; hasCompleted: boolean }> = [];
+    playersList.forEach((p) => {
+      const existing = list.find(item => isSameAthleteIdentity(item.primary, p));
+      if (existing) {
+        if (p.event && !existing.events.includes(p.event)) {
+          existing.events.push(p.event);
+        }
+        if (p.indemnityStatus === 'Completed') {
+          existing.hasCompleted = true;
+        } else {
+          existing.allCompleted = false;
+        }
+      } else {
+        list.push({
+          primary: p,
+          events: p.event ? [p.event] : [],
+          allCompleted: p.indemnityStatus === 'Completed',
+          hasCompleted: p.indemnityStatus === 'Completed'
+        });
+      }
+    });
+    return list;
+  }, [playersList]);
+
   // SELECT CHILD VIEW (when indemnityPlayer prop was null and parent must choose their child)
   if (!selectedPlayer) {
-    const filteredPlayers = playersList.filter(p => 
+    const filteredAthletes = uniqueAthletes.filter(({ primary: p }) => 
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.club.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.ic.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    const tempAthleteRecord = tempSelectedPlayer
+      ? uniqueAthletes.find(item => isSameAthleteIdentity(item.primary, tempSelectedPlayer))
+      : null;
+    const tempEvents = tempAthleteRecord?.events || (tempSelectedPlayer?.event ? [tempSelectedPlayer.event] : []);
+    const tempIsCompleted = tempAthleteRecord ? (tempAthleteRecord.allCompleted || tempAthleteRecord.hasCompleted) : tempSelectedPlayer?.indemnityStatus === 'Completed';
 
     return (
       <div className="max-w-xl mx-auto my-6 bg-surface rounded-2xl border border-line shadow-xl overflow-hidden animate-fade-in">
@@ -453,11 +493,16 @@ export default function ParentIndemnityForm({
 
           {/* Search/Select Dropdown Field */}
           <div className="space-y-3">
-            <label className="block text-xs font-bold text-gold uppercase tracking-wider">
-              1. PLAYER
-            </label>
+            <div className="flex justify-between items-center">
+              <label className="block text-xs font-bold text-gold uppercase tracking-wider">
+                1. PLAYER ({uniqueAthletes.length} Competitors)
+              </label>
+              <span className="text-[11px] text-text-dim">
+                Only fill once per competitor
+              </span>
+            </div>
             <p className="text-xs text-text-dim leading-relaxed">
-              Search or select your child's name from the registered competitors dropdown list below.
+              Search or select your child's name from the registered competitors dropdown list below. If your child entered multiple events, you only need to sign once.
             </p>
             
             {/* Quick search filter to narrow down dropdown options */}
@@ -479,17 +524,18 @@ export default function ParentIndemnityForm({
                 onChange={(e) => {
                   const val = e.target.value;
                   setSelectedDropdownPlayerId(val);
-                  const p = playersList.find(player => player.id === val);
-                  setTempSelectedPlayer(p || null);
+                  const found = uniqueAthletes.find(item => item.primary.id === val);
+                  setTempSelectedPlayer(found ? found.primary : null);
                 }}
                 className="w-full bg-ink border border-line text-sm rounded-xl py-3 px-4 text-text focus:outline-none focus:border-gold transition cursor-pointer font-semibold uppercase tracking-wide"
               >
-                <option value="" className="text-text-dim">-- Choose Competitor --</option>
-                {filteredPlayers.map((p) => {
-                  const statusSuffix = p.indemnityStatus === 'Completed' ? ' (✓ Waiver Signed)' : '';
+                <option value="" className="text-text-dim">-- Choose Competitor ({filteredAthletes.length}) --</option>
+                {filteredAthletes.map(({ primary: p, events, hasCompleted, allCompleted }) => {
+                  const statusSuffix = (hasCompleted || allCompleted) ? ' (✓ Waiver Signed)' : '';
+                  const eventsStr = events.length > 1 ? ` · ${events.length} Events: [${events.join(', ')}]` : events.length === 1 ? ` · [${events[0]}]` : '';
                   return (
                     <option key={p.id} value={p.id} className="bg-surface text-text">
-                      {p.name.toUpperCase()} [{p.club.toUpperCase()}] - {p.ic}{statusSuffix}
+                      {p.name.toUpperCase()} [{p.club.toUpperCase()}]{eventsStr} - {p.ic}{statusSuffix}
                     </option>
                   );
                 })}
@@ -514,40 +560,51 @@ export default function ParentIndemnityForm({
                   <p className="text-[11px] text-text-dim font-mono">NRIC: {tempSelectedPlayer.ic}</p>
                 </div>
                 <div>
-                  {tempSelectedPlayer.indemnityStatus === 'Completed' ? (
-                    <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 font-mono">
+                  {tempIsCompleted ? (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/20 font-mono">
                       ✓ CONSENT SECURED
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-950/40 text-amber-400 border border-amber-500/20 font-mono">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-950/40 text-amber-400 border border-amber-500/20 font-mono">
                       PENDING CONSENT
                     </span>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-4 text-xs">
                 <div>
                   <span className="text-text-dim block">Represented Club:</span>
                   <strong className="text-text uppercase">{tempSelectedPlayer.club}</strong>
                 </div>
                 <div>
-                  <span className="text-text-dim block">Category / Event:</span>
-                  <strong className="text-text">{tempSelectedPlayer.event}</strong>
-                </div>
-                <div>
-                  <span className="text-text-dim block">Weight Class:</span>
-                  <strong className="text-text">{tempSelectedPlayer.weightClass}</strong>
-                </div>
-                <div>
                   <span className="text-text-dim block">Age Division:</span>
-                  <strong className="text-text">{tempSelectedPlayer.ageGroup}</strong>
+                  <strong className="text-text">{tempSelectedPlayer.ageGroup} · {tempSelectedPlayer.gender}</strong>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-text-dim block">Registered Disciplines / Events ({tempEvents.length}):</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {tempEvents.map((ev, idx) => (
+                      <span key={idx} className="bg-gold/15 text-gold border border-gold/30 px-2 py-0.5 rounded text-[11px] font-bold">
+                        {ev}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {tempSelectedPlayer.indemnityStatus === 'Completed' ? (
+              {tempEvents.length > 1 && (
+                <div className="bg-gold/10 border border-gold/30 rounded-xl p-3 text-xs text-gold flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    This competitor is registered for <strong>{tempEvents.length} events ({tempEvents.join(', ')})</strong>. You only need to complete this indemnity form <strong>once</strong>. Submitting will automatically cover all registered events.
+                  </span>
+                </div>
+              )}
+
+              {tempIsCompleted ? (
                 <div className="bg-emerald-950/20 border border-emerald-500/15 p-3 rounded-xl text-[11px] text-emerald-400 leading-relaxed">
-                  This competitor's parental consent and digital indemnity waiver have already been signed and logged securely. No further action is required.
+                  This competitor's parental consent and digital indemnity waiver have already been signed and logged securely for all registered events. No further action is required.
                 </div>
               ) : (
                 <button
@@ -563,7 +620,7 @@ export default function ParentIndemnityForm({
           )}
 
           {/* No matches warning */}
-          {!loadingPlayers && filteredPlayers.length === 0 && searchQuery && (
+          {!loadingPlayers && filteredAthletes.length === 0 && searchQuery && (
             <div className="p-8 text-center border border-dashed border-line rounded-xl text-text-dim space-y-2">
               <AlertCircle className="w-6 h-6 text-text-dim/60 mx-auto" />
               <p className="text-xs font-bold">No registered competitors found matching "{searchQuery}".</p>

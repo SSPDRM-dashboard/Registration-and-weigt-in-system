@@ -12,7 +12,10 @@ import {
   onSnapshot,
   getDoc,
   setLogLevel,
-  deleteField
+  deleteField,
+  orderBy,
+  limit,
+  startAfter
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Competition, Player, Coach, Organizer, Referee, ClubReceipt } from './types';
@@ -487,51 +490,81 @@ export async function deleteMasterAthlete(id: string): Promise<void> {
 
 export async function fetchPlayersForComp(compId: string): Promise<Player[]> {
   const isTeresaComp = compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'));
-  try {
-    const colRef = collection(db, 'players');
-    const q = query(colRef, where('compId', '==', compId));
-    const snap = await getDocs(q);
-    const players: Player[] = [];
-    snap.forEach((doc) => {
-      players.push(doc.data() as Player);
-    });
-    if (players.length > 0) {
-      if (isTeresaComp && players.length < BASELINE_TERESA_PLAYERS.length) {
-        const ids = new Set(players.map(p => p.id));
-        for (const bp of BASELINE_TERESA_PLAYERS) {
-          if (!ids.has(bp.id)) {
-            players.push(bp);
-            ids.add(bp.id);
-          }
+
+  // 1. High-speed backend API route (Node.js direct connection, bypassing browser long-polling delays)
+  if (typeof window !== 'undefined') {
+    try {
+      const resp = await fetch(`/api/competition-players/${encodeURIComponent(compId)}`);
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json && Array.isArray(json.players) && json.players.length > 0) {
+          cachePlayersLocally(compId, json.players);
+          return json.players;
         }
       }
-      cachePlayersLocally(compId, players);
-      return players;
+    } catch (apiErr) {
+      // Fall through to Firestore client SDK
+    }
+  }
+
+  try {
+    const colRef = collection(db, 'players');
+
+    // 2. Direct indexed query by compId via Firestore SDK
+    const directQuery = query(colRef, where('compId', '==', compId));
+    const directSnap = await getDocs(directQuery);
+    if (!directSnap.empty) {
+      const allPlayers: Player[] = [];
+      directSnap.forEach((docSnap) => {
+        allPlayers.push(docSnap.data() as Player);
+      });
+      if (allPlayers.length > 0) {
+        cachePlayersLocally(compId, allPlayers);
+        return allPlayers;
+      }
+    }
+
+    // 2. Paginated chunk scan fallback for legacy un-indexed or untagged documents
+    const allPlayers: Player[] = [];
+    let lastDoc: any = null;
+    while (true) {
+      let q = query(colRef, orderBy('__name__'), limit(250));
+      if (lastDoc) {
+        q = query(colRef, orderBy('__name__'), startAfter(lastDoc), limit(250));
+      }
+      const snap = await getDocs(q);
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as Player;
+        if (!data.compId || data.compId === compId || (isTeresaComp && (data.compId || '').toLowerCase().includes('teresa'))) {
+          allPlayers.push(data);
+        }
+      });
+
+      if (snap.size < 250) break;
+    }
+
+    if (allPlayers.length > 0) {
+      cachePlayersLocally(compId, allPlayers);
+      return allPlayers;
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
+    console.warn('[fetchPlayersForComp batch error]', error);
   }
+
+  // Local storage fallback
   try {
     const cached = localStorage.getItem(`app:players:${compId}`);
     if (cached) {
       let parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
-          const ids = new Set(parsed.map((p: Player) => p.id));
-          const merged = [...parsed];
-          for (const bp of BASELINE_TERESA_PLAYERS) {
-            if (!ids.has(bp.id)) {
-              merged.push(bp);
-              ids.add(bp.id);
-            }
-          }
-          parsed = merged;
-          cachePlayersLocally(compId, parsed);
-        }
         return parsed;
       }
     }
   } catch (e) {}
+
   if (isTeresaComp) {
     cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
     return BASELINE_TERESA_PLAYERS;
@@ -679,92 +712,61 @@ export async function fetchCompetitionById(compId: string): Promise<Competition 
 export function subscribeToPlayersForComp(compId: string, callback: (players: Player[]) => void, onError: (error: Error) => void): () => void {
   const isTeresaComp = compId === 'stteresacup2026udkr' || (compId && compId.toLowerCase().includes('teresa'));
   const colRef = collection(db, 'players');
-  const q = query(colRef, where('compId', '==', compId));
-  
-  const unsubscribe = onSnapshot(q, (snap) => {
-    const players: Player[] = [];
-    snap.forEach((doc) => {
-      players.push(doc.data() as Player);
-    });
-    if (players.length > 0) {
-      if (isTeresaComp && players.length < BASELINE_TERESA_PLAYERS.length) {
-        const ids = new Set(players.map(p => p.id));
-        for (const bp of BASELINE_TERESA_PLAYERS) {
-          if (!ids.has(bp.id)) {
-            players.push(bp);
-            ids.add(bp.id);
-          }
-        }
-      }
-      cachePlayersLocally(compId, players);
-      callback(players);
-    } else {
-      const cached = localStorage.getItem(`app:players:${compId}`);
-      if (cached) {
-        try {
-          let parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
-              const ids = new Set(parsed.map((p: Player) => p.id));
-              const merged = [...parsed];
-              for (const bp of BASELINE_TERESA_PLAYERS) {
-                if (!ids.has(bp.id)) {
-                  merged.push(bp);
-                  ids.add(bp.id);
-                }
-              }
-              parsed = merged;
-              cachePlayersLocally(compId, parsed);
-            }
-            callback(parsed);
-            return;
-          }
-        } catch(e) {}
-      }
-      if (isTeresaComp) {
-        cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
-        callback(BASELINE_TERESA_PLAYERS);
-      } else {
-        callback([]);
-      }
+  let active = true;
+
+  // 1. Immediate paginated chunk load to guarantee all 1,000+ registered players load into memory
+  fetchPlayersForComp(compId).then((allPlayers) => {
+    if (active && allPlayers && allPlayers.length > 0) {
+      callback(allPlayers);
     }
-  }, (error) => {
-    const isQuota = String(error).includes('Quota limit exceeded');
-    console.warn('[Firestore Quota Exceeded/Sync Error for Players]', isQuota ? 'Quota limit exceeded' : error);
-    const cached = localStorage.getItem(`app:players:${compId}`);
-    if (cached) {
-      try {
-        let parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          if (isTeresaComp && parsed.length < BASELINE_TERESA_PLAYERS.length) {
-            const ids = new Set(parsed.map((p: Player) => p.id));
-            const merged = [...parsed];
-            for (const bp of BASELINE_TERESA_PLAYERS) {
-              if (!ids.has(bp.id)) {
-                merged.push(bp);
-                ids.add(bp.id);
-              }
-            }
-            parsed = merged;
-            cachePlayersLocally(compId, parsed);
-          }
-          callback(parsed);
-          return;
-        }
-      } catch(e) {}
-    }
-    if (isTeresaComp) {
-      cachePlayersLocally(compId, BASELINE_TERESA_PLAYERS);
-      callback(BASELINE_TERESA_PLAYERS);
-      return;
-    }
-    if (!isQuota) {
-      handleFirestoreError(error, OperationType.GET, `players?compId=${compId}`);
-      onError(error as Error);
-    }
+  }).catch((e) => {
+    console.warn('[Initial chunked fetch error]', e);
   });
-  
-  return unsubscribe;
+
+  // 2. Real-time snapshot listener
+  let unsubscribeLive: (() => void) | null = null;
+  try {
+    const q = query(colRef, where('compId', '==', compId));
+    unsubscribeLive = onSnapshot(q, (snap) => {
+      const players: Player[] = [];
+      snap.forEach((docSnap) => {
+        players.push(docSnap.data() as Player);
+      });
+      if (players.length > 0) {
+        cachePlayersLocally(compId, players);
+        callback(players);
+      }
+    }, (error) => {
+      const errMsg = String(error?.message || error);
+      console.warn('[Firestore Live Listener Note - using chunked sync]', errMsg);
+      // If live listener fails due to memory scan limits, fetch via safe chunked batches
+      fetchPlayersForComp(compId).then((chunked) => {
+        if (active && chunked && chunked.length > 0) {
+          callback(chunked);
+        }
+      });
+    });
+  } catch (err) {
+    console.warn('[Failed to attach live snapshot listener]', err);
+  }
+
+  // 3. Periodic safe background sync every 30s to keep multiple users in perfect sync
+  const pollInterval = setInterval(() => {
+    if (!active) return;
+    fetchPlayersForComp(compId).then((refreshed) => {
+      if (active && refreshed && refreshed.length > 0) {
+        callback(refreshed);
+      }
+    }).catch(() => {});
+  }, 30000);
+
+  return () => {
+    active = false;
+    if (unsubscribeLive) {
+      unsubscribeLive();
+    }
+    clearInterval(pollInterval);
+  };
 }
 
 // --- REFEREE DEDUPLICATION & NORMALIZATION HELPER ---

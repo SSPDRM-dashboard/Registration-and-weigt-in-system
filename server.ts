@@ -94,6 +94,24 @@ async function startServer() {
     }
   });
 
+  // API route to get all registered entrants for a competition directly from Firestore
+  app.get("/api/competition-players/:compId", async (req, res) => {
+    try {
+      const compId = req.params.compId;
+      const { db } = await import("./src/firebase");
+      const { collection, query, where, getDocs } = await import("firebase/firestore");
+      const colRef = collection(db, "players");
+      const q = query(colRef, where("compId", "==", compId));
+      const snap = await getDocs(q);
+      const players: any[] = [];
+      snap.forEach((d) => players.push(d.data()));
+      res.json({ players, count: players.length });
+    } catch (err: any) {
+      console.error("Error fetching players in server endpoint:", err);
+      res.status(500).json({ error: err.message, players: [] });
+    }
+  });
+
   // API routes FIRST
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });

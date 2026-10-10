@@ -37,8 +37,8 @@ export const IndemnityDashboardModal: React.FC<IndemnityDashboardModalProps> = (
 }) => {
   if (!isOpen) return null;
 
-  // Filter list: coaches see their own athletes; admins see all athletes
-  const targetAthletes = isAdmin ? players : players.filter((p) => p.coachUsername === user);
+  // Filter list: already properly scoped for coaches and admins
+  const targetAthletes = players;
   const totalCount = targetAthletes.length;
   const completedCount = targetAthletes.filter((p) => p.indemnityStatus === 'Completed').length;
   const pendingCount = totalCount - completedCount;
