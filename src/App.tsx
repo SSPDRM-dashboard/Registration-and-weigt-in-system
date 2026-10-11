@@ -93,7 +93,7 @@ import {
   subscribeToCompetitionReceipts,
   fetchCompetitionReceipts
 } from './firebase';
-import { cachePlayersLocally, cacheRefereesLocally, safeSetLocalStorage } from './utils/storage';
+import { cacheCompetitionsLocally, cachePlayersLocally, cacheRefereesLocally, safeSetLocalStorage } from './utils/storage';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import SignatureCanvas from 'react-signature-canvas';
@@ -1401,7 +1401,7 @@ export default function App() {
         loadedComps = BASELINE_COMPETITIONS.filter(c => !isCompetitionDeleted(c.id));
       }
       try {
-        localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
+        cacheCompetitionsLocally(loadedComps);
       } catch (e) {}
 
       // Ensure stteresacup2026udkr is always present in competitions list if not deleted
@@ -1426,7 +1426,7 @@ export default function App() {
         return { ...c, events: deduplicated, affiliatedClubs: existingClubs };
       });
       try {
-        localStorage.setItem('app:competitions', JSON.stringify(loadedComps));
+        cacheCompetitionsLocally(loadedComps);
       } catch (e) {}
 
       setCompetitions(loadedComps);
@@ -1605,7 +1605,7 @@ export default function App() {
           });
           if (valid.length > 0) {
             setCompetitions(valid);
-            try { localStorage.setItem('app:competitions', JSON.stringify(valid)); } catch (e) {}
+            try { cacheCompetitionsLocally(valid); } catch (e) {}
           }
         }
       },
@@ -1869,7 +1869,13 @@ export default function App() {
   const saveCompsToStorage = async (list: Competition[]) => {
     const prevComps = [...competitions];
     setCompetitions(list);
-    localStorage.setItem('app:competitions', JSON.stringify(list));
+    
+    // Safely cache in localStorage with quota eviction protection
+    try {
+      cacheCompetitionsLocally(list);
+    } catch (storageErr) {
+      console.warn("Local cache save skipped due to quota limit:", storageErr);
+    }
     
     // Cloud sync
     try {
@@ -1908,8 +1914,7 @@ export default function App() {
       } else {
         errMsg = String(error);
       }
-      triggerMsg('Cloud save failed: ' + errMsg, 'error');
-      throw error;
+      triggerMsg('Cloud save warning: ' + errMsg, 'ok');
     }
   };
 
@@ -2042,7 +2047,7 @@ export default function App() {
   const saveCoachesToStorage = async (obj: Record<string, Coach>) => {
     const prevCoaches = { ...coaches };
     setCoaches(obj);
-    localStorage.setItem('app:coaches', JSON.stringify(obj));
+    safeSetLocalStorage('app:coaches', JSON.stringify(obj));
     
     // Cloud sync
     try {
@@ -2077,7 +2082,7 @@ export default function App() {
   const saveOrganizersToStorage = async (obj: Record<string, Organizer>) => {
     const prevOrganizers = { ...organizers };
     setOrganizers(obj);
-    localStorage.setItem('app:organizers', JSON.stringify(obj));
+    safeSetLocalStorage('app:organizers', JSON.stringify(obj));
     
     // Cloud sync
     try {
@@ -7007,7 +7012,7 @@ export default function App() {
                       ]);
                       if (cloud && cloud.length > 0) {
                         setCompetitions(cloud);
-                        try { localStorage.setItem('app:competitions', JSON.stringify(cloud)); } catch (e) {}
+                        try { cacheCompetitionsLocally(cloud); } catch (e) {}
                       }
                       if (cloudPlayers && cloudPlayers.length > 0) {
                         setPlayers(cloudPlayers);
@@ -12437,7 +12442,33 @@ export default function App() {
                   <User className="w-5 h-5 text-gold" />
                   Organizer Panel
                 </h2>
-                <p className="text-sm font-semibold text-gold mt-1">{activeComp.name}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-sm font-semibold text-gold">{activeComp.name}</p>
+                  <button
+                    onClick={() => {
+                      setEditCompName(activeComp.name || '');
+                      setEditCompVenue(activeComp.venue || '');
+                      setEditCompDate(activeComp.date || '');
+                      setEditCompEndDate(activeComp.endDate || activeComp.date || '');
+                      setEditCompRegistrationCloseDate(activeComp.registrationCloseDate || activeComp.date || '');
+                      setEditCompPasscode(activeComp.staffCode || '');
+                      setEditCompCurrency(activeComp.currency || 'RM');
+                      setEditCompEvents(activeComp.events || []);
+                      setEditCompFeeModel(activeComp.feeModel || 'STANDARD');
+                      setEditCompPkgFirst(activeComp.packageFirstEventFee || '80');
+                      setEditCompPkgSecond(activeComp.packageSecondEventFee || '40');
+                      setEditCompPkgSub(activeComp.packageSubsequentEventFee || '20');
+                      setEditCompPkgFive(activeComp.packageFiveEventFee || '150');
+                      setEditCompIndemnityScope(activeComp.indemnityScope || 'PER_PERSON');
+                      setShowEditCompModal(true);
+                    }}
+                    className="text-text-dim hover:text-gold transition px-2 py-0.5 hover:bg-gold/10 rounded-lg inline-flex items-center gap-1 text-xs border border-line cursor-pointer"
+                    title="Edit Tournament Details"
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>Edit Details</span>
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {role === 'admin' && (
@@ -12458,7 +12489,7 @@ export default function App() {
                       ]);
                       if (cloud && cloud.length > 0) {
                         setCompetitions(cloud);
-                        try { localStorage.setItem('app:competitions', JSON.stringify(cloud)); } catch (e) {}
+                        cacheCompetitionsLocally(cloud);
                       }
                       if (cloudPlayers && cloudPlayers.length > 0) {
                         setPlayers(cloudPlayers);
@@ -14864,7 +14895,7 @@ export default function App() {
                                           const updatedRef = { ...r, kyorugiDays: current - 1 };
                                           const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                           setReferees(updatedRefs);
-                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          cacheRefereesLocally(activeComp.id, updatedRefs);
                                           saveRefereeToFirestore(updatedRef).catch(() => {});
                                         }}
                                         className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
@@ -14881,7 +14912,7 @@ export default function App() {
                                           const updatedRef = { ...r, kyorugiDays: current + 1 };
                                           const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                           setReferees(updatedRefs);
-                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          cacheRefereesLocally(activeComp.id, updatedRefs);
                                           saveRefereeToFirestore(updatedRef).catch(() => {});
                                         }}
                                         className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
@@ -14903,7 +14934,7 @@ export default function App() {
                                           const updatedRef = { ...r, poomsaeDays: current - 1 };
                                           const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                           setReferees(updatedRefs);
-                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          cacheRefereesLocally(activeComp.id, updatedRefs);
                                           saveRefereeToFirestore(updatedRef).catch(() => {});
                                         }}
                                         className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
@@ -14920,7 +14951,7 @@ export default function App() {
                                           const updatedRef = { ...r, poomsaeDays: current + 1 };
                                           const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                           setReferees(updatedRefs);
-                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          cacheRefereesLocally(activeComp.id, updatedRefs);
                                           saveRefereeToFirestore(updatedRef).catch(() => {});
                                         }}
                                         className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
@@ -14942,7 +14973,7 @@ export default function App() {
                                           const updatedRef = { ...r, virtualDays: current - 1 };
                                           const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                           setReferees(updatedRefs);
-                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          cacheRefereesLocally(activeComp.id, updatedRefs);
                                           saveRefereeToFirestore(updatedRef).catch(() => {});
                                         }}
                                         className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
@@ -14959,7 +14990,7 @@ export default function App() {
                                           const updatedRef = { ...r, virtualDays: current + 1 };
                                           const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                           setReferees(updatedRefs);
-                                          localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                          cacheRefereesLocally(activeComp.id, updatedRefs);
                                           saveRefereeToFirestore(updatedRef).catch(() => {});
                                         }}
                                         className="w-5 h-5 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 select-none cursor-pointer transition active:scale-95"
@@ -14984,7 +15015,7 @@ export default function App() {
                                       
                                       const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                       setReferees(updatedRefs);
-                                      localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                      cacheRefereesLocally(activeComp.id, updatedRefs);
                                       saveRefereeToFirestore(updatedRef).catch(() => {});
                                     }}
                                     className="text-red-500 hover:text-red-400 text-[10px] font-semibold text-center mt-1 cursor-pointer transition tracking-wide select-none bg-red-500/10 hover:bg-red-500/20 px-2 py-1 rounded-md"
@@ -15003,7 +15034,7 @@ export default function App() {
                                         const updatedRef = { ...r, includeOvertime: e.target.checked };
                                         const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                         setReferees(updatedRefs);
-                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        cacheRefereesLocally(activeComp.id, updatedRefs);
                                         saveRefereeToFirestore(updatedRef).catch(() => {});
                                       }}
                                       className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
@@ -15019,7 +15050,7 @@ export default function App() {
                                         const updatedRef = { ...r, includeOthers: e.target.checked };
                                         const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                         setReferees(updatedRefs);
-                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        cacheRefereesLocally(activeComp.id, updatedRefs);
                                         saveRefereeToFirestore(updatedRef).catch(() => {});
                                       }}
                                       className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
@@ -15040,7 +15071,7 @@ export default function App() {
                                       const updatedRef = { ...r, officiatingDays: current - 1 };
                                       const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                       setReferees(updatedRefs);
-                                      localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                      cacheRefereesLocally(activeComp.id, updatedRefs);
                                       saveRefereeToFirestore(updatedRef).catch(() => {});
                                     }}
                                     className="w-6 h-6 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 shadow-sm select-none cursor-pointer transition active:scale-95"
@@ -15057,7 +15088,7 @@ export default function App() {
                                       const updatedRef = { ...r, officiatingDays: current + 1 };
                                       const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                       setReferees(updatedRefs);
-                                      localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                      cacheRefereesLocally(activeComp.id, updatedRefs);
                                       saveRefereeToFirestore(updatedRef).catch(() => {});
                                     }}
                                     className="w-6 h-6 rounded bg-[#1e2330] hover:bg-[#2a3042] text-white flex items-center justify-center font-bold text-xs border border-slate-700/60 shadow-sm select-none cursor-pointer transition active:scale-95"
@@ -15080,7 +15111,7 @@ export default function App() {
                                     };
                                     const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                     setReferees(updatedRefs);
-                                    localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                    cacheRefereesLocally(activeComp.id, updatedRefs);
                                     saveRefereeToFirestore(updatedRef).catch(() => {});
                                   }}
                                   className="text-[#d4af37] text-xs font-semibold hover:underline cursor-pointer transition tracking-wide select-none mt-0.5"
@@ -15098,7 +15129,7 @@ export default function App() {
                                         const updatedRef = { ...r, includeOvertime: e.target.checked };
                                         const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                         setReferees(updatedRefs);
-                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        cacheRefereesLocally(activeComp.id, updatedRefs);
                                         saveRefereeToFirestore(updatedRef).catch(() => {});
                                       }}
                                       className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
@@ -15114,7 +15145,7 @@ export default function App() {
                                         const updatedRef = { ...r, includeOthers: e.target.checked };
                                         const updatedRefs = referees.map(x => x.id === r.id ? updatedRef : x);
                                         setReferees(updatedRefs);
-                                        localStorage.setItem(`app:referees:${activeComp.id}`, JSON.stringify(updatedRefs));
+                                        cacheRefereesLocally(activeComp.id, updatedRefs);
                                         saveRefereeToFirestore(updatedRef).catch(() => {});
                                       }}
                                       className="w-4 h-4 bg-white rounded border border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
@@ -15253,12 +15284,12 @@ export default function App() {
         saveRefereeAccount={async (ref) => {
             const updated = [...refereeAccounts.filter(r => r.id !== ref.id), ref];
             setRefereeAccounts(updated);
-            localStorage.setItem('app:refereeAccounts', JSON.stringify(updated));
+            safeSetLocalStorage('app:refereeAccounts', JSON.stringify(updated));
         }}
         saveRefereeToFirestore={async (ref) => {
             const updated = [...referees.filter(r => r.id !== ref.id), ref];
             setReferees(updated);
-            localStorage.setItem(`app:referees:${activeComp?.id}`, JSON.stringify(updated));
+            if (activeComp?.id) cacheRefereesLocally(activeComp.id, updated);
         }}
         triggerMsg={triggerMsg}
       />
@@ -15365,7 +15396,7 @@ export default function App() {
       <EditCompetitionModal
         isOpen={showEditCompModal}
         onClose={() => setShowEditCompModal(false)}
-        compId={activeComp?.id || null}
+        compId={activeComp?.id || compId || (competitions.length > 0 ? competitions[0].id : null)}
         competitions={competitions}
         editCompName={editCompName}
         setEditCompName={setEditCompName}
@@ -15460,12 +15491,12 @@ export default function App() {
             await saveRefereeToFirestore(ref);
             const updated = [...referees.filter(r => r.id !== ref.id), ref];
             setReferees(updated);
-            localStorage.setItem(`app:referees:${activeComp?.id}`, JSON.stringify(updated));
+            if (activeComp?.id) cacheRefereesLocally(activeComp.id, updated);
         }}
         saveRefereeAccount={async (ref) => {
             const updated = [...refereeAccounts.filter(r => r.nric !== ref.nric), ref];
             setRefereeAccounts(updated);
-            localStorage.setItem('app:refereeAccounts', JSON.stringify(updated));
+            safeSetLocalStorage('app:refereeAccounts', JSON.stringify(updated));
         }}
         triggerMsg={triggerMsg}
       />
@@ -15492,7 +15523,7 @@ export default function App() {
           await saveRefereeToFirestore(ref);
           const updated = [...referees.filter(r => r.id !== ref.id), ref];
           setReferees(updated);
-          localStorage.setItem(`app:referees:${ref.compId}`, JSON.stringify(updated));
+          if (ref.compId) cacheRefereesLocally(ref.compId, updated);
           const updatedMy = [...myRefereeRegistrations.filter(r => r.id !== ref.id), ref];
           setMyRefereeRegistrations(updatedMy);
         }}

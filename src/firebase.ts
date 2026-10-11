@@ -168,7 +168,13 @@ export async function saveCompetition(comp: Competition): Promise<void> {
     // Exclude heavy base64 receipts from the main competition doc to ensure document size never approaches the 1MB limit.
     // Receipts are stored and synchronized via the dedicated competitions/{compId}/receipts subcollection.
     const { receipts, ...compWithoutReceipts } = comp;
-    await setDoc(docRef, compWithoutReceipts);
+    const cleanComp: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(compWithoutReceipts)) {
+      if (value !== undefined) {
+        cleanComp[key] = value;
+      }
+    }
+    await setDoc(docRef, cleanComp, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `competitions/${comp.id}`);
   }

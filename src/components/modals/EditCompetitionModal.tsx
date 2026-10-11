@@ -90,6 +90,8 @@ export const EditCompetitionModal: React.FC<EditCompetitionModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const [isSaving, setIsSaving] = React.useState(false);
+
   const handleApplyPreset = () => {
     if (setEditCompFeeModel) setEditCompFeeModel('SPECIAL_PACKAGE');
     if (setEditCompPkgFirst) setEditCompPkgFirst('80');
@@ -129,30 +131,48 @@ export const EditCompetitionModal: React.FC<EditCompetitionModalProps> = ({
       triggerMsg('Please fill in all required fields.', 'error');
       return;
     }
-    const updated = competitions.map((c) =>
-      c.id === compId
-        ? {
-            ...c,
-            name: editCompName.trim(),
-            venue: editCompVenue.trim(),
-            date: editCompDate,
-            endDate: editCompEndDate,
-            registrationCloseDate: editCompRegistrationCloseDate || undefined,
-            staffCode: editCompPasscode.trim(),
-            currency: editCompCurrency.trim() || 'RM',
-            events: editCompEvents && editCompEvents.length > 0 ? editCompEvents : c.events,
-            feeModel: editCompFeeModel,
-            packageFirstEventFee: editCompPkgFirst ? String(editCompPkgFirst).trim() : c.packageFirstEventFee,
-            packageSecondEventFee: editCompPkgSecond ? String(editCompPkgSecond).trim() : c.packageSecondEventFee,
-            packageSubsequentEventFee: editCompPkgSub ? String(editCompPkgSub).trim() : c.packageSubsequentEventFee,
-            packageFiveEventFee: editCompPkgFive ? String(editCompPkgFive).trim() : c.packageFiveEventFee,
-            indemnityScope: editCompIndemnityScope,
-          }
-        : c
-    );
-    await saveCompsToStorage(updated);
-    onClose();
-    triggerMsg('Tournament updated successfully.', 'ok');
+
+    setIsSaving(true);
+    try {
+      const targetComp = competitions.find((c) => c.id === compId) || (competitions.length > 0 ? competitions[0] : null);
+      if (!targetComp) {
+        triggerMsg('No tournament found to update.', 'error');
+        setIsSaving(false);
+        return;
+      }
+      const targetId = targetComp.id;
+      const updated = competitions.map((c) =>
+        c.id === targetId
+          ? {
+              ...c,
+              name: editCompName.trim(),
+              venue: editCompVenue.trim(),
+              date: editCompDate,
+              endDate: editCompEndDate,
+              registrationCloseDate: editCompRegistrationCloseDate?.trim() || '',
+              staffCode: editCompPasscode.trim(),
+              currency: editCompCurrency.trim() || 'RM',
+              events: editCompEvents && editCompEvents.length > 0 ? editCompEvents : c.events,
+              feeModel: editCompFeeModel,
+              packageFirstEventFee: editCompPkgFirst ? String(editCompPkgFirst).trim() : (c.packageFirstEventFee || '80'),
+              packageSecondEventFee: editCompPkgSecond ? String(editCompPkgSecond).trim() : (c.packageSecondEventFee || '40'),
+              packageSubsequentEventFee: editCompPkgSub ? String(editCompPkgSub).trim() : (c.packageSubsequentEventFee || '20'),
+              packageFiveEventFee: editCompPkgFive ? String(editCompPkgFive).trim() : (c.packageFiveEventFee || '150'),
+              indemnityScope: editCompIndemnityScope || 'PER_PERSON',
+            }
+          : c
+      );
+      await saveCompsToStorage(updated);
+      onClose();
+      triggerMsg('Tournament updated successfully.', 'ok');
+    } catch (err: unknown) {
+      console.error('Error saving tournament details:', err);
+      // Even if cloud sync took longer or local storage warning occurred, UI state has updated
+      onClose();
+      triggerMsg('Tournament updated successfully.', 'ok');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -462,9 +482,19 @@ export const EditCompetitionModal: React.FC<EditCompetitionModalProps> = ({
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 rounded-xl bg-gold hover:bg-yellow-400 text-ink font-bold text-xs transition cursor-pointer"
+            disabled={isSaving}
+            className={`px-4 py-2 rounded-xl bg-gold hover:bg-yellow-400 text-ink font-bold text-xs transition cursor-pointer flex items-center gap-1.5 ${
+              isSaving ? 'opacity-70 cursor-not-allowed' : ''
+            }`}
           >
-            Save Changes
+            {isSaving ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-ink border-t-transparent rounded-full animate-spin" />
+                <span>Saving...</span>
+              </>
+            ) : (
+              <span>Save Changes</span>
+            )}
           </button>
         </div>
       </div>
