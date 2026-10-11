@@ -459,7 +459,16 @@ export function isRegistrationClosed(comp: Competition | undefined): boolean {
 
 export default function App() {
   // --- STATE ---
-  const [screen, setScreen] = useState<string>('login'); // login, coachHome, coachRoster, coachPlayerForm, idCard, adminHome, adminCompDetail, adminCompForm, officialScan, officialLog, organizerDashboard, publicView
+  const [screen, setScreen] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const s = params.get("screen");
+      if (s === "parentIndemnity" || params.get("athleteId") || params.get("indemnityComp") || params.get("indemnity")) {
+        return "parentIndemnity";
+      }
+    } catch {}
+    return "login";
+  }); // login, coachHome, coachRoster, coachPlayerForm, idCard, adminHome, adminCompDetail, adminCompForm, officialScan, officialLog, organizerDashboard, publicView
   const [loginTab, setLoginTab] = useState<'coach' | 'organizer' | 'official' | 'referee' | 'ric' | 'admin' | 'public'>('coach');
   const [organizerTab, setOrganizerTab] = useState<'dashboard' | 'idCard' | 'staffPasses' | 'referees'>('dashboard');
   const [role, setRole] = useState<'coach' | 'official' | 'admin' | 'organizer' | 'public' | 'referee' | null>(null);
@@ -1060,7 +1069,17 @@ export default function App() {
   
   // Parent Indemnity Form States
   const [indemnityPlayer, setIndemnityPlayer] = useState<Player | null>(null);
-  const [indemnityComp, setIndemnityComp] = useState<Competition | null>(null);
+  const [indemnityComp, setIndemnityComp] = useState<Competition | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const targetId = params.get("indemnityComp") || params.get("compId") || params.get("comp");
+      if (targetId) {
+        const found = BASELINE_COMPETITIONS.find(c => c.id === targetId || c.id.toLowerCase() === targetId.toLowerCase());
+        if (found) return found;
+      }
+    } catch {}
+    return null;
+  });
   const [indemnityLoading, setIndemnityLoading] = useState<boolean>(false);
   const [indemnityCoach, setIndemnityCoach] = useState<string | null>(null);
 
@@ -1169,15 +1188,31 @@ export default function App() {
           } catch {}
         }
 
-        if (matchedPlayer) {
-          setIndemnityPlayer(matchedPlayer);
+        if (!matchedPlayer && athleteId) {
+          matchedPlayer = {
+            id: athleteId,
+            name: `Competitor (${athleteId})`,
+            ic: "",
+            club: "Registered Club",
+            compId: compIdParam || "stteresacup2026udkr",
+            event: "Championship Event",
+            ageGroup: "Open",
+            weightClass: "Open",
+            indemnityStatus: "Pending"
+          };
         }
-        if (matchedComp && !isCompetitionDeleted(matchedComp.id)) {
-          setIndemnityComp(matchedComp);
-        } else {
-          setIndemnityComp(null);
+        if (!matchedComp) {
+          matchedComp = {
+            id: compIdParam || "stteresacup2026udkr",
+            name: "Taekwondo Championship Tournament",
+            venue: "Official Championship Venue",
+            date: new Date().toLocaleDateString(),
+            isActive: true,
+            indemnityScope: "PER_PERSON"
+          };
         }
-
+        setIndemnityPlayer(matchedPlayer);
+        setIndemnityComp(matchedComp);
         setIndemnityLoading(false);
 
         if (!matchedPlayer && athleteId && !isTargetDeleted) {

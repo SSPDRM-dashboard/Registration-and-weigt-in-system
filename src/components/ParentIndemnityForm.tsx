@@ -168,7 +168,7 @@ export default function ParentIndemnityForm({
             filtered = filtered.filter(p => p.coachUsername === indemnityCoach);
           }
           // Sort players by name alphabetically
-          const sorted = filtered.sort((a, b) => a.name.localeCompare(b.name));
+          const sorted = filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
           setPlayersList(sorted);
           setLoadingPlayers(false);
         },
@@ -180,6 +180,32 @@ export default function ParentIndemnityForm({
       return () => unsubscribe();
     }
   }, [indemnityComp, indemnityPlayer, indemnityCoach]);
+
+  // Consolidate unique athletes so competitors registered in multiple events appear once
+  const uniqueAthletes = useMemo(() => {
+    const list: Array<{ primary: Player; events: string[]; allCompleted: boolean; hasCompleted: boolean }> = [];
+    playersList.forEach((p) => {
+      const existing = list.find(item => isSameAthleteIdentity(item.primary, p));
+      if (existing) {
+        if (p.event && !existing.events.includes(p.event)) {
+          existing.events.push(p.event);
+        }
+        if (p.indemnityStatus === "Completed") {
+          existing.hasCompleted = true;
+        } else {
+          existing.allCompleted = false;
+        }
+      } else {
+        list.push({
+          primary: p,
+          events: p.event ? [p.event] : [],
+          allCompleted: p.indemnityStatus === "Completed",
+          hasCompleted: p.indemnityStatus === "Completed"
+        });
+      }
+    });
+    return list;
+  }, [playersList]);
 
   if (indemnityLoading) {
     return (
@@ -396,38 +422,13 @@ export default function ParentIndemnityForm({
     );
   }
 
-  // Consolidate unique athletes so competitors registered in multiple events appear once
-  const uniqueAthletes = useMemo(() => {
-    const list: Array<{ primary: Player; events: string[]; allCompleted: boolean; hasCompleted: boolean }> = [];
-    playersList.forEach((p) => {
-      const existing = list.find(item => isSameAthleteIdentity(item.primary, p));
-      if (existing) {
-        if (p.event && !existing.events.includes(p.event)) {
-          existing.events.push(p.event);
-        }
-        if (p.indemnityStatus === 'Completed') {
-          existing.hasCompleted = true;
-        } else {
-          existing.allCompleted = false;
-        }
-      } else {
-        list.push({
-          primary: p,
-          events: p.event ? [p.event] : [],
-          allCompleted: p.indemnityStatus === 'Completed',
-          hasCompleted: p.indemnityStatus === 'Completed'
-        });
-      }
-    });
-    return list;
-  }, [playersList]);
 
   // SELECT CHILD VIEW (when indemnityPlayer prop was null and parent must choose their child)
   if (!selectedPlayer) {
     const filteredAthletes = uniqueAthletes.filter(({ primary: p }) => 
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.club.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.ic.toLowerCase().includes(searchQuery.toLowerCase())
+      (p.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.club || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.ic || "").toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     const tempAthleteRecord = tempSelectedPlayer
@@ -535,7 +536,7 @@ export default function ParentIndemnityForm({
                   const eventsStr = events.length > 1 ? ` · ${events.length} Events: [${events.join(', ')}]` : events.length === 1 ? ` · [${events[0]}]` : '';
                   return (
                     <option key={p.id} value={p.id} className="bg-surface text-text">
-                      {p.name.toUpperCase()} [{p.club.toUpperCase()}]{eventsStr} - {p.ic}{statusSuffix}
+                      {(p.name || "").toUpperCase()} [{(p.club || "").toUpperCase()}]{eventsStr} - {p.ic || ""}{statusSuffix}
                     </option>
                   );
                 })}
