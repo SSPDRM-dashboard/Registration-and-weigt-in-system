@@ -457,6 +457,20 @@ export function isRegistrationClosed(comp: Competition | undefined): boolean {
   return new Date() > closeDate;
 }
 
+
+// Helper to generate sequential 4-digit competitor ID (0001-9999)
+const generateSequentialPlayerId = (playersList = []) => {
+  let maxId = 0;
+  playersList.forEach(p => {
+    if (p && p.id && /^\d{4}$/.test(p.id)) {
+      const num = parseInt(p.id, 10);
+      if (num > maxId) maxId = num;
+    }
+  });
+  const nextNum = (maxId % 9999) + 1;
+  return String(nextNum).padStart(4, "0");
+};
+
 export default function App() {
   // --- STATE ---
   const [screen, setScreen] = useState<string>(() => {
@@ -4847,7 +4861,7 @@ export default function App() {
         const extraWc = pEventWeightClasses[extraEv] || getWeightClassesForEvent(activeComp, extraEv)[0] || 'OPEN WEIGHT';
         const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
         const extraPlayer: Player = {
-          id: `PLY-${randomPart}`,
+          id: generateSequentialPlayerId(players),
           compId,
           name: pName.trim(),
           ic: pIc.trim(),
@@ -4921,7 +4935,7 @@ export default function App() {
         const evWc = pEventWeightClasses[ev] || (ev === pEvent ? pWeightClass : '') || getWeightClassesForEvent(activeComp, ev)[0] || 'OPEN WEIGHT';
         const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
         const newPlayer: Player = {
-          id: `PLY-${randomPart}`,
+          id: generateSequentialPlayerId(players),
           compId,
           name: pName.trim(),
           ic: pIc.trim(),
@@ -5521,7 +5535,7 @@ export default function App() {
         }
 
         const randomPart = Math.random().toString(36).slice(2, 7).toUpperCase();
-        const customId = `PLY-${randomPart}`;
+        const customId = generateSequentialPlayerId(players);
 
         const completedPeerExcel = newPlayersList.find(p => isSameAthleteIdentity(p, parsedP) && p.indemnityStatus === 'Completed');
         const indemnityInheritExcel = (completedPeerExcel && activeComp?.indemnityScope !== 'PER_EVENT') ? {
